@@ -1,0 +1,40 @@
+---
+description: กระบวนการ Deploy — HTML static ไป itch.io / Netlify / GitHub Pages
+alwaysApply: true
+---
+
+# Deploy — Ship HTML Game
+
+## เป้าหมายที่รู้แล้ว
+ส่งเกมเว็บ **static** เล่นได้บน:
+- **itch.io** (HTML5 zip / โฟลเดอร์)
+- **Netlify** (`netlify.toml` · publish `.` · ไม่ต้อง build ถ้าเป็น HTML ล้วน)
+- **GitHub Pages**
+
+## เช็คลิสต์ก่อนขึ้นโฮสต์
+- [ ] เล่นได้ผ่าน HTTP จริง (ไม่พึ่ง `file://` อย่างเดียว)
+- [ ] รวม `index.html` + asset: Template SVG, Image, Audio
+- [ ] ชื่อไฟล์ asset เป็น **ASCII**
+- [ ] ไม่มี secret ใน repo
+- [ ] มีเครดิตผู้สร้าง / ลิงก์ถ้าต้องการ
+- [ ] ทดสอบ path สัมพัทธ์ (โฟลเดอร์ย่อยไม่พัง)
+
+## Netlify (แบบโปรเจกต์นี้)
+- `publish = "."` · `command = ""` เมื่อไม่มี build step
+- redirect SPA ระวังทับหน้าอื่น (เช่น `print-cards.html`) — ไฟล์ที่มีอยู่ควรเสิร์ฟได้ก่อน rewrite
+- ชื่อไซต์ / โดเมนตั้งใน Dashboard ไม่ใช่ในโค้ดเกม
+
+## itch.io
+- อัปโหลด zip โครงสร้าง root มี `index.html`
+- ตั้งชนิดเป็น HTML · เปิดใช้เป็น embed ได้ตามที่ itch กำหนด
+
+## GitHub Pages
+- branch/`docs` หรือ Actions ตามที่เลือก · base path ถ้าเป็น project site ต้องระวัง relative URL
+
+## ขอบเขตเฟส
+- Deploy static ≠ backend คลัง pack / ห้องโลก — อันหลังแยกเฟสและมีค่าใช้จ่ายที่เก็บข้อมูล
+
+## เตือนเมื่อ
+- แนะนำชื่อไฟล์ไทยสำหรับ production CDN
+- สมมติว่า `file://` พอสำหรับผู้เล่นจริง
+- ผสมเฟส portfolio กับระบบเซิร์ฟเวอร์หนักโดยไม่แยกขอบเขต

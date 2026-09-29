@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WantToPlay — Local Host</title>
+    <link rel="stylesheet" href="css/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- MENU -->
+      <section id="screen-menu" class="screen is-active" aria-label="Menu">
+        <div class="menu-panel">
+          <h1 class="brand">WantToPlay</h1>
+          <p class="tagline">Local Host · Survival V1</p>
+
+          <div class="lobby-box">
+            <label class="field">
+              <span>World mode</span>
+              <select id="sel-mode">
+                <option value="FLAT_SURVIVAL">Flat (no resources)</option>
+                <option value="WORLD_TYPE">World Type (trees / stone / ore)</option>
+              </select>
+            </label>
+            <div class="room-row">
+              <span class="room-label">Room</span>
+              <code id="room-code" class="room-code">------</code>
+            </div>
+            <button type="button" id="btn-join" class="btn btn-ghost" disabled title="Network join stub">
+              Join (disabled)
+            </button>
+            <p id="join-stub" class="stub-msg">Network join stub — Local Host only.</p>
+          </div>
+
+          <button type="button" id="btn-start" class="btn">Start Local Host</button>
+          <button type="button" id="btn-restore" class="btn btn-ghost" hidden>
+            Restore Local Snapshot
+          </button>
+          <button type="button" id="btn-clear-snap" class="btn btn-ghost" hidden>
+            Clear Snapshot
+          </button>
+          <p id="snap-status" class="stub-msg" hidden></p>
+
+          <div class="save-file-opt" aria-label="Optional load save file">
+            <p class="opt-label">Option — Load exported save</p>
+            <div id="save-drop-zone" class="save-drop-zone" tabindex="0">
+              Drop <code>.json</code> save here, or
+              <label class="save-file-label">
+                Load file…
+                <input type="file" id="save-file-input" accept="application/json,.json" hidden />
+              </label>
+            </div>
+            <p id="save-file-status" class="stub-msg" hidden></p>
+          </div>
+
+          <p class="hint">
+            Place Base · build walls/turret/gen · Craft (MOVE only while open) · R reload · E interact · WASD · aim · clear wave 7
+          </p>
+        </div>
+      </section>
+
+      <!-- LOADING -->
+      <section id="screen-loading" class="screen" hidden aria-label="Loading">
+        <div class="loading-panel">
+          <h2>Loading</h2>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <p id="progress-label">0%</p>
+        </div>
+      </section>
+
+      <!-- PLAYING -->
+      <section id="screen-playing" class="screen" hidden aria-label="Playing">
+        <div class="play-hud">
+          <span id="wave-hud" class="hud-chip">Wave 0</span>
+          <span id="hp-hud" class="hud-chip">HP 100/100</span>
+          <span id="base-hud" class="hud-chip">Base —</span>
+          <span id="ammo-hud" class="hud-chip">Ammo —</span>
+          <span id="prompt-hud" class="hud-chip hud-prompt"></span>
+          <button type="button" id="btn-craft" class="btn btn-ghost">Craft</button>
+          <button type="button" id="btn-melee-vol" class="btn btn-ghost" title="Toggle melee damage volume overlay (V)">MeleeVol (V)</button>
+          <button type="button" id="btn-cheat" class="btn btn-ghost" title="Open cheat panel">Cheat</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="game-canvas" width="800" height="600"></canvas>
+        </div>
+        <div id="hotbar" class="hotbar" aria-label="Hotbar"></div>
+
+        <!-- Craft panel -->
+        <div id="panel-craft" class="game-panel" hidden aria-label="Craft">
+          <div class="game-panel-card">
+            <header class="game-panel-head">
+              <h2>Craft</h2>
+              <button type="button" id="craft-close" class="btn btn-ghost panel-x" aria-label="Close">×</button>
+            </header>
+            <div id="craft-tabs" class="panel-tabs" role="tablist"></div>
+            <div id="craft-list" class="panel-list"></div>
+            <p id="craft-status" class="panel-status" aria-live="polite"></p>
+            <p class="panel-hint">Esc to close · MOVE only while open · costs from bag</p>
+          </div>
+        </div>
+
+        <!-- Gen / Base receive panel -->
+        <div id="panel-receive" class="game-panel" hidden aria-label="Receive">
+          <div class="game-panel-card">
+            <header class="game-panel-head">
+              <h2 id="receive-title">Receive</h2>
+              <button type="button" id="receive-close" class="btn btn-ghost panel-x" aria-label="Close">×</button>
+            </header>
+            <div id="receive-body" class="panel-body"></div>
+            <p id="receive-status" class="panel-status" aria-live="polite"></p>
+            <p class="panel-hint">Esc to close · E near Gen/Base to open</p>
+          </div>
+        </div>
+
+        <!-- Cheat panel (Win / Lose / FreeCraft / Zoom) -->
+        <div id="panel-cheat" class="game-panel" hidden aria-label="Cheat">
+          <div class="game-panel-card game-panel-card--cheat">
+            <header class="game-panel-head">
+              <h2>Cheat</h2>
+              <button type="button" id="cheat-close" class="btn btn-ghost panel-x" aria-label="Close">×</button>
+            </header>
+            <div class="cheat-row">
+              <button type="button" id="btn-force-win" class="btn">Force Win (F9)</button>
+              <button type="button" id="btn-force-lose" class="btn btn-ghost">Force Lose (F10)</button>
+            </div>
+            <div class="cheat-row">
+              <button type="button" id="btn-free-craft" class="btn btn-ghost" title="Skip craft costs this session">FreeCraft</button>
+              <button type="button" id="btn-manual-save" class="btn btn-ghost" title="Export snapshot JSON (not autosave)">Save file</button>
+            </div>
+            <div class="cheat-zoom">
+              <label for="cheat-zoom-range">Camera zoom</label>
+              <div class="cheat-zoom-controls">
+                <button type="button" id="cheat-zoom-out" class="btn btn-ghost" aria-label="Zoom out">−</button>
+                <input type="range" id="cheat-zoom-range" min="0.25" max="2" step="0.1" value="1" />
+                <button type="button" id="cheat-zoom-in" class="btn btn-ghost" aria-label="Zoom in">+</button>
+                <span id="cheat-zoom-value" class="cheat-zoom-value">1.0</span>
+              </div>
+              <p class="panel-hint">Scroll on slider · step 0.1 · range 0.25–2.0</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RESULT -->
+      <section id="screen-result" class="screen" hidden aria-label="Result">
+        <div class="result-panel">
+          <h2 id="result-title">Result</h2>
+          <p id="result-detail">Match over.</p>
+          <ul id="result-stats" class="result-stats"></ul>
+          <button type="button" id="btn-result-menu" class="btn">Back to Menu</button>
+          <p class="mode-note">Must click to return — no auto-skip.</p>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
