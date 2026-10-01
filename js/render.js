@@ -3,18 +3,26 @@ import { getMeleeVolume } from './sim.js';
 
 /**
  * World + units + projectiles + blocks + drops + place ghost.
+ * @param {number} [dpr=1] devicePixelRatio scale — must match drawPlaying buffer.
  */
-export function renderWorld(ctx, world, camera, match) {
-  const zoom = camera.zoom;
+export function renderWorld(ctx, world, camera, match, dpr = 1) {
+  if (!world) return;
+  const zoom = camera && camera.zoom > 0 ? camera.zoom : 1;
+  const scale = (dpr > 0 ? dpr : 1) * zoom;
+  const camX = camera && Number.isFinite(camera.x) ? camera.x : 0;
+  const camY = camera && Number.isFinite(camera.y) ? camera.y : 0;
+
   ctx.save();
-  ctx.setTransform(zoom, 0, 0, zoom, -camera.x * zoom, -camera.y * zoom);
+  // Compose DPR + camera: world unit → device pixels (do not wipe DPR).
+  ctx.setTransform(scale, 0, 0, scale, -camX * scale, -camY * scale);
   ctx.imageSmoothingEnabled = false;
 
   ctx.fillStyle = '#1a1c1e';
   ctx.fillRect(0, 0, world.worldW, world.worldH);
 
-  for (let i = 0; i < world.paths.length; i++) {
-    const p = world.paths[i];
+  const paths = world.paths || [];
+  for (let i = 0; i < paths.length; i++) {
+    const p = paths[i];
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x, p.y, p.w, p.h);
 
@@ -65,13 +73,13 @@ export function renderWorld(ctx, world, camera, match) {
     drawBaseChunk(ctx, match.baseChunk, zoom);
     drawGeneralPaths(ctx, match.general, zoom);
     drawBlocks(ctx, match.blocks, zoom);
-    drawDrops(ctx, match.pools.drops, zoom);
+    drawDrops(ctx, match.pools && match.pools.drops, zoom);
     drawPlaceGhost(ctx, match.placeGhost, zoom);
-    drawUnits(ctx, match.pools.units, zoom);
+    drawUnits(ctx, match.pools && match.pools.units, zoom);
     if (match.showMeleeVolume) {
       drawMeleeVolumes(ctx, match, zoom);
     }
-    drawProjectiles(ctx, match.pools.projectiles, zoom);
+    drawProjectiles(ctx, match.pools && match.pools.projectiles, zoom);
     drawBeams(ctx, match.beams);
   }
 
@@ -209,11 +217,12 @@ function drawDrops(ctx, drops, zoom) {
   for (let i = 0; i < drops.length; i++) {
     const d = drops[i];
     if (!d.active) continue;
+    const r = d.radius > 0 ? d.radius : 8;
     ctx.fillStyle = '#d4c070';
-    ctx.fillRect(d.x - 8, d.y - 8, 16, 16);
+    ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 1 / zoom;
-    ctx.strokeRect(d.x - 8, d.y - 8, 16, 16);
+    ctx.strokeRect(d.x - r, d.y - r, r * 2, r * 2);
   }
 }
 
@@ -233,6 +242,7 @@ function drawPlaceGhost(ctx, ghost, zoom) {
 }
 
 function drawUnits(ctx, units, zoom) {
+  if (!units) return;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (!u.active) continue;
@@ -277,6 +287,7 @@ function stageColor(u) {
 }
 
 function drawProjectiles(ctx, projectiles, zoom) {
+  if (!projectiles) return;
   for (let i = 0; i < projectiles.length; i++) {
     const p = projectiles[i];
     if (!p.active) continue;

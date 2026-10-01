@@ -66,10 +66,32 @@ body.is-playing-lock #app {
   display: none;
   align-items: center;
   justify-content: center;
+  z-index: 1;
 }
 
 .screen.is-active {
   display: flex;
+}
+
+/* Stacking: loading stays above playing during first-paint warmup */
+#screen-menu.is-active {
+  z-index: 4;
+}
+
+#screen-loading.is-active {
+  z-index: 10;
+}
+
+#screen-playing.is-active {
+  z-index: 2;
+}
+
+#screen-playing.is-warming {
+  pointer-events: none;
+}
+
+#screen-result.is-active {
+  z-index: 12;
 }
 
 /* --- MENU --- */
@@ -164,6 +186,8 @@ body.is-playing-lock #app {
   align-items: stretch;
   justify-content: stretch;
   padding: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .play-hud {
@@ -191,11 +215,12 @@ body.is-playing-lock #app {
 }
 
 .canvas-wrap {
-  flex: 1;
+  flex: 1 1 auto;
   position: relative;
   width: 100%;
-  height: 100%;
   min-height: 0;
+  align-self: stretch;
+  background: #121416;
 }
 
 #game-canvas {

@@ -2,6 +2,16 @@ AskKeep — Doc ออกแบบ + สถานะส่งมอบ
 ที่มา: คำถาม/ล็อกจาก แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint คงไว้แยก)
 ความจริงเชิงสเกลปัจจุบัน = Set A (ดูท้ายไฟล์ «สถานะส่งมอบ»)
 
+คู่เอกสาร (ชั้นเว็บ / โหลดก่อน GamePlay — ไม่ใช่กฎเกม):
+  → WebShell-Bootstrap-and-LoadPath.txt
+  (Application Bootstrap · Shell & Load Path · ES modules · HTTP cache · gates BOOT/LOADING)
+
+คู่เอกสาร (AI Unit Goals / Stages — blueprint แยก stage ในอนาคต):
+  → AI-Stage-Goals-and-Actions.txt
+  (Goal มี priority int · Event = Δpriority+จอง target · Enum TargetKind
+   · Mediator เลือก Goal→Stage · Stages ไม่รู้จักกัน · Action ผ่าน Unified Input)
+  · คู่กับ §4 General vs Unit stage ด้านล่าง · โค้ดปัจจุบันยังเป็น decideEnemyActions ก้อนเดียว
+
 ไอเดียสูงสุดที่จะทำเกมคือ
 ไอเดียเริ่มแรก Player เอาชีวิตรอดให้นานที่สุด  Enemy จะเกิดมาเป็น Wave
 
@@ -58,6 +68,9 @@ Place / สิ่งก่อสร้าง
 - Placeholder ทั่วไป: Asset/AssetSVG/PlaceHold/Object_01.svg (~64×64 โลก) ไส้เต็ม 1 place
 - สิ่งก่อสร้างใหม่ = ลงทะเบียน type + อาร์ต · ขนาด 1×1 place หรือคร่อมหลายช่อง
 - ทดสอบใช้สีเทา Object_01 · อนาคตสลับ skin ได้เหมือน Path
+- หักของ: tryPlace สำเร็จ → consumeSlotItem ใน sim เท่านั้น (UI/Hub อ่าน count ไม่หักเอง)
+- freeCraft = เฉพาะ craft/buy · ไม่ทำให้ place ฟรี
+- Hub = กระจกแสดง state · วางของ = Input→Action→sim (ghost จาก match ไม่ใช่ DOM เป็นกฎ)
 
 ฐาน (object) + BaseChunk
 - ฐานวางจริง V1 = 3×3 ของ L3 (64) = ก้อน 192×192 รวม (แผน/โค้ดปัจจุบัน · ไม่ใช้ 2×2 เก่า)
@@ -487,12 +500,19 @@ SVG เมนูสวยยังไม่มี — เฟสนี้ใช�
 สถานะแผน: UI ละเอียด Deferred ได้ · แต่ App Flow ด้านล่างล็อกใช้ทดสอบ Local Host คนเดียว
 
 App state (flow หลัก)
-  MENU → LOADING → PLAYING → RESULT → (กดปุ่ม) → MENU
+  BOOT → MENU → LOADING → PLAYING → RESULT → (กดปุ่ม) → MENU
 
-LOADING (บังคับก่อนเล่น)
-- ต้องรอจบ · จองพื้นที่ / Memory Pool / Arena ให้ครบ ไม่งั้นเข้าเล่นไม่ได้
+BOOT (บังคับตอนเข้าเว็บ — ก่อนเมนูใช้งานได้)
+- HTML เริ่มที่หน้า loading · เมนูยังกดไม่ได้จนกว่า bootReady
+- งาน: ตรวจ DOM · prefetch asset ขนาน (timeout ต่อไฟล์ · พลาดไม่บล็อก) · sanitize autosave · แล้วค่อยเข้า MENU
+- "Loading modules…" = dynamic import app.js · phase บน window.__theDdosPhase · watchdog ไม่ทับ Boot failed
+- play-local.bat ใช้ serve_nocache.py (Cache-Control: no-store) ลดแคช ES module ค้าง
+- cache-bust ที่ js/main.js?v=… + import app.js?v=…
+
+LOADING (บังคับก่อนเล่นแมทช์)
+- pools + world รันขนาน (overlap) แล้วค่อย occupancy/placeSlots
+- timeout ต่อช่วง · ถ้า fail จะขึ้น label ชัด ไม่ค้างเงียบ
 - มีแถบ loading (progress %)
-- งานคร่าวๆ: จอง pool unit (~100) · projectile · drop · Path/L3 grid · bake SVG ถ้ามี · เตรียมแมพตามโหมด
 - กัน GC สะดุดกลางแมทช์ (รายละเอียดโควตา pool → แผนสถาปัตย์)
 
 PLAYING (HUD ขั้นต่ำเฟสนี้)
@@ -579,15 +599,18 @@ Set A (ล็อก — ตรง config.js)
 - Cheat: Win/Lose/FreeCraft/zoom · ตาย = free-fly กล้อง · เกิดใหม่ snap ตามผู้เล่น
 
 เฟส A–J / V1 portfolio (สรุป)
-[✓] แมพ Path ตาราง · L3 snap · BaseChunk · Local Host MENU→LOADING→PLAYING→RESULT
+[✓] แมพ Path ตาราง · L3 snap · BaseChunk · Local Host BOOT→MENU→LOADING→PLAYING→RESULT
+[✓] Boot preload ตอนเข้าเว็บ (DOM + modules + asset) ก่อนเมนูใช้งานได้
 [✓] Player / Enemy / Ally โครงร่วม · Unified Action (คน+บอท)
 [✓] อาวุธหลายชนิด + turret ยิงจาก registry · laser pierce/cooldown
 [✓] Inventory / hotbar · craft panel · place/build · interact ประตู
 [✓] Wave + แพ้ฐานพัง / ชนะเคลียร์ wave · RESULT panel
 [✓] Bot stage พื้นฐาน (อ่านสถานะ→ตัดสินใจยิง/เดิน) · Boss composition
 [✓] Snapshot autosave + Save file + drag-load
+  · FEATURE_SNAPSHOT=true (เปิดใช้ · Restore / autosave / import ทำงาน)
+[✓] Boot + match LOADING แบบขนาน (loadPipeline) · timeout ต่อช่วง · asset พลาดไม่ค้างทั้งท่อ
 [✓] Collision layers + hitMask
-[✓] Audio mute · asset ASCII path
+[~] Audio mute · asset ASCII path — ASCII path มี · ระบบเสียง mute ยังไม่ครบ
 
 บางส่วน / เบาใน V1
 [~] Sector Pi / Local General — baseline พอเล่น · ยังไม่เต็มสเปกแผน
@@ -614,4 +637,8 @@ Deploy checklist (static)
 - อย่าแก้ .cursor/
 - แผนงาน MD = blueprint · AskKeep = Doc สถานะ+ล็อกถามตอบ · ตัวเลข Path ต้องตรง Set A
 - เมื่อเพิ่มฟีเจอร์ใหญ่: ติ๊กสถานะด้านบน · อย่าปล่อย 800/400/200/100 กลับมาในเอกสารนี้
+- 2026-10-01: Boot `Unexpected token export` = tryPlace ใน sim.js ขาด `}` — แก้แล้ว
+- 2026-10-01: จอดำ PLAYING = canvas resize ก่อน layout + renderWorld ล้าง DPR — แก้ ensureCanvasSize + setTransform(dpr*zoom)
+- 2026-10-01: วางบล็อกไม่หมด = tryPlace ไม่ consume — แก้หักใน sim; freeCraft ไม่เกี่ยว place
+- 2026-10-01: หลังวาง Base ลูปตาย = syncBaseStorageFromGenerators หาย — เติมแล้ว; playerReloadOpts เติมแล้ว
 

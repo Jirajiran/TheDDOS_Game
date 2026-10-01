@@ -6,13 +6,13 @@ set PORT=8080
 set URL=http://127.0.0.1:%PORT%/
 
 echo.
-echo  WantToPlay — local HTTP
+echo  TheDDOS - local HTTP (no-cache)
 echo  Folder: %CD%
 echo  URL:    %URL%
+echo  If stuck: Ctrl+Shift+R once, wait, check Console
 echo  Close this window to stop the server.
 echo.
 
-rem Prefer `py` launcher, then `python`
 set PY=
 where py >nul 2>&1 && set PY=py
 if not defined PY (
@@ -26,12 +26,17 @@ if not defined PY (
 )
 
 start "" "%URL%"
-%PY% -m http.server %PORT% --bind 127.0.0.1
+%PY% serve_nocache.py
 if errorlevel 1 (
   echo.
-  echo [ERROR] Server failed. Is port %PORT% already in use?
-  pause
-  exit /b 1
+  echo [WARN] serve_nocache.py failed — falling back to http.server
+  %PY% -m http.server %PORT% --bind 127.0.0.1
+  if errorlevel 1 (
+    echo.
+    echo [ERROR] Server failed. Is port %PORT% already in use?
+    pause
+    exit /b 1
+  )
 )
 
 endlocal

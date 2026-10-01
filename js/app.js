@@ -1,6 +1,12 @@
 import {
+  makeSelectHotbarAction,
+  makeTakeBaseAction,
+  makeTakeGenAction,
+} from './actions.js';
+import {
   AppState,
   AUTOSAVE_INTERVAL_SEC,
+  FEATURE_SNAPSHOT,
   GAME_PACK,
   GameMode,
   PATH_SIZE,
@@ -20,6 +26,7 @@ import {
   isWeaponSlot,
   moveOrSwapInventorySlots,
 } from './inventory.js';
+import { runBootPreload } from './boot.js';
 import { runLoading } from './loading.js';
 import {
   clearLocalSnapshot,
@@ -28,6 +35,7 @@ import {
   importSnapshotIntoAutosave,
   loadLocalSnapshotRaw,
   parseSnapshotFileText,
+  sanitizeLocalSnapshot,
   writeAutosave,
 } from './memento.js';
 import { createPanels } from './panels.js';
@@ -45,24 +53,32 @@ import { formatAmmoHud } from './weapons.js';
 
 export function createApp(dom) {
   const state = {
-    appState: AppState.MENU,
+    appState: AppState.BOOT,
     match: null,
     result: null,
     camera: createCamera(),
     rafId: 0,
     lastTs: 0,
     loadingLocked: false,
+    /** false until runBootPreload finishes — Start/Restore gated. */
+    bootReady: false,
+    boot: null,
     input: null,
     host: createHostSession({ gameMode: GameMode.FLAT_SURVIVAL }),
     panels: null,
     /** Elapsed since last throttled autosave while PLAYING. */
     autosaveAcc: 0,
+    /** Hub click → SELECT_HOTBAR applied next tick (Unified Input). */
+    pendingHotbarSelect: -1,
+    /** Hub Take → TAKE_GEN / TAKE_BASE applied next tick (Unified Input). */
+    pendingTake: null,
   };
 
   const {
     screens,
     progressFill,
     progressLabel,
+    loadingTitle,
     canvas,
     waveHud,
     hpHud,
@@ -110,19 +126,39 @@ export function createApp(dom) {
     receiveClose,
   } = dom;
 
+  if (!canvas) {
+    throw new Error('Missing #game-canvas — open via play-local.bat (HTTP), not file://');
+  }
+  if (!screens || !screens.menu || !screens.loading || !screens.playing || !screens.result) {
+    throw new Error('Missing screen elements — hard refresh (Ctrl+Shift+R)');
+  }
+  if (!progressFill || !progressLabel) {
+    throw new Error('Missing loading progress elements');
+  }
+
   const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Canvas 2D context unavailable');
+  }
   state.input = createInput(canvas);
 
   /** Hotbar drag: mousedown starts, mouseup ends (swap / throw). */
   const hotbarDrag = {
     active: false,
+    dragging: false,
     fromIndex: -1,
+    startX: 0,
+    startY: 0,
   };
+
+  const HOTBAR_DRAG_PX = 8;
 
   function endHotbarDrag(clientX, clientY) {
     if (!hotbarDrag.active) return;
     const from = hotbarDrag.fromIndex;
+    const wasDragging = hotbarDrag.dragging;
     hotbarDrag.active = false;
+    hotbarDrag.dragging = false;
     hotbarDrag.fromIndex = -1;
     if (state.input) state.input.setActionBusy(false);
     if (hotbarEl) hotbarEl.classList.remove('is-dragging');
@@ -133,13 +169,19 @@ export function createApp(dom) {
       return;
     }
 
+    // Click without drag — selection already queued as pendingHotbarSelect.
+    if (!wasDragging) {
+      refreshHotbar();
+      return;
+    }
+
     const slotEl = document.elementFromPoint(clientX, clientY);
     const overSlot = slotEl && slotEl.closest ? slotEl.closest('.hotbar-slot') : null;
     if (overSlot && hotbarEl && hotbarEl.contains(overSlot)) {
       const to = Number(overSlot.dataset.slotIndex);
       if (Number.isFinite(to) && to !== from) {
         moveOrSwapInventorySlots(match.inventory, from, to);
-        match.activeHotbar = to;
+        state.pendingHotbarSelect = to;
       }
       refreshHotbar();
       return;
@@ -165,16 +207,24 @@ export function createApp(dom) {
       })();
 
     if (overCanvas && !overHotbar) {
-      const zoom = state.camera.zoom > 0 ? state.camera.zoom : 1;
-      const wx = state.camera.x + (clientX - canvasRect.left) / zoom;
-      const wy = state.camera.y + (clientY - canvasRect.top) / zoom;
-      throwHotbarSlot(match, from, wx, wy);
+      // Spawn uses unit facing + velocity inside sim — ignore cursor world pos.
+      throwHotbarSlot(match, from);
     }
     refreshHotbar();
   }
 
   window.addEventListener('mouseup', (e) => {
     if (hotbarDrag.active) endHotbarDrag(e.clientX, e.clientY);
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!hotbarDrag.active || hotbarDrag.dragging) return;
+    const dx = e.clientX - hotbarDrag.startX;
+    const dy = e.clientY - hotbarDrag.startY;
+    if (dx * dx + dy * dy < HOTBAR_DRAG_PX * HOTBAR_DRAG_PX) return;
+    hotbarDrag.dragging = true;
+    if (state.input) state.input.setActionBusy(true);
+    if (hotbarEl) hotbarEl.classList.add('is-dragging');
   });
 
   state.panels = createPanels(
@@ -204,6 +254,12 @@ export function createApp(dom) {
       onInventoryChanged: () => {
         refreshHotbar();
       },
+      onTakeGen: (blockId) => {
+        state.pendingTake = { kind: 'gen', blockId };
+      },
+      onTakeBase: (itemId) => {
+        state.pendingTake = { kind: 'base', itemId };
+      },
     }
   );
 
@@ -215,20 +271,25 @@ export function createApp(dom) {
       btnJoin.disabled = !state.host.joinEnabled;
       btnJoin.title = state.host.joinStubMessage;
     }
-    const hasSnap = hasLocalSnapshot();
-    if (btnRestore) {
-      btnRestore.hidden = !hasSnap;
-    }
-    if (btnClearSnap) {
-      btnClearSnap.hidden = !hasSnap;
-    }
+
+    // FEATURE_SNAPSHOT deferred — hide restore / import UI entirely.
+    const snapUi = FEATURE_SNAPSHOT;
+    if (btnRestore) btnRestore.hidden = !snapUi || !hasLocalSnapshot();
+    if (btnClearSnap) btnClearSnap.hidden = !snapUi || !hasLocalSnapshot();
+    if (btnManualSave) btnManualSave.hidden = !snapUi;
+    const saveOpt = document.querySelector('.save-file-opt');
+    if (saveOpt) saveOpt.hidden = !snapUi;
+
     if (snapStatus) {
-      if (hasSnap) {
+      if (snapUi && hasLocalSnapshot()) {
         const raw = loadLocalSnapshotRaw();
         const when = raw && raw.savedAt ? new Date(raw.savedAt).toLocaleString() : '';
         const wave = raw ? raw.waveIndex : '?';
         snapStatus.hidden = false;
         snapStatus.textContent = `Snapshot ready — wave ${wave}${when ? ` · ${when}` : ''}`;
+      } else if (!snapUi) {
+        snapStatus.hidden = false;
+        snapStatus.textContent = 'Snapshot / autosave deferred (FEATURE_SNAPSHOT=false)';
       } else {
         snapStatus.hidden = true;
         snapStatus.textContent = '';
@@ -237,6 +298,7 @@ export function createApp(dom) {
   }
 
   function tryAutosave(force) {
+    if (!FEATURE_SNAPSHOT) return false;
     if (state.appState !== AppState.PLAYING || !state.match) return false;
     if (!force && state.autosaveAcc < AUTOSAVE_INTERVAL_SEC) return false;
     const ok = writeAutosave(state.match);
@@ -255,12 +317,78 @@ export function createApp(dom) {
     if (state.panels) state.panels.close();
     state.host.roomCode = generateRoomCode();
     refreshLobbyUi();
+    setMenuInteractable(state.bootReady);
     setAppState(AppState.MENU);
+  }
+
+  /**
+   * First gate after page open. Must finish before MENU controls work.
+   * Separate from match LOADING (pools/world).
+   */
+  async function boot() {
+    if (state.bootReady) {
+      enterMenu();
+      return true;
+    }
+    if (state.loadingLocked) return false;
+    state.loadingLocked = true;
+    setMenuInteractable(false);
+    setAppState(AppState.BOOT);
+    setLoadingTitle('Booting TheDDOS');
+    progressFill.style.width = '0%';
+    progressLabel.textContent = '0% — Starting…';
+
+    try {
+      const payload = await runBootPreload((pct, label) => {
+        progressFill.style.width = `${pct}%`;
+        progressLabel.textContent = `${Math.round(pct)}% — ${label}`;
+      });
+      if (!payload || !payload.ready) {
+        throw new Error('Boot incomplete');
+      }
+      // Legacy WantToPlay / corrupt autosave — skipped while FEATURE_SNAPSHOT is off.
+      if (FEATURE_SNAPSHOT) {
+        const snapCheck = sanitizeLocalSnapshot();
+        if (snapCheck.cleared) {
+          console.warn('[boot] cleared corrupt autosave:', snapCheck.reason);
+        }
+      } else {
+        console.info('[boot] FEATURE_SNAPSHOT=false — autosave/restore deferred');
+      }
+      state.boot = payload;
+      state.bootReady = true;
+      setMenuInteractable(true);
+      enterMenu();
+      return true;
+    } catch (err) {
+      console.error(err);
+      setLoadingTitle('Boot failed');
+      progressLabel.textContent =
+        (err && err.message ? err.message : 'Boot failed') + ' — reload the page';
+      state.bootReady = false;
+      setMenuInteractable(false);
+      return false;
+    } finally {
+      state.loadingLocked = false;
+    }
+  }
+
+  function setLoadingTitle(text) {
+    if (loadingTitle) loadingTitle.textContent = text;
+  }
+
+  function setMenuInteractable(enabled) {
+    if (btnStart) btnStart.disabled = !enabled;
+    if (btnRestore) btnRestore.disabled = !enabled;
+    if (btnClearSnap) btnClearSnap.disabled = !enabled;
+    if (selMode) selMode.disabled = !enabled;
+    if (saveFileInput) saveFileInput.disabled = !enabled;
   }
 
   function showScreen(appState) {
     const showMenu = appState === AppState.MENU;
-    const showLoading = appState === AppState.LOADING;
+    const showLoading =
+      appState === AppState.BOOT || appState === AppState.LOADING;
     const showPlaying =
       appState === AppState.PLAYING || appState === AppState.RESULT;
     const showResult = appState === AppState.RESULT;
@@ -331,25 +459,60 @@ export function createApp(dom) {
 
   function resizeCanvas() {
     const parent = canvas.parentElement;
-    const w = parent ? parent.clientWidth : window.innerWidth;
-    const h = parent ? parent.clientHeight : window.innerHeight;
+    let w = parent ? parent.clientWidth : 0;
+    let h = parent ? parent.clientHeight : 0;
+    // Layout may not be ready the frame PLAYING becomes visible.
+    if (w < 2 || h < 2) {
+      w = Math.max(w, window.innerWidth || 800);
+      h = Math.max(h, window.innerHeight || 600);
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.max(1, Math.floor(w * dpr));
-    canvas.height = Math.max(1, Math.floor(h * dpr));
+    const bw = Math.max(1, Math.floor(w * dpr));
+    const bh = Math.max(1, Math.floor(h * dpr));
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { cssW: w, cssH: h, dpr };
+  }
+
+  /** Keep backing-store in sync every frame (fixes black screen after menu→play). */
+  function ensureCanvasSize() {
+    const parent = canvas.parentElement;
+    const w = parent ? parent.clientWidth : 0;
+    const h = parent ? parent.clientHeight : 0;
+    if (w < 2 || h < 2) return resizeCanvas();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const bw = Math.max(1, Math.floor(w * dpr));
+    const bh = Math.max(1, Math.floor(h * dpr));
+    if (
+      canvas.width !== bw ||
+      canvas.height !== bh ||
+      canvas.clientWidth !== w ||
+      canvas.clientHeight !== h
+    ) {
+      return resizeCanvas();
+    }
+    return {
+      cssW: w,
+      cssH: h,
+      dpr: canvas.width / Math.max(1, w),
+    };
   }
 
   async function startMatch(opts = {}) {
+    if (!state.bootReady) return;
     if (state.loadingLocked) return;
     state.loadingLocked = true;
     state.result = null;
-    const restoreSnap = opts.restore ? loadLocalSnapshotRaw() : null;
+    const wantRestore = !!(FEATURE_SNAPSHOT && opts.restore);
+    const restoreSnap = wantRestore ? loadLocalSnapshotRaw() : null;
 
-    // Fresh Start: clear lingering mid-game autosave so Restore won't revive old snap
-    // until the next throttled autosave during this match.
-    if (!opts.restore) {
+    // Fresh Start: clear lingering mid-game autosave (no-op if FEATURE_SNAPSHOT off).
+    if (!wantRestore) {
       clearLocalSnapshot();
     }
 
@@ -362,6 +525,7 @@ export function createApp(dom) {
     }
 
     setAppState(AppState.LOADING);
+    setLoadingTitle('Loading match');
     progressFill.style.width = '0%';
     progressLabel.textContent = '0% — Starting…';
 
@@ -388,19 +552,127 @@ export function createApp(dom) {
       state.camera.zoom = getMatchZoom(match);
       state.autosaveAcc = 0;
 
+      // Gate 2b: resource load passed — still require first world paint before hide loading.
+      progressLabel.textContent = '96% — First world paint…';
+      await warmFirstWorldPaint(match);
+
       setAppState(AppState.PLAYING);
+      screens.playing.classList.remove('is-warming');
       resizeCanvas();
       refreshHotbar();
       syncDebugHudButtons(match);
       startLoop();
     } catch (err) {
       console.error(err);
-      progressLabel.textContent = 'Load failed — back to menu';
-      await new Promise((r) => setTimeout(r, 800));
+      screens.playing.classList.remove('is-warming');
+      progressLabel.textContent = `Load failed: ${
+        err && err.message ? err.message : err
+      } — back to menu`;
+      await new Promise((r) => setTimeout(r, 1200));
       enterMenu();
     } finally {
       state.loadingLocked = false;
     }
+  }
+
+  /**
+   * First-paint readiness (สถาปัตยกรรมระบบเว็บเกมโฮสต์ §5):
+   * Keep LOADING on top, reveal PLAYING underneath for real layout, then
+   * resize + draw ≥2 frames. Fail closed if canvas/world/player/paint broken.
+   */
+  function frame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  async function warmFirstWorldPaint(match) {
+    if (!match || !match.world) {
+      throw new Error('First paint: match/world missing');
+    }
+    if (!match.world.paths || !match.world.paths.length) {
+      throw new Error('First paint: world paths empty');
+    }
+    if (match.playerUnitId < 0 || !getPlayerUnit(match)) {
+      throw new Error('First paint: player not spawned');
+    }
+
+    // Layout under loading overlay (loading z-index higher in CSS).
+    screens.menu.hidden = true;
+    screens.menu.classList.remove('is-active');
+    screens.playing.hidden = false;
+    screens.playing.classList.add('is-active', 'is-warming');
+    screens.loading.hidden = false;
+    screens.loading.classList.add('is-active');
+
+    await frame();
+    let size = resizeCanvas();
+    if (size.cssW < 2 || size.cssH < 2 || canvas.width < 2 || canvas.height < 2) {
+      await frame();
+      size = resizeCanvas();
+    }
+    if (canvas.width < 2 || canvas.height < 2) {
+      throw new Error(
+        `First paint: canvas buffer ${canvas.width}×${canvas.height} (layout 0×0)`
+      );
+    }
+
+    match.cameraSnapPending = true;
+    let ok = false;
+    try {
+      ok = drawPlaying({ throwOnError: true });
+    } catch (e) {
+      throw new Error(`First paint: draw failed — ${e.message || e}`);
+    }
+    await frame();
+    try {
+      ok = drawPlaying({ throwOnError: true }) && ok;
+    } catch (e) {
+      throw new Error(`First paint: draw failed — ${e.message || e}`);
+    }
+    if (!ok) {
+      throw new Error('First paint: draw returned empty (no match/world)');
+    }
+
+    // Sample several pixels — cleared buffer is #121416; painted world is brighter/tinted.
+    const probes = [
+      [0.5, 0.5],
+      [0.35, 0.35],
+      [0.65, 0.65],
+      [0.5, 0.4],
+    ];
+    let painted = false;
+    let lastRgb = 'n/a';
+    try {
+      for (let i = 0; i < probes.length; i++) {
+        const px = Math.min(
+          canvas.width - 1,
+          Math.max(0, Math.floor(canvas.width * probes[i][0]))
+        );
+        const py = Math.min(
+          canvas.height - 1,
+          Math.max(0, Math.floor(canvas.height * probes[i][1]))
+        );
+        const sample = ctx.getImageData(px, py, 1, 1).data;
+        const r = sample[0];
+        const g = sample[1];
+        const b = sample[2];
+        lastRgb = `${r},${g},${b}`;
+        // Clear fill ≈ 18,20,22 — anything clearly above that counts as painted.
+        if (r > 24 || g > 26 || b > 28) {
+          painted = true;
+          break;
+        }
+      }
+    } catch (e) {
+      throw new Error(`First paint: getImageData failed — ${e.message || e}`);
+    }
+    if (!painted) {
+      throw new Error(
+        `First paint: canvas still clear-color (last rgb(${lastRgb})) — world not drawn`
+      );
+    }
+
+    progressLabel.textContent = '100% — World paint OK';
+    await frame();
   }
 
   function endMatch(outcome) {
@@ -458,8 +730,16 @@ export function createApp(dom) {
       if (!state.lastTs) state.lastTs = ts;
       const dt = Math.min(0.05, (ts - state.lastTs) / 1000);
       state.lastTs = ts;
-      updatePlaying(dt);
-      drawPlaying();
+      try {
+        updatePlaying(dt);
+      } catch (err) {
+        console.error('[TheDDOS] updatePlaying failed (loop kept alive)', err);
+      }
+      try {
+        drawPlaying();
+      } catch (err) {
+        console.error('[TheDDOS] drawPlaying failed (loop kept alive)', err);
+      }
       state.rafId = requestAnimationFrame(tick);
     };
     state.rafId = requestAnimationFrame(tick);
@@ -476,92 +756,117 @@ export function createApp(dom) {
     const match = state.match;
     if (!match) return;
 
-    state.autosaveAcc += dt;
-    tryAutosave(false);
+    try {
+      state.autosaveAcc += dt;
+      tryAutosave(false);
 
-    const cssW = canvas.clientWidth;
-    const cssH = canvas.clientHeight;
-    const playerId = match.playerUnitId >= 0 ? match.playerUnitId : 0;
-    const polled = state.input.poll(
-      playerId,
-      state.camera,
-      cssW,
-      cssH,
-      match.activeHotbar,
-      match.inventory
-    );
-
-    if (polled.escapePressed) {
-      if (isCheatOpen()) closeCheat();
-      else if (state.panels && state.panels.isOpen()) state.panels.close();
-    }
-
-    // F = toggle craft; E while receive panel open = toggle close.
-    if (polled.craftTogglePressed && state.panels) {
-      state.panels.toggleCraft();
-    }
-    if (polled.meleeVolumeTogglePressed) {
-      match.showMeleeVolume = !match.showMeleeVolume;
-      syncDebugHudButtons(match);
-    }
-    if (
-      polled.interactTogglePressed &&
-      state.panels &&
-      state.panels.isReceiveOpen()
-    ) {
-      state.panels.close();
-    }
-
-    // Free-fly while dead: WASD pans camera (faster); no player actions.
-    if (match.playerDead || match.cameraFreeFly) {
-      ensureFreeFlyCamera(match, cssW, cssH);
-      const speed = GAME_PACK.cameraFreeFlySpeed || 520;
-      panCamera(
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      const playerId = match.playerUnitId >= 0 ? match.playerUnitId : 0;
+      const polled = state.input.poll(
+        playerId,
         state.camera,
-        (polled.moveDx || 0) * speed * dt,
-        (polled.moveDy || 0) * speed * dt,
-        match.world.worldW,
-        match.world.worldH,
         cssW,
-        cssH
+        cssH,
+        match.activeHotbar,
+        match.inventory
       );
-      const outcome = tickMatch(match, [], polled.mouseWorld, dt);
+
+      if (polled.escapePressed) {
+        if (isCheatOpen()) closeCheat();
+        else if (state.panels && state.panels.isOpen()) state.panels.close();
+      }
+
+      if (polled.craftTogglePressed && state.panels) {
+        state.panels.toggleCraft();
+      }
+      if (polled.meleeVolumeTogglePressed) {
+        match.showMeleeVolume = !match.showMeleeVolume;
+        syncDebugHudButtons(match);
+      }
+      if (
+        polled.interactTogglePressed &&
+        state.panels &&
+        state.panels.isReceiveOpen()
+      ) {
+        state.panels.close();
+      }
+
+      if (match.playerDead || match.cameraFreeFly) {
+        ensureFreeFlyCamera(match, cssW, cssH);
+        const speed = GAME_PACK.cameraFreeFlySpeed || 520;
+        panCamera(
+          state.camera,
+          (polled.moveDx || 0) * speed * dt,
+          (polled.moveDy || 0) * speed * dt,
+          match.world.worldW,
+          match.world.worldH,
+          cssW,
+          cssH
+        );
+        const outcome = tickMatch(match, [], polled.mouseWorld, dt);
+        if (state.panels) {
+          state.panels.consumePendingUi(match);
+          state.panels.tick(dt);
+        }
+        if (outcome === 'win' || outcome === 'lose') {
+          endMatch(outcome);
+        }
+        return;
+      }
+
+      const prevHotbar = match.activeHotbar;
+      const invFingerprint = inventoryFingerprint(match.inventory);
+      let actions = hostIngestActions(state.host, polled.actions, null) || [];
+      if (state.pendingHotbarSelect >= 0) {
+        const slot = state.pendingHotbarSelect;
+        state.pendingHotbarSelect = -1;
+        actions = [
+          makeSelectHotbarAction(playerId, slot),
+          ...actions.filter((a) => a.type !== 'SELECT_HOTBAR'),
+        ];
+      }
+      if (state.pendingTake) {
+        const pend = state.pendingTake;
+        state.pendingTake = null;
+        if (pend.kind === 'gen') {
+          actions = actions.concat([
+            makeTakeGenAction(playerId, pend.blockId),
+          ]);
+        } else if (pend.kind === 'base') {
+          actions = actions.concat([
+            makeTakeBaseAction(playerId, pend.itemId),
+          ]);
+        }
+      }
+      // Align ghost + place with SELECT before tick (session state stays one source).
+      for (let i = 0; i < actions.length; i++) {
+        if (actions[i].type === 'SELECT_HOTBAR') {
+          match.activeHotbar = actions[i].slot | 0;
+        }
+      }
+      updatePlaceGhost(match, polled.mouseWorld);
+      const outcome = tickMatch(match, actions, polled.mouseWorld, dt);
+
       if (state.panels) {
         state.panels.consumePendingUi(match);
         state.panels.tick(dt);
       }
-      updateHud(match);
-      // Respawn may clear free-fly this frame — snap on next draw.
+
+      if (
+        match.activeHotbar !== prevHotbar ||
+        inventoryFingerprint(match.inventory) !== invFingerprint
+      ) {
+        refreshHotbar();
+        if (state.panels) state.panels.refreshCraftIfOpen();
+      }
+
       if (outcome === 'win' || outcome === 'lose') {
         endMatch(outcome);
       }
-      return;
-    }
-
-    updatePlaceGhost(match, polled.mouseWorld);
-
-    const prevHotbar = match.activeHotbar;
-    const invFingerprint = inventoryFingerprint(match.inventory);
-    const actions = hostIngestActions(state.host, polled.actions, null);
-    const outcome = tickMatch(match, actions, polled.mouseWorld, dt);
-
-    if (state.panels) {
-      state.panels.consumePendingUi(match);
-      state.panels.tick(dt);
-    }
-
-    if (
-      match.activeHotbar !== prevHotbar ||
-      inventoryFingerprint(match.inventory) !== invFingerprint
-    ) {
-      refreshHotbar();
-      if (state.panels) state.panels.refreshCraftIfOpen();
-    }
-
-    updateHud(match);
-
-    if (outcome === 'win' || outcome === 'lose') {
-      endMatch(outcome);
+    } finally {
+      // Always sync Hub to match state — even if tick threw mid-frame.
+      updateHud(match);
     }
   }
 
@@ -661,17 +966,16 @@ export function createApp(dom) {
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
+        // Queue SELECT through gameplay session (do not bypass Action pipeline).
+        state.pendingHotbarSelect = i;
         match.activeHotbar = i;
-        if (!slot.itemId) {
-          refreshHotbar();
-          return;
-        }
-        hotbarDrag.active = true;
-        hotbarDrag.fromIndex = i;
-        if (state.input) state.input.setActionBusy(true);
-        if (hotbarEl) hotbarEl.classList.add('is-dragging');
-        el.classList.add('is-drag-source');
         refreshHotbar();
+        if (!slot.itemId) return;
+        hotbarDrag.active = true;
+        hotbarDrag.dragging = false;
+        hotbarDrag.fromIndex = i;
+        hotbarDrag.startX = e.clientX;
+        hotbarDrag.startY = e.clientY;
       });
       if (hotbarDrag.active && hotbarDrag.fromIndex === i) {
         el.classList.add('is-drag-source');
@@ -775,58 +1079,75 @@ export function createApp(dom) {
     );
   }
 
-  function drawPlaying() {
-    const cssW = canvas.clientWidth;
-    const cssH = canvas.clientHeight;
-    clearCanvas(ctx, canvas.width, canvas.height);
-    const dpr = canvas.width / Math.max(1, cssW);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function drawPlaying(opts = {}) {
+    try {
+      const size = ensureCanvasSize();
+      const cssW = size.cssW;
+      const cssH = size.cssH;
+      const dpr = size.dpr > 0 ? size.dpr : 1;
 
-    if (!state.match) return;
-    const match = state.match;
-    state.camera.zoom = getMatchZoom(match);
+      clearCanvas(ctx, canvas.width, canvas.height);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    if (match.cameraFreeFly || match.playerDead) {
-      ensureFreeFlyCamera(match, cssW, cssH);
-      // Keep pan clamp if zoom changed while free-flying.
-      panCamera(state.camera, 0, 0, match.world.worldW, match.world.worldH, cssW, cssH);
-    } else {
-      const player = getPlayerUnit(match);
-      if (match.cameraSnapPending && player) {
-        snapCameraTo(
-          state.camera,
-          player.x,
-          player.y,
-          match.world.worldW,
-          match.world.worldH,
-          cssW,
-          cssH
-        );
-        match.cameraSnapPending = false;
-        match._freeFlyBooted = false;
-      } else {
-        const followX = player
-          ? player.x
-          : match.base
-            ? match.base.x + match.base.w / 2
-            : match.world.worldW / 2;
-        const followY = player
-          ? player.y
-          : match.base
-            ? match.base.y + match.base.h / 2
-            : match.world.worldH / 2;
-        followPoint(
-          state.camera,
-          followX,
-          followY,
-          match.world.worldW,
-          match.world.worldH,
-          cssW,
-          cssH
-        );
+      if (!state.match) return false;
+      const match = state.match;
+      if (!match.world) return false;
+
+      state.camera.zoom = getMatchZoom(match);
+      if (!Number.isFinite(state.camera.zoom) || state.camera.zoom <= 0) {
+        state.camera.zoom = 1;
       }
+
+      if (match.cameraFreeFly || match.playerDead) {
+        ensureFreeFlyCamera(match, cssW, cssH);
+        panCamera(state.camera, 0, 0, match.world.worldW, match.world.worldH, cssW, cssH);
+      } else {
+        const player = getPlayerUnit(match);
+        if (match.cameraSnapPending && player) {
+          snapCameraTo(
+            state.camera,
+            player.x,
+            player.y,
+            match.world.worldW,
+            match.world.worldH,
+            cssW,
+            cssH
+          );
+          match.cameraSnapPending = false;
+          match._freeFlyBooted = false;
+        } else {
+          const followX = player
+            ? player.x
+            : match.base
+              ? match.base.x + match.base.w / 2
+              : match.world.worldW / 2;
+          const followY = player
+            ? player.y
+            : match.base
+              ? match.base.y + match.base.h / 2
+              : match.world.worldH / 2;
+          followPoint(
+            state.camera,
+            followX,
+            followY,
+            match.world.worldW,
+            match.world.worldH,
+            cssW,
+            cssH
+          );
+        }
+      }
+
+      if (!Number.isFinite(state.camera.x)) state.camera.x = 0;
+      if (!Number.isFinite(state.camera.y)) state.camera.y = 0;
+
+      renderWorld(ctx, match.world, state.camera, match, dpr);
+      return true;
+    } catch (err) {
+      console.error('[TheDDOS] drawPlaying failed', err);
+      if (opts.throwOnError) throw err;
+      return false;
     }
-    renderWorld(ctx, match.world, state.camera, match);
   }
 
   btnStart.addEventListener('click', () => {
@@ -834,7 +1155,7 @@ export function createApp(dom) {
   });
   if (btnRestore) {
     btnRestore.addEventListener('click', () => {
-      if (!hasLocalSnapshot()) {
+      if (!FEATURE_SNAPSHOT || !hasLocalSnapshot()) {
         refreshLobbyUi();
         return;
       }
@@ -843,6 +1164,7 @@ export function createApp(dom) {
   }
   if (btnClearSnap) {
     btnClearSnap.addEventListener('click', () => {
+      if (!FEATURE_SNAPSHOT) return;
       clearLocalSnapshot();
       refreshLobbyUi();
     });
@@ -874,6 +1196,7 @@ export function createApp(dom) {
   }
 
   function manualExportSave() {
+    if (!FEATURE_SNAPSHOT) return;
     if (state.appState !== AppState.PLAYING || !state.match) return;
     exportMatchSnapshotFile(state.match);
   }
@@ -883,7 +1206,7 @@ export function createApp(dom) {
   }
 
   function applyImportedSaveFile(file) {
-    if (!file) return;
+    if (!FEATURE_SNAPSHOT || !file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const snap = parseSnapshotFileText(String(reader.result || ''));
@@ -1004,6 +1327,7 @@ export function createApp(dom) {
   function onFullscreenChange() {
     if (
       state.appState === AppState.PLAYING ||
+      state.appState === AppState.BOOT ||
       state.appState === AppState.LOADING ||
       state.appState === AppState.RESULT
     ) {
@@ -1027,10 +1351,14 @@ export function createApp(dom) {
     if (document.visibilityState === 'hidden') onPageLifecycleSave();
   });
 
-  enterMenu();
+  // Stay on BOOT until main.js calls boot() — do not enterMenu early.
+  setMenuInteractable(false);
+  setAppState(AppState.BOOT);
+  setLoadingTitle('Booting TheDDOS');
 
   return {
     state,
+    boot,
     startMatch,
     forceResult,
     enterMenu,

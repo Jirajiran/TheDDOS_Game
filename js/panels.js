@@ -12,8 +12,6 @@ import { countItem, tryCraftBuy } from './inventory.js';
 import {
   getBaseReceiveState,
   getGenReceiveState,
-  takeBaseResources,
-  takeGenResources,
 } from './sim.js';
 
 export function createPanels(dom, hooks) {
@@ -35,6 +33,9 @@ export function createPanels(dom, hooks) {
   let craftCategory = CRAFT_CATEGORIES[0];
   let receiveCtx = null; // { type, blockId }
   let statusTimer = 0;
+  /** Avoid rebuild-every-frame (destroys buttons before click lands). */
+  let receiveMountedKey = '';
+  let receiveEls = null; // gen: { hp, stock, timer, takeBtn } | base: { hp, rows: Map }
 
   function isOpen() {
     return openKind != null;
@@ -48,9 +49,16 @@ export function createPanels(dom, hooks) {
     statusTimer = 2.5;
   }
 
+  function clearReceiveMount() {
+    receiveMountedKey = '';
+    receiveEls = null;
+    if (receiveBody) receiveBody.innerHTML = '';
+  }
+
   function close() {
     openKind = null;
     receiveCtx = null;
+    clearReceiveMount();
     if (craftPanel) {
       craftPanel.hidden = true;
       craftPanel.classList.remove('is-open');
@@ -65,6 +73,7 @@ export function createPanels(dom, hooks) {
   function openCraft() {
     openKind = 'craft';
     receiveCtx = null;
+    clearReceiveMount();
     if (receivePanel) {
       receivePanel.hidden = true;
       receivePanel.classList.remove('is-open');
@@ -82,6 +91,7 @@ export function createPanels(dom, hooks) {
     if (!pending) return;
     openKind = pending.type;
     receiveCtx = { type: pending.type, blockId: pending.blockId };
+    clearReceiveMount();
     if (craftPanel) {
       craftPanel.hidden = true;
       craftPanel.classList.remove('is-open');
@@ -194,122 +204,183 @@ export function createPanels(dom, hooks) {
     }
   }
 
+  function mountKeyForGen(st) {
+    return `gen:${receiveCtx.blockId}:${st ? 'ok' : 'gone'}`;
+  }
+
+  function mountKeyForBase(st) {
+    if (!st) return 'base:gone';
+    if (!st.hasStorageApi) return 'base:nostorage';
+    const ids = (st.bags || []).map((b) => b.itemId).join(',');
+    return `base:bags:${ids || 'empty'}`;
+  }
+
+  function buildReceiveGen(st) {
+    clearReceiveMount();
+    if (!st) {
+      receiveTitle.textContent = 'Generator';
+      receiveBody.textContent = 'Generator gone.';
+      receiveMountedKey = mountKeyForGen(null);
+      return;
+    }
+    receiveTitle.textContent = st.label;
+    const hp = document.createElement('p');
+    hp.className = 'panel-stat';
+    const stock = document.createElement('p');
+    stock.className = 'panel-stat';
+    const timer = document.createElement('p');
+    timer.className = 'panel-muted';
+    const takeBtn = document.createElement('button');
+    takeBtn.type = 'button';
+    takeBtn.className = 'btn';
+    takeBtn.addEventListener('click', () => {
+      if (!receiveCtx || receiveCtx.type !== 'receive-gen') return;
+      if (!hooks.onTakeGen) {
+        setStatus(receiveStatus, 'Take not wired', false);
+        return;
+      }
+      hooks.onTakeGen(receiveCtx.blockId);
+      setStatus(receiveStatus, 'Taking…', true);
+    });
+    receiveBody.appendChild(hp);
+    receiveBody.appendChild(stock);
+    receiveBody.appendChild(timer);
+    receiveBody.appendChild(takeBtn);
+    receiveEls = { kind: 'gen', hp, stock, timer, takeBtn };
+    receiveMountedKey = mountKeyForGen(st);
+    updateReceiveGen(st);
+  }
+
+  function updateReceiveGen(st) {
+    if (!receiveEls || receiveEls.kind !== 'gen' || !st) return;
+    receiveTitle.textContent = st.label;
+    receiveEls.hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
+    receiveEls.stock.textContent = `Stock: ${st.stock}/${st.stockMax} ${st.itemId || ''}`;
+    receiveEls.timer.textContent =
+      st.stock >= st.stockMax
+        ? 'Storage full'
+        : `Next +${st.amountPerTick} in ${Math.ceil(st.timerSec)}s`;
+    receiveEls.takeBtn.textContent =
+      st.stock > 0 ? `Take all (${st.stock})` : 'Empty';
+    receiveEls.takeBtn.disabled = st.stock <= 0;
+  }
+
+  function buildReceiveBase(st) {
+    clearReceiveMount();
+    if (!st) {
+      receiveTitle.textContent = 'Base';
+      receiveBody.textContent = 'Base not available.';
+      receiveMountedKey = mountKeyForBase(null);
+      return;
+    }
+    receiveTitle.textContent = st.label;
+    const hp = document.createElement('p');
+    hp.className = 'panel-stat';
+    receiveBody.appendChild(hp);
+
+    if (!st.hasStorageApi) {
+      const todo = document.createElement('p');
+      todo.className = 'panel-muted';
+      todo.textContent =
+        st.note ||
+        'TODO: base inherent storage/gen — panel hooks takeBaseResources when sim adds base.storage';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'panel-row';
+      placeholder.innerHTML =
+        '<div class="panel-row-main"><strong>Storage</strong><span class="panel-row-meta">— empty (waiting on sim)</span></div>';
+      receiveBody.appendChild(todo);
+      receiveBody.appendChild(placeholder);
+      receiveEls = { kind: 'base', hp, rows: new Map() };
+      receiveMountedKey = mountKeyForBase(st);
+      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
+      return;
+    }
+
+    if (!st.bags.length) {
+      const empty = document.createElement('p');
+      empty.className = 'panel-empty';
+      empty.textContent = 'Base storage empty.';
+      receiveBody.appendChild(empty);
+      receiveEls = { kind: 'base', hp, rows: new Map() };
+      receiveMountedKey = mountKeyForBase(st);
+      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
+      return;
+    }
+
+    const rows = new Map();
+    for (let i = 0; i < st.bags.length; i++) {
+      const bag = st.bags[i];
+      const def = getItemDef(bag.itemId);
+      const row = document.createElement('div');
+      row.className = 'panel-row';
+      const main = document.createElement('div');
+      main.className = 'panel-row-main';
+      const label = document.createElement('strong');
+      label.textContent = def ? def.label : bag.itemId;
+      const meta = document.createElement('span');
+      meta.className = 'panel-row-meta';
+      main.appendChild(label);
+      main.appendChild(meta);
+      const takeBtn = document.createElement('button');
+      takeBtn.type = 'button';
+      takeBtn.className = 'btn btn-ghost panel-buy';
+      const itemId = bag.itemId;
+      takeBtn.addEventListener('click', () => {
+        if (!hooks.onTakeBase) {
+          setStatus(receiveStatus, 'Take not wired', false);
+          return;
+        }
+        hooks.onTakeBase(itemId);
+        setStatus(receiveStatus, 'Taking…', true);
+      });
+      row.appendChild(main);
+      row.appendChild(takeBtn);
+      receiveBody.appendChild(row);
+      rows.set(itemId, { meta, takeBtn });
+    }
+    receiveEls = { kind: 'base', hp, rows };
+    receiveMountedKey = mountKeyForBase(st);
+    updateReceiveBase(st);
+  }
+
+  function updateReceiveBase(st) {
+    if (!receiveEls || receiveEls.kind !== 'base' || !st) return;
+    receiveTitle.textContent = st.label;
+    receiveEls.hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
+    if (!st.hasStorageApi || !st.bags.length) return;
+    for (let i = 0; i < st.bags.length; i++) {
+      const bag = st.bags[i];
+      const row = receiveEls.rows.get(bag.itemId);
+      if (!row) continue;
+      row.meta.textContent = `×${bag.count}`;
+      row.takeBtn.textContent = bag.count > 0 ? 'Take' : 'Empty';
+      row.takeBtn.disabled = bag.count <= 0;
+    }
+  }
+
   function renderReceive() {
     if (!receiveBody || !receiveCtx) return;
     const match = hooks.getMatch();
-    receiveBody.innerHTML = '';
     if (!match) {
+      clearReceiveMount();
       receiveBody.textContent = 'No match.';
+      receiveMountedKey = 'nomatch';
       return;
     }
 
     if (receiveCtx.type === 'receive-gen') {
       const st = getGenReceiveState(match, receiveCtx.blockId);
-      if (!st) {
-        receiveTitle.textContent = 'Generator';
-        receiveBody.textContent = 'Generator gone.';
-        return;
-      }
-      receiveTitle.textContent = st.label;
-      const hp = document.createElement('p');
-      hp.className = 'panel-stat';
-      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-      const stock = document.createElement('p');
-      stock.className = 'panel-stat';
-      stock.textContent = `Stock: ${st.stock}/${st.stockMax} ${st.itemId || ''}`;
-      const timer = document.createElement('p');
-      timer.className = 'panel-muted';
-      timer.textContent = st.stock >= st.stockMax
-        ? 'Storage full'
-        : `Next +${st.amountPerTick} in ${Math.ceil(st.timerSec)}s`;
-      const takeBtn = document.createElement('button');
-      takeBtn.type = 'button';
-      takeBtn.className = 'btn';
-      takeBtn.textContent = st.stock > 0 ? `Take all (${st.stock})` : 'Empty';
-      takeBtn.disabled = st.stock <= 0;
-      takeBtn.addEventListener('click', () => {
-        const m = hooks.getMatch();
-        if (!m) return;
-        const res = takeGenResources(m, receiveCtx.blockId);
-        if (res.taken > 0) {
-          setStatus(receiveStatus, `Took ${res.taken} ${res.itemId}`, true);
-          if (hooks.onInventoryChanged) hooks.onInventoryChanged();
-        } else {
-          setStatus(receiveStatus, res.reason || 'Nothing to take', false);
-        }
-        renderReceive();
-      });
-      receiveBody.appendChild(hp);
-      receiveBody.appendChild(stock);
-      receiveBody.appendChild(timer);
-      receiveBody.appendChild(takeBtn);
+      const key = mountKeyForGen(st);
+      if (key !== receiveMountedKey) buildReceiveGen(st);
+      else if (st) updateReceiveGen(st);
       return;
     }
 
     if (receiveCtx.type === 'receive-base') {
       const st = getBaseReceiveState(match);
-      if (!st) {
-        receiveTitle.textContent = 'Base';
-        receiveBody.textContent = 'Base not available.';
-        return;
-      }
-      receiveTitle.textContent = st.label;
-      const hp = document.createElement('p');
-      hp.className = 'panel-stat';
-      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-      receiveBody.appendChild(hp);
-
-      if (!st.hasStorageApi) {
-        const todo = document.createElement('p');
-        todo.className = 'panel-muted';
-        todo.textContent =
-          st.note ||
-          'TODO: base inherent storage/gen — panel hooks takeBaseResources when sim adds base.storage';
-        const placeholder = document.createElement('div');
-        placeholder.className = 'panel-row';
-        placeholder.innerHTML =
-          '<div class="panel-row-main"><strong>Storage</strong><span class="panel-row-meta">— empty (waiting on sim)</span></div>';
-        receiveBody.appendChild(todo);
-        receiveBody.appendChild(placeholder);
-        return;
-      }
-
-      if (!st.bags.length) {
-        const empty = document.createElement('p');
-        empty.className = 'panel-empty';
-        empty.textContent = 'Base storage empty.';
-        receiveBody.appendChild(empty);
-        return;
-      }
-      for (let i = 0; i < st.bags.length; i++) {
-        const bag = st.bags[i];
-        const def = getItemDef(bag.itemId);
-        const row = document.createElement('div');
-        row.className = 'panel-row';
-        const main = document.createElement('div');
-        main.className = 'panel-row-main';
-        main.innerHTML = `<strong>${def ? def.label : bag.itemId}</strong><span class="panel-row-meta">×${bag.count}</span>`;
-        const takeBtn = document.createElement('button');
-        takeBtn.type = 'button';
-        takeBtn.className = 'btn btn-ghost panel-buy';
-        takeBtn.textContent = bag.count > 0 ? 'Take' : 'Empty';
-        takeBtn.disabled = bag.count <= 0;
-        takeBtn.addEventListener('click', () => {
-          const m = hooks.getMatch();
-          if (!m) return;
-          const res = takeBaseResources(m, bag.itemId);
-          if (res.taken > 0) {
-            setStatus(receiveStatus, `Took ${res.taken} ${res.itemId}`, true);
-            if (hooks.onInventoryChanged) hooks.onInventoryChanged();
-          } else {
-            setStatus(receiveStatus, res.reason || 'Cannot take', false);
-          }
-          renderReceive();
-        });
-        row.appendChild(main);
-        row.appendChild(takeBtn);
-        receiveBody.appendChild(row);
-      }
+      const key = mountKeyForBase(st);
+      if (key !== receiveMountedKey) buildReceiveBase(st);
+      else if (st) updateReceiveBase(st);
     }
   }
 
@@ -320,6 +391,21 @@ export function createPanels(dom, hooks) {
       if (statusTimer <= 0) {
         if (craftStatus) craftStatus.textContent = '';
         if (receiveStatus) receiveStatus.textContent = '';
+      }
+    }
+    const match = hooks.getMatch && hooks.getMatch();
+    if (match && match.lastTakeResult) {
+      const r = match.lastTakeResult;
+      match.lastTakeResult = null;
+      if (r.taken > 0) {
+        const msg =
+          r.mode === 'world_drop'
+            ? `Ejected ${r.taken} ${r.itemId} — walk to pick up`
+            : `Took ${r.taken} ${r.itemId}`;
+        setStatus(receiveStatus, msg, true);
+        if (hooks.onInventoryChanged) hooks.onInventoryChanged();
+      } else {
+        setStatus(receiveStatus, r.reason || 'Nothing to take', false);
       }
     }
     if (openKind === 'receive-gen' || openKind === 'receive-base') {

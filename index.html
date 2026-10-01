@@ -3,15 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WantToPlay — Local Host</title>
+    <title>TheDDOS — Local Host</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="stylesheet" href="css/main.css" />
   </head>
   <body>
     <div id="app">
-      <!-- MENU -->
-      <section id="screen-menu" class="screen is-active" aria-label="Menu">
+      <!-- MENU (shown after boot preload) -->
+      <section id="screen-menu" class="screen" hidden aria-label="Menu">
         <div class="menu-panel">
-          <h1 class="brand">WantToPlay</h1>
+          <h1 class="brand">TheDDOS</h1>
           <p class="tagline">Local Host · Survival V1</p>
 
           <div class="lobby-box">
@@ -59,14 +60,14 @@
         </div>
       </section>
 
-      <!-- LOADING -->
-      <section id="screen-loading" class="screen" hidden aria-label="Loading">
+      <!-- BOOT / MATCH LOADING (visible first so shell is never clickable half-ready) -->
+      <section id="screen-loading" class="screen is-active" aria-label="Loading">
         <div class="loading-panel">
-          <h2>Loading</h2>
+          <h2 id="loading-title">Booting TheDDOS</h2>
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
             <div id="progress-fill" class="progress-fill"></div>
           </div>
-          <p id="progress-label">0%</p>
+          <p id="progress-label">0% — Starting…</p>
         </div>
       </section>
 
@@ -155,6 +156,68 @@
       </section>
     </div>
 
-    <script type="module" src="js/main.js"></script>
+    <script>
+      /* Stage UI + soft watchdog — never overwrite Boot failed / locked title. */
+      (function () {
+        var label = document.getElementById('progress-label');
+        var fill = document.getElementById('progress-fill');
+        var title = document.getElementById('loading-title');
+        if (label) label.textContent = '1% — Starting entry…';
+        if (fill) fill.style.width = '1%';
+        window.__theDdosPhase = window.__theDdosPhase || 'html';
+
+        var ticks = 0;
+        var timer = setInterval(function () {
+          var phase = window.__theDdosPhase || '';
+          if (window.__theDdos && phase === 'ready') {
+            clearInterval(timer);
+            return;
+          }
+          if (phase === 'failed' || phase === 'ready') {
+            clearInterval(timer);
+            return;
+          }
+          if (title && title.dataset.locked === '1') {
+            clearInterval(timer);
+            return;
+          }
+          ticks += 1;
+          /* Still importing heavy graph — show phase, do not hard-fail yet. */
+          if (phase === 'import-app' || phase === 'create-app' || phase === 'boot') {
+            if (label && ticks % 2 === 0) {
+              label.textContent =
+                (label.textContent.split(' ·')[0] || label.textContent) +
+                ' · ' +
+                ticks +
+                's';
+            }
+            /* Only warn after long import (sim.js can be large on cold cache). */
+            if (ticks >= 45 && phase === 'import-app') {
+              clearInterval(timer);
+              if (title && title.dataset.locked !== '1') {
+                title.textContent = 'Import slow';
+              }
+              if (label) {
+                label.textContent =
+                  'app.js/sim still loading after 45s — check Network for red JS, then Ctrl+Shift+R';
+              }
+              console.error('[TheDDOS] slow import-app after 45s');
+            }
+            return;
+          }
+          /* main.js never started (script tag failed). */
+          if (ticks >= 8 && (phase === 'html' || !phase)) {
+            clearInterval(timer);
+            if (title) title.textContent = 'Entry missing';
+            if (label) {
+              label.textContent =
+                'js/main.js did not run — open via play-local.bat HTTP, Disable cache, Ctrl+Shift+R';
+            }
+            console.error('[TheDDOS] main.js never set __theDdosPhase');
+          }
+        }, 1000);
+      })();
+    </script>
+    <script type="module" src="js/main.js?v=20261001o"></script>
   </body>
 </html>

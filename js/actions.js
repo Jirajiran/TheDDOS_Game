@@ -9,6 +9,10 @@ export const ActionType = Object.freeze({
   RELOAD: 'RELOAD',
   INTERACT: 'INTERACT',
   HARVEST: 'HARVEST',
+  /** Take produced stock from a Gen block into inventory (sim mutates). */
+  TAKE_GEN: 'TAKE_GEN',
+  /** Take from base inherent storage into inventory (sim mutates). */
+  TAKE_BASE: 'TAKE_BASE',
 });
 
 export function makeMoveAction(unitId, dx, dy) {
@@ -42,4 +46,14 @@ export function makeInteractAction(unitId) {
 
 export function makeHarvestAction(unitId, worldX, worldY) {
   return { type: ActionType.HARVEST, unitId, worldX, worldY };
+}
+
+/** TAKE_GEN — blockId of Gen; amount optional (default all). */
+export function makeTakeGenAction(unitId, blockId, amount = Infinity) {
+  return { type: ActionType.TAKE_GEN, unitId, blockId, amount };
+}
+
+/** TAKE_BASE — itemId in base.storage bags; amount optional (default all). */
+export function makeTakeBaseAction(unitId, itemId, amount = Infinity) {
+  return { type: ActionType.TAKE_BASE, unitId, itemId, amount };
 }

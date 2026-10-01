@@ -31,7 +31,10 @@ export const PATH_DEBUG_COLORS = [
 ];
 
 export const AppState = Object.freeze({
+  /** Page open — prefetch assets/modules before MENU is usable. */
+  BOOT: 'BOOT',
   MENU: 'MENU',
+  /** Match load — pools + world before PLAYING. */
   LOADING: 'LOADING',
   PLAYING: 'PLAYING',
   RESULT: 'RESULT',
@@ -1361,7 +1364,15 @@ export const WAVE_ARCHETYPE_TABLE = Object.freeze([
   'CLASS_BOSS',
 ]);
 
-export const MEMENTO_STORAGE_KEY = 'wanttoplay_local_host_snapshot_v1';
+export const MEMENTO_STORAGE_KEY = 'theddos_local_host_snapshot_v1';
+/** Legacy WantToPlay key — migrate once into MEMENTO_STORAGE_KEY. */
+export const MEMENTO_STORAGE_KEY_LEGACY = 'wanttoplay_local_host_snapshot_v1';
+
+/**
+ * Feature flag — Snapshot / autosave / Restore / save-file import.
+ * true = enabled. false = deferred (Start ignores localStorage saves).
+ */
+export const FEATURE_SNAPSHOT = true;
 
 export function getCraftRecipesByCategory(category) {
   return CRAFT_RECIPES.filter((r) => r.category === category);
@@ -1439,6 +1450,26 @@ export const GAME_PACK = Object.freeze({
   respawnBaseSec: 10,
   respawnExtraPerWave: 5,
   dropExpireSec: 180,
+  /** Throw/drop launch speed (world units / sec) along unit facing. */
+  dropThrowSpeed: 220,
+  /** Offset past unit radius when spawning a thrown drop (player throw). */
+  dropThrowOffset: 28,
+  /** Circle radius for drop vs solid resolve + pickup (fraction of L3). */
+  dropRadius: Math.round(L3_SIZE * 0.16),
+  /**
+   * Extra past block half-extent when ejecting Take from Gen/Base center.
+   * Spawn distance = max(w,h)/2 + this (Gen 2×2 / Base 3×3).
+   */
+  dropEjectMargin: Math.round(L3_SIZE * 0.4),
+  /**
+   * Magnet beyond player collider: pickup if dist ≤ player.radius + this + dropRadius.
+   * Keep small — not a wide vacuum.
+   */
+  dropMagnetRange: Math.round(L3_SIZE * 0.28),
+  /** Exponential velocity damp for drops (/sec); slows then stops. */
+  dropFriction: 6.5,
+  /** Below this speed (wu/s) drop velocity is zeroed. */
+  dropStopSpeed: 8,
   /** Per Path quotas — denser scatter on 16×16 L3. */
   worldGenPerPath: Object.freeze({
     trees: 10,

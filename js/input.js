@@ -195,78 +195,85 @@ export function createInput(canvas) {
 
   const actions = [];
   const { dx, dy } = moveAxis();
+
+  // Hotbar select first in the list (sim also applies SELECT in pass-1).
+  let hotbarDelta = 0;
+  if (wheelDelta !== 0) {
+    hotbarDelta = wheelDelta > 0 ? 1 : -1;
+    wheelDelta = 0;
+  }
+  while (digitPress.length) {
+    const digit = digitPress.shift();
+    if (digit >= 0 && digit < GAME_PACK.hotbarSlots) {
+      actions.push(makeSelectHotbarAction(playerUnitId, digit));
+    }
+  }
+  let effectiveHotbar = activeHotbar;
+  if (hotbarDelta !== 0) {
+    const slots = GAME_PACK.hotbarSlots;
+    effectiveHotbar = (activeHotbar + hotbarDelta + slots * 8) % slots;
+    actions.push(makeSelectHotbarAction(playerUnitId, effectiveHotbar));
+  }
+  // Also honor digit selects in effectiveHotbar for this frame's place/fire.
+  for (let i = actions.length - 1; i >= 0; i--) {
+    if (actions[i].type === 'SELECT_HOTBAR') {
+      effectiveHotbar = actions[i].slot;
+      break;
+    }
+  }
+
   actions.push(makeMoveAction(playerUnitId, dx, dy));
 
-    const zoom = camera.zoom > 0 ? camera.zoom : 1;
-    const worldX = camera.x + mouseScreenX / zoom;
-    const worldY = camera.y + mouseScreenY / zoom;
-    const mouseWorld = { x: worldX, y: worldY };
+  const zoom = camera.zoom > 0 ? camera.zoom : 1;
+  const worldX = camera.x + mouseScreenX / zoom;
+  const worldY = camera.y + mouseScreenY / zoom;
+  const mouseWorld = { x: worldX, y: worldY };
 
-    actions.push(makeAimAction(playerUnitId, 0));
+  actions.push(makeAimAction(playerUnitId, 0));
 
-    const slot = inventory ? getActiveSlot(inventory, activeHotbar) : null;
+  const slot = inventory ? getActiveSlot(inventory, effectiveHotbar) : null;
 
-    if (!actionBusy) {
-      if (isPlaceableSlot(slot)) {
-        if (firePressed) {
-          actions.push(makePlaceAction(playerUnitId, worldX, worldY));
-        }
-      } else if (isToolSlot(slot)) {
-        // Click only — facing-based hit in sim; do not hold-to-spam unless pressed edge.
-        if (firePressed) {
-          actions.push(makeHarvestAction(playerUnitId, worldX, worldY));
-        }
-      } else if (isWeaponSlot(slot)) {
-        if (firePressed || fireHeld) {
-          actions.push(makeFireAction(playerUnitId));
-        }
+  if (!actionBusy) {
+    if (isPlaceableSlot(slot)) {
+      if (firePressed) {
+        actions.push(makePlaceAction(playerUnitId, worldX, worldY));
+      }
+    } else if (isToolSlot(slot)) {
+      if (firePressed) {
+        actions.push(makeHarvestAction(playerUnitId, worldX, worldY));
+      }
+    } else if (isWeaponSlot(slot)) {
+      if (firePressed || fireHeld) {
+        actions.push(makeFireAction(playerUnitId));
       }
     }
-    firePressed = false;
-
-    if (reloadPressed) {
-      actions.push(makeReloadAction(playerUnitId));
-      reloadPressed = false;
-    }
-    if (interactPressed) {
-      actions.push(makeInteractAction(playerUnitId));
-      interactPressed = false;
-    }
-
-    let hotbarDelta = 0;
-    if (wheelDelta !== 0) {
-      hotbarDelta = wheelDelta > 0 ? 1 : -1;
-      wheelDelta = 0;
-    }
-
-    while (digitPress.length) {
-      const digit = digitPress.shift();
-      if (digit >= 0 && digit < GAME_PACK.hotbarSlots) {
-        actions.push(makeSelectHotbarAction(playerUnitId, digit));
-      }
-    }
-
-    if (hotbarDelta !== 0) {
-      const slots = GAME_PACK.hotbarSlots;
-      const next = (activeHotbar + hotbarDelta + slots * 8) % slots;
-      actions.push(makeSelectHotbarAction(playerUnitId, next));
-    }
-
-    return {
-      actions,
-      mouseWorld,
-      mouseScreenX,
-      mouseScreenY,
-      escapePressed: escaped,
-      craftTogglePressed: craftToggle,
-      interactTogglePressed: false,
-      meleeVolumeTogglePressed: meleeVolToggle,
-      moveDx: dx,
-      moveDy: dy,
-      uiBlocked: false,
-      actionBusy,
-    };
   }
+  firePressed = false;
+
+  if (reloadPressed) {
+    actions.push(makeReloadAction(playerUnitId));
+    reloadPressed = false;
+  }
+  if (interactPressed) {
+    actions.push(makeInteractAction(playerUnitId));
+    interactPressed = false;
+  }
+
+  return {
+    actions,
+    mouseWorld,
+    mouseScreenX,
+    mouseScreenY,
+    escapePressed: escaped,
+    craftTogglePressed: craftToggle,
+    interactTogglePressed: false,
+    meleeVolumeTogglePressed: meleeVolToggle,
+    moveDx: dx,
+    moveDy: dy,
+    uiBlocked: false,
+    actionBusy,
+  };
+}
 
   function destroy() {
     window.removeEventListener('keydown', onKeyDown);

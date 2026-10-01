@@ -1,31 +1,87 @@
-import { MEMENTO_STORAGE_KEY, AUTOSAVE_INTERVAL_SEC } from './config.js';
+import {
+  MEMENTO_STORAGE_KEY,
+  MEMENTO_STORAGE_KEY_LEGACY,
+  AUTOSAVE_INTERVAL_SEC,
+  FEATURE_SNAPSHOT,
+} from './config.js';
 
 /**
  * Local Host memento — single autosave slot in localStorage + optional JSON export.
- * Autosave: throttled while PLAYING (see AUTOSAVE_INTERVAL_SEC).
- * Win/Lose: clear autosave (no Restore after finished match).
- * Manual Save: download file only — does NOT write autosave.
+ * Gated by FEATURE_SNAPSHOT (false = deferred / no-op).
  */
 
-export { AUTOSAVE_INTERVAL_SEC };
+export { AUTOSAVE_INTERVAL_SEC, FEATURE_SNAPSHOT };
 
-export function hasLocalSnapshot() {
+function readStorageRaw(key) {
   try {
-    return !!localStorage.getItem(MEMENTO_STORAGE_KEY);
+    return localStorage.getItem(key);
   } catch {
-    return false;
+    return null;
   }
 }
 
+/** Prefer new key; if only legacy WantToPlay slot exists, migrate once. */
+function migrateLegacySnapshotIfNeeded() {
+  if (!FEATURE_SNAPSHOT) return;
+  try {
+    if (localStorage.getItem(MEMENTO_STORAGE_KEY)) return;
+    const legacy = localStorage.getItem(MEMENTO_STORAGE_KEY_LEGACY);
+    if (!legacy) return;
+    localStorage.setItem(MEMENTO_STORAGE_KEY, legacy);
+    localStorage.removeItem(MEMENTO_STORAGE_KEY_LEGACY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Drop corrupt / unreadable autosave so MENU never hangs on bad legacy data.
+ * No-op when FEATURE_SNAPSHOT is false.
+ */
+export function sanitizeLocalSnapshot() {
+  if (!FEATURE_SNAPSHOT) return { ok: true, cleared: false, skipped: true };
+  migrateLegacySnapshotIfNeeded();
+  try {
+    const raw = localStorage.getItem(MEMENTO_STORAGE_KEY);
+    if (!raw) return { ok: true, cleared: false };
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') {
+      localStorage.removeItem(MEMENTO_STORAGE_KEY);
+      return { ok: false, cleared: true, reason: 'not-object' };
+    }
+    return { ok: true, cleared: false };
+  } catch {
+    try {
+      localStorage.removeItem(MEMENTO_STORAGE_KEY);
+      localStorage.removeItem(MEMENTO_STORAGE_KEY_LEGACY);
+    } catch {
+      /* ignore */
+    }
+    return { ok: false, cleared: true, reason: 'parse-error' };
+  }
+}
+
+export function hasLocalSnapshot() {
+  if (!FEATURE_SNAPSHOT) return false;
+  migrateLegacySnapshotIfNeeded();
+  const check = sanitizeLocalSnapshot();
+  if (!check.ok) return false;
+  return !!readStorageRaw(MEMENTO_STORAGE_KEY);
+}
+
 export function clearLocalSnapshot() {
+  if (!FEATURE_SNAPSHOT) return;
   try {
     localStorage.removeItem(MEMENTO_STORAGE_KEY);
+    localStorage.removeItem(MEMENTO_STORAGE_KEY_LEGACY);
   } catch {
     /* ignore */
   }
 }
 
 export function loadLocalSnapshotRaw() {
+  if (!FEATURE_SNAPSHOT) return null;
+  migrateLegacySnapshotIfNeeded();
   try {
     const raw = localStorage.getItem(MEMENTO_STORAGE_KEY);
     if (!raw) return null;
@@ -36,8 +92,10 @@ export function loadLocalSnapshotRaw() {
 }
 
 export function saveLocalSnapshotRaw(data) {
+  if (!FEATURE_SNAPSHOT) return false;
   try {
     localStorage.setItem(MEMENTO_STORAGE_KEY, JSON.stringify(data));
+    localStorage.removeItem(MEMENTO_STORAGE_KEY_LEGACY);
     return true;
   } catch {
     return false;
@@ -126,6 +184,8 @@ export function serializeMatchSnapshot(match) {
     drops.push({
       x: d.x,
       y: d.y,
+      vx: d.vx || 0,
+      vy: d.vy || 0,
       itemId: d.itemId,
       stack: d.stack,
       age: d.age,
@@ -207,16 +267,17 @@ export function serializeMatchSnapshot(match) {
 
 /** Persist match into the single autosave localStorage slot. */
 export function writeAutosave(match) {
+  if (!FEATURE_SNAPSHOT) return false;
   const snap = serializeMatchSnapshot(match);
   if (!snap) return false;
   return saveLocalSnapshotRaw(snap);
 }
 
 export function downloadSnapshotJson(snapshot, filename) {
-  if (!snapshot) return;
+  if (!FEATURE_SNAPSHOT || !snapshot) return;
   const name =
     filename ||
-    `wanttoplay-save-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    `theddos-save-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
     type: 'application/json',
   });
@@ -230,6 +291,7 @@ export function downloadSnapshotJson(snapshot, filename) {
 
 /** Manual export — download only; does not touch autosave. */
 export function exportMatchSnapshotFile(match) {
+  if (!FEATURE_SNAPSHOT) return false;
   const snap = serializeMatchSnapshot(match);
   if (!snap) return false;
   downloadSnapshotJson(snap);

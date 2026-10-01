@@ -6,19 +6,15 @@ import {
   TEAM,
   TURRET_DOGPILE_K,
   WIRE_MELEE_MULT,
-  defaultProjectileHitMask,
-  deriveCollisionLayer,
   getArchetypeForWave,
   getBlockDef,
   getBlockPierceCost,
   getDamageMult,
-  getEntityPierceCost,
   getItemDef,
   getPierceUnitBudget,
   getToolHarvestMult,
   getUpgradeRecipe,
   getWeaponDef,
-  layerHitsMask,
 } from './config.js';
 import {
   advanceUnitAlongChain,
@@ -63,7 +59,7 @@ import {
   unitStandingCells,
   worldToL3,
 } from './occupancy.js';
-import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit, resetPools } from './pools.js';
+import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit } from './pools.js';
 import {
   beginReload,
   canFireAmmo,
@@ -117,7 +113,6 @@ export function initMatchGameplay(match, options = {}) {
   match.placeGhost = null;
   match.interactPrompt = '';
   match.pendingUi = null;
-  match.lastTakeResult = null;
   match.showMeleeVolume = false;
   match.freeCraft = false;
   match.stats = {
@@ -174,8 +169,6 @@ function resetPlayerStats(u, pack) {
   u.typeId = 1;
   u.team = TEAM.PLAYER;
   u.role = 'player';
-  u.collisionLayer = deriveCollisionLayer({ team: TEAM.PLAYER, role: 'player' });
-  u.pierceCost = 1;
   u.maxHp = pack.playerMaxHp;
   u.hp = pack.playerMaxHp;
   u.speed = pack.playerSpeed;
@@ -298,8 +291,8 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   updateBlockSystems(match, dt);
   updateFactory(match, dt);
   applyEnemyContactDamage(match, dt);
-  updateDrops(match, dt);
   pickupDrops(match);
+  updateDrops(match, dt);
   updateInteractPrompt(match);
   updateWaves(match, dt);
   updatePlayerRespawn(match, dt);
@@ -318,25 +311,19 @@ function applyActions(match, actions, mouseWorld, dt) {
   const player = getPlayerUnit(match);
   const moveIntent = Object.create(null);
 
-  // Pass 1: SELECT before PLACE/FIRE (same-frame scroll/click uses new slot).
-  for (let i = 0; i < actions.length; i++) {
-    const a = actions[i];
-    if (a.type !== ActionType.SELECT_HOTBAR) continue;
-    if (player && a.unitId === player.id) {
-      match.activeHotbar = a.slot | 0;
-    }
-  }
-
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i];
 
     if (a.type === ActionType.SELECT_HOTBAR) {
+      if (player && a.unitId === player.id) {
+        match.activeHotbar = a.slot | 0;
+      }
       continue;
     }
 
     // Turret fire uses synthetic unitId = -(blockId+1)
     if (a.type === ActionType.FIRE && a.turretBlockId != null) {
-      tryTurretFire(match, a.turretBlockId, a.aimRad);
+      tryTurretFire(match, a.turretBlockId);
       continue;
     }
 
@@ -363,23 +350,7 @@ function applyActions(match, actions, mouseWorld, dt) {
       if (unit.role === 'player') tryInteract(match, unit);
     } else if (a.type === ActionType.HARVEST) {
       if (unit.role === 'player') {
-        tryHarvest(match, unit, a.worldX, a.worldY);
-      }
-    } else if (a.type === ActionType.TAKE_GEN) {
-      if (unit.role === 'player') {
-        match.lastTakeResult = {
-          kind: 'gen',
-          blockId: a.blockId,
-          ...takeGenResources(match, a.blockId, a.amount),
-        };
-      }
-    } else if (a.type === ActionType.TAKE_BASE) {
-      if (unit.role === 'player') {
-        match.lastTakeResult = {
-          kind: 'base',
-          itemId: a.itemId,
-          ...takeBaseResources(match, a.itemId, a.amount),
-        };
+        tryHarvest(match, unit);
       }
     } else if (a.type === ActionType.PLACE) {
       if (unit.role === 'player') {
@@ -459,27 +430,19 @@ function tryPlace(match, unit, gx, gy) {
   registerBlock(match, block);
   match.stats.blocksPlaced += 1;
 
-  // Economy: place always consumes from inventory (freeCraft is craft-only).
-  // Hub/UI only displays counts — sim is the sole writer.
-  consumeSlotItem(match.inventory, match.activeHotbar, 1);
-
   if (block.isDefeatCondition) {
     match.base = block;
     match.basePlaced = true;
-    ensureBaseStorage(block);
-    syncBaseStorageFromGenerators(block);
     match.baseChunk = buildBaseChunk(match, block);
     applyBaseChunkPipeMask(match);
     match.phase = 'setup';
     match.waveCountdown = GAME_PACK.setupPhaseDurationSec;
     match.waveActive = false;
     match.waveIndex = 0;
-    match.interactPrompt = 'Base placed — setup started';
     // Turret + resource gen are inherent BaseBlock systems — no free starter blocks.
   }
 
-  return true;
-}
+
 
 function createPlacedBlock(match, itemId, gx, gy, blockDef) {
   const fw = blockDef.footprint.w;
@@ -542,12 +505,6 @@ function createPlacedBlock(match, itemId, gx, gy, blockDef) {
     factoryBusy: false,
     color: blockDef.color,
     team: blockDef.team != null ? blockDef.team : TEAM.PLAYER,
-    pierceCost: typeof blockDef.pierceCost === 'number' ? blockDef.pierceCost : 1,
-    collisionLayer: deriveCollisionLayer({
-      team: blockDef.team != null ? blockDef.team : TEAM.PLAYER,
-      isHarvest: !!blockDef.isHarvest,
-      collisionLayer: blockDef.collisionLayer,
-    }),
   };
 }
 
@@ -565,40 +522,6 @@ function initGeneratorList(list) {
     });
   }
   return out;
-}
-
-/** Ensure defeat-condition block has storage bags for receive UI. */
-function ensureBaseStorage(block) {
-  if (!block) return null;
-  if (!block.storage || !Array.isArray(block.storage.bags)) {
-    block.storage = { bags: [] };
-  }
-  return block.storage;
-}
-
-/**
- * Mirror inherent generatorList stock into base.storage.bags
- * so receive panel / takeBaseResources see the same numbers.
- */
-function syncBaseStorageFromGenerators(block) {
-  if (!block || !block.generatorList || !block.generatorList.length) return;
-  const storage = ensureBaseStorage(block);
-  for (let g = 0; g < block.generatorList.length; g++) {
-    const gen = block.generatorList[g];
-    if (!gen || !gen.itemId) continue;
-    let bag = null;
-    for (let i = 0; i < storage.bags.length; i++) {
-      if (storage.bags[i].itemId === gen.itemId) {
-        bag = storage.bags[i];
-        break;
-      }
-    }
-    if (!bag) {
-      bag = { itemId: gen.itemId, count: 0 };
-      storage.bags.push(bag);
-    }
-    bag.count = Math.max(0, gen.stock | 0);
-  }
 }
 
 function buildBaseChunk(match, base) {
@@ -638,8 +561,7 @@ function getUnitWeaponAmmo(match, unit) {
 function tryReload(match, unit) {
   const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
   if (!weapon || !ammo) return;
-  const opts = unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
-  beginReload(ammo, weapon, opts);
+  beginReload(ammo, weapon);
 }
 
 function tryFire(match, unit) {
@@ -647,24 +569,7 @@ function tryFire(match, unit) {
   if (!weapon) return;
   if (unit.fireCooldown > 0) return;
   if (!canFireAmmo(ammo, weapon)) {
-    if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) {
-      const opts = unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
-      beginReload(ammo, weapon, opts);
-    }
-    return;
-  }
-
-  if (weapon.projectileMode === 'CONTINUOUS_BEAM') {
-    if (!weapon.infiniteAmmo) {
-      const consumed = consumeAmmoForShot(ammo, weapon);
-      if (!consumed) return;
-    }
-    // No stacking: fireCooldown covers beamDuration then cooldownSec.
-    if (ownerHasActiveBeam(match, unit.id, -1)) return;
-    spawnBeam(match, unit, weapon, unit.aimRad);
-    const duration = weapon.beamDurationSec || 0;
-    unit.fireCooldown = duration + (weapon.cooldownSec || 0);
-    match.stats.shotsFired += 1;
+    if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) beginReload(ammo, weapon);
     return;
   }
 
@@ -712,69 +617,10 @@ function spawnProjectile(match, owner, weapon, aimRad) {
   proj.traveled = 0;
   proj.maxRange = maxRange;
   proj.radius = weapon.projectileRadius || 4;
-  proj.pierceLeft = getPierceUnitBudget(weapon);
-  proj.blockPierceLeft = proj.pierceLeft; // shared budget (legacy field kept in sync)
-  proj.pierceConfig = weapon.pierceConfig || null;
-  proj.weaponId = weapon.id;
-  proj.targetFaction = weapon.targetFaction || 'ENEMY';
-  proj.hitMask = defaultProjectileHitMask(proj.team, proj.targetFaction);
+  proj.pierceLeft = weapon.pierceUnits || 0;
   proj.hitBlockIds = [];
   proj.fromTurret = !!owner.fromTurret;
-  proj.sourceBlockId = owner.sourceBlockId != null ? owner.sourceBlockId : -1;
-  proj.noLootOnPierce = true;
-  proj.isBeam = false;
   return proj;
-}
-
-function ownerHasActiveBeam(match, ownerId, sourceBlockId) {
-  if (!match.beams || !match.beams.length) return false;
-  for (let i = 0; i < match.beams.length; i++) {
-    const b = match.beams[i];
-    if (!b.active) continue;
-    if (sourceBlockId >= 0 && b.sourceBlockId === sourceBlockId) return true;
-    if (sourceBlockId < 0 && b.ownerId === ownerId && !(b.sourceBlockId >= 0)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function spawnBeam(match, owner, weapon, aimRad) {
-  if (!match.beams) match.beams = [];
-  const cos = Math.cos(aimRad);
-  const sin = Math.sin(aimRad);
-  const ox = owner.x != null ? owner.x : owner.cx;
-  const oy = owner.y != null ? owner.y : owner.cy;
-  const muzzle = (owner.radius || 20) + 2;
-  const maxRange = (weapon.maxDistancePath || 1) * PATH_SIZE;
-  const team = owner.team != null ? owner.team : TEAM.PLAYER;
-  const targetFaction = weapon.targetFaction || 'ENEMY';
-  const x0 = ox + cos * muzzle;
-  const y0 = oy + sin * muzzle;
-  match.beams.push({
-    active: true,
-    x0,
-    y0,
-    x1: x0 + cos * maxRange,
-    y1: y0 + sin * maxRange,
-    aimRad,
-    maxRange,
-    damage: weapon.baseDamage,
-    damageType: weapon.damageType,
-    team,
-    targetFaction,
-    hitMask: defaultProjectileHitMask(team, targetFaction),
-    ownerId: owner.id != null ? owner.id : -1,
-    sourceBlockId: owner.sourceBlockId != null ? owner.sourceBlockId : -1,
-    fromTurret: !!owner.fromTurret,
-    durationLeft: weapon.beamDurationSec || 1,
-    tickAcc: 0,
-    tickInterval: 0.2,
-    color: weapon.color || '#ff6b9a',
-    weaponId: weapon.id,
-    pierceLeft: getPierceUnitBudget(weapon),
-    pierceBudgetMax: getPierceUnitBudget(weapon),
-  });
 }
 
 function tryTurretFire(match, blockId, aimRad) {
@@ -790,24 +636,9 @@ function tryTurretFire(match, blockId, aimRad) {
     radius: Math.min(block.w, block.h) * 0.35,
     team: TEAM.PLAYER,
     fromTurret: true,
-    sourceBlockId: block.id,
   };
-  const aim =
-    typeof aimRad === 'number'
-      ? aimRad
-      : typeof block.turretAimRad === 'number'
-        ? block.turretAimRad
-        : block.turretTargetAimRad || 0;
-
-  if (weapon.projectileMode === 'CONTINUOUS_BEAM') {
-    if (ownerHasActiveBeam(match, owner.id, block.id)) return;
-    spawnBeam(match, owner, weapon, aim);
-    const duration = weapon.beamDurationSec || 0;
-    block.fireCooldown = duration + (weapon.cooldownSec || 0);
-  } else {
-    spawnProjectile(match, owner, weapon, aim);
-    block.fireCooldown = weapon.cooldownSec;
-  }
+  spawnProjectile(match, owner, weapon, aimRad);
+  block.fireCooldown = weapon.cooldownSec;
   match.stats.shotsFired += 1;
 }
 
@@ -835,12 +666,10 @@ function decideTurretActions(match) {
       }
     }
     if (!best) continue;
-    const aim = Math.atan2(best.y - cy, best.x - cx);
-    b.turretTargetAimRad = aim;
     actions.push({
       type: ActionType.FIRE,
       turretBlockId: b.id,
-      aimRad: aim,
+      aimRad: Math.atan2(best.y - cy, best.x - cx),
     });
   }
   return actions;
@@ -930,53 +759,8 @@ export function getGenReceiveState(match, blockId) {
 }
 
 /**
- * Distance from AABB center to surface along unit direction (cos, sin).
- * Axis-aligned box half-extents hw/hh — needed so diagonal eject clears Gen/Base.
- */
-function aabbRayExitDist(hw, hh, cos, sin) {
-  let t = Infinity;
-  if (Math.abs(cos) > 1e-8) t = Math.min(t, hw / Math.abs(cos));
-  if (Math.abs(sin) > 1e-8) t = Math.min(t, hh / Math.abs(sin));
-  return Number.isFinite(t) ? t : Math.max(hw, hh);
-}
-
-/**
- * Eject stock as a world drop toward the player (pickup in-scene).
- * Does not write inventory directly — player walks to collect.
- * @param {{ hw?: number, hh?: number }} [boxHalf] half-extents of source block from center.
- *   When set, spawn at AABB surface + dropEjectMargin along player dir.
- */
-function ejectDropTowardPlayer(match, fromX, fromY, itemId, count, boxHalf = null) {
-  if (!match || !itemId || !(count > 0)) return false;
-  const player = getPlayerUnit(match);
-  const pack = GAME_PACK;
-  const speed = pack.dropThrowSpeed || 220;
-  const margin =
-    pack.dropEjectMargin != null ? pack.dropEjectMargin : Math.round(L3_SIZE * 0.4);
-  let cos = 1;
-  let sin = 0;
-  if (player) {
-    const dx = player.x - fromX;
-    const dy = player.y - fromY;
-    const len = Math.hypot(dx, dy) || 1;
-    cos = dx / len;
-    sin = dy / len;
-  }
-  let off;
-  if (boxHalf && boxHalf.hw > 0 && boxHalf.hh > 0) {
-    off = aabbRayExitDist(boxHalf.hw, boxHalf.hh, cos, sin) + margin;
-  } else {
-    off = (player ? player.radius : 0) + (pack.dropThrowOffset || 28);
-  }
-  const x = fromX + cos * off;
-  const y = fromY + sin * off;
-  spawnDrop(match, x, y, itemId, count, cos * speed, sin * speed);
-  return true;
-}
-
-/**
- * Take Gen stock → world drop toward player (not inventory).
- * @returns {{ taken: number, itemId: string|null, reason?: string, mode?: string }}
+ * Take produced resources from a Gen block into player inventory.
+ * @returns {{ taken: number, itemId: string|null, reason?: string }}
  */
 export function takeGenResources(match, blockId, amount = Infinity) {
   const block = findBlockById(match, blockId);
@@ -989,20 +773,19 @@ export function takeGenResources(match, blockId, amount = Infinity) {
     Number.isFinite(amount) ? amount : block.genStock || 0
   );
   if (want <= 0) return { taken: 0, itemId, reason: 'Empty' };
-
-  const cx = block.x + block.w / 2;
-  const cy = block.y + block.h / 2;
-  const boxHalf = { hw: block.w * 0.5, hh: block.h * 0.5 };
-  if (!ejectDropTowardPlayer(match, cx, cy, itemId, want, boxHalf)) {
-    return { taken: 0, itemId, reason: 'Drop failed' };
-  }
-  block.genStock = (block.genStock || 0) - want;
-  match.interactPrompt = `Ejected ${want} ${itemId} — walk to pick up`;
-  return { taken: want, itemId, mode: 'world_drop' };
+  const left = addItemToInventory(match.inventory, itemId, want);
+  const taken = want - left;
+  block.genStock = (block.genStock || 0) - taken;
+  if (taken > 0) match.stats.resourcesGathered += taken;
+  if (taken <= 0) return { taken: 0, itemId, reason: 'Inventory full' };
+  match.interactPrompt = `Took ${taken} ${itemId}`;
+  return { taken, itemId };
 }
 
 /**
  * Base receive panel state.
+ * TODO hook: when sim adds inherent gen/storage on base (`base.storage`),
+ * panel reads it here. Until then: HP + empty placeholder bags.
  */
 export function getBaseReceiveState(match) {
   const base = match && match.base;
@@ -1018,12 +801,13 @@ export function getBaseReceiveState(match) {
     bags: storage && Array.isArray(storage.bags) ? storage.bags : [],
     note: storage
       ? null
-      : 'Base storage missing — place Base again or report bug',
+      : 'Inherent base storage/gen not wired yet (sim TODO)',
   };
 }
 
 /**
- * Take base storage bag → world drop toward player (not inventory).
+ * Take from base inherent storage when sim provides `base.storage`.
+ * Stub-safe: returns reason if API missing.
  */
 export function takeBaseResources(match, itemId, amount = Infinity) {
   const base = match && match.base;
@@ -1052,22 +836,12 @@ export function takeBaseResources(match, itemId, amount = Infinity) {
     bag.count,
     Number.isFinite(amount) ? amount : bag.count
   );
-
-  const cx = base.x + base.w / 2;
-  const cy = base.y + base.h / 2;
-  const boxHalf = { hw: base.w * 0.5, hh: base.h * 0.5 };
-  if (!ejectDropTowardPlayer(match, cx, cy, itemId, want, boxHalf)) {
-    return { taken: 0, itemId, reason: 'Drop failed' };
-  }
-  bag.count -= want;
-  if (base.generatorList) {
-    for (let g = 0; g < base.generatorList.length; g++) {
-      const gen = base.generatorList[g];
-      if (gen && gen.itemId === itemId) gen.stock = bag.count;
-    }
-  }
-  match.interactPrompt = `Ejected ${want} ${itemId} — walk to pick up`;
-  return { taken: want, itemId, mode: 'world_drop' };
+  const left = addItemToInventory(match.inventory, itemId, want);
+  const taken = want - left;
+  bag.count -= taken;
+  if (taken > 0) match.stats.resourcesGathered += taken;
+  if (taken <= 0) return { taken: 0, itemId, reason: 'Inventory full' };
+  return { taken, itemId };
 }
 
 function findBlockById(match, blockId) {
@@ -1127,97 +901,47 @@ function updateFactory(match, dt) {
   }
 }
 
-function tryHarvest(match, unit, _wx, _wy) {
+function tryHarvest(match, unit, wx, wy) {
+  if (typeof wx !== 'number') return;
   const slot = getActiveSlot(match.inventory, match.activeHotbar);
   if (!isToolSlot(slot)) return;
   const def = getItemDef(slot.itemId);
   if (!def) return;
 
-  // Hit detection uses unit facing melee volume — cursor worldX/Y ignored.
-  const vol = getMeleeVolume(unit, { toolId: slot.itemId });
-  const targets = blocksOverlappingMeleeVolume(match, vol);
-  if (!targets.length) return;
+  let target = harvestTargetAt(match, wx, wy);
+  if (!target) target = placeableTargetAt(match, wx, wy);
+  if (!target) return;
 
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
-    let dmg = def.harvestDamage || 20;
-    if (target.isHarvest) {
-      const mult = getToolHarvestMult(def.toolTier || 'TIER0', target.harvestKind);
-      if (mult <= 0) {
-        match.interactPrompt = 'Wrong tool tier';
-        continue;
-      }
-      dmg *= mult;
+  const d = distToBlockAABB(unit.x, unit.y, target);
+  if (d > GAME_PACK.interactRadius + L3_SIZE) return;
+
+  let dmg = def.harvestDamage || 20;
+  if (target.isHarvest) {
+    const mult = getToolHarvestMult(def.toolTier || 'TIER0', target.harvestKind);
+    if (mult <= 0) {
+      match.interactPrompt = 'Wrong tool tier';
+      return;
     }
-
-    applyDamageToBlock(match, target, dmg, 'DEFAULT', {
-      sourceTeam: TEAM.PLAYER,
-      damageKind: 'TOOL',
-    });
+    dmg *= mult;
   }
+
+  applyDamageToBlock(match, target, dmg, 'DEFAULT', {
+    sourceTeam: TEAM.PLAYER,
+    damageKind: 'TOOL',
+  });
 }
 
-/** Alive harvest resources + placeables overlapping the oriented melee box. */
-function blocksOverlappingMeleeVolume(match, vol) {
-  const out = [];
+/** Any non-harvest placeable under cursor (for tool grief / deconstruct). */
+function placeableTargetAt(match, worldX, worldY) {
+  const { gx, gy } = worldToL3(worldX, worldY);
   for (let i = 0; i < match.blocks.length; i++) {
     const b = match.blocks[i];
-    if (!b.alive) continue;
-    if (!b.isHarvest && b.isDefeatCondition) continue;
-    if (!aabbOverlapsMeleeVolume(b.x, b.y, b.w, b.h, vol)) continue;
-    out.push(b);
+    if (!b.alive || b.isHarvest) continue;
+    if (gx >= b.gx && gx < b.gx + b.fw && gy >= b.gy && gy < b.gy + b.fh) {
+      return b;
+    }
   }
-  return out;
-}
-
-/**
- * Oriented box vs AABB: any block corner in OBB, or any OBB corner in AABB.
- * Vol local X = ahead (start..start+reach), local Y = lateral ±halfW.
- */
-function aabbOverlapsMeleeVolume(bx, by, bw, bh, vol) {
-  const cos = Math.cos(vol.ang);
-  const sin = Math.sin(vol.ang);
-  const ox = vol.ox;
-  const oy = vol.oy;
-  const x0 = vol.start;
-  const x1 = vol.start + vol.reach;
-  const y0 = -vol.halfW;
-  const y1 = vol.halfW;
-
-  function localInObb(wx, wy) {
-    const dx = wx - ox;
-    const dy = wy - oy;
-    const lx = dx * cos + dy * sin;
-    const ly = -dx * sin + dy * cos;
-    return lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1;
-  }
-
-  if (localInObb(bx, by)) return true;
-  if (localInObb(bx + bw, by)) return true;
-  if (localInObb(bx, by + bh)) return true;
-  if (localInObb(bx + bw, by + bh)) return true;
-  if (localInObb(bx + bw * 0.5, by + bh * 0.5)) return true;
-
-  function worldFromLocal(lx, ly) {
-    return {
-      x: ox + lx * cos - ly * sin,
-      y: oy + lx * sin + ly * cos,
-    };
-  }
-  function inAabb(wx, wy) {
-    return wx >= bx && wx <= bx + bw && wy >= by && wy <= by + bh;
-  }
-  const corners = [
-    worldFromLocal(x0, y0),
-    worldFromLocal(x1, y0),
-    worldFromLocal(x0, y1),
-    worldFromLocal(x1, y1),
-    worldFromLocal((x0 + x1) * 0.5, (y0 + y1) * 0.5),
-  ];
-  for (let i = 0; i < corners.length; i++) {
-    if (inAabb(corners[i].x, corners[i].y)) return true;
-  }
-  return false;
+  return null;
 }
 
 function integrateUnitMotion(match, dt) {
@@ -1312,54 +1036,10 @@ function updateWeaponReloads(match, dt) {
   }
 }
 
-/** Player hotbar weapons: sync reload with inventory ammoTypeId stock. */
-function playerReloadOpts(match, weaponDef) {
-  if (!match || !match.inventory || !weaponDef || !weaponDef.ammoTypeId) {
-    return null;
-  }
-  const ammoTypeId = weaponDef.ammoTypeId;
-  return {
-    reserveCount: countItem(match.inventory, ammoTypeId),
-    spendReserve: () => {
-      if (countItem(match.inventory, ammoTypeId) <= 0) return false;
-      deductCost(match.inventory, { [ammoTypeId]: 1 });
-      return true;
-    },
-  };
-}
-
 function unitMatchesFaction(unit, projectileTeam, targetFaction) {
   if (!unit || !unit.active) return false;
   if (targetFaction === 'FRIENDLY') return unit.team === projectileTeam;
   return unit.team !== projectileTeam;
-}
-
-function entityCollisionLayer(ent) {
-  if (!ent) return 0;
-  if (typeof ent.collisionLayer === 'number') return ent.collisionLayer;
-  return deriveCollisionLayer(ent);
-}
-
-/** Prefer hitMask; fall back to team/faction while migrating. */
-function canHitUnit(pOrBeam, unit) {
-  if (!unit || !unit.active) return false;
-  if (pOrBeam.hitMask != null) {
-    return layerHitsMask(entityCollisionLayer(unit), pOrBeam.hitMask);
-  }
-  return unitMatchesFaction(unit, pOrBeam.team, pOrBeam.targetFaction || 'ENEMY');
-}
-
-function canHitBlock(pOrBeam, block) {
-  if (!block || !block.alive) return false;
-  if (!blockProjectileSolid(block)) return false;
-  // Heal / friendly beams only target units — do not stop on placeables.
-  if ((pOrBeam.targetFaction || 'ENEMY') === 'FRIENDLY') return false;
-  if (pOrBeam.hitMask != null) {
-    return layerHitsMask(entityCollisionLayer(block), pOrBeam.hitMask);
-  }
-  // Fallback: own-team placeables are non-collision for that team's shots (harvest still hits).
-  if (block.team === pOrBeam.team && !block.isHarvest) return false;
-  return true;
 }
 
 function updateProjectiles(match, dt) {
@@ -1388,136 +1068,74 @@ function updateProjectiles(match, dt) {
       continue;
     }
 
-    const hits = collectProjectileSegmentHits(match, p, units);
-    let pierce = p.pierceLeft | 0;
-    let stopped = false;
-    for (let h = 0; h < hits.length; h++) {
-      const hit = hits[h];
-      if (hit.kind === 'block') {
-        const weapon = p.weaponId ? getWeaponDef(p.weaponId) : null;
-        const cost = getBlockPierceCost(weapon, hit.block);
-        applyDamageToBlock(match, hit.block, p.damage, p.damageType, {
-          sourceTeam: p.team,
-          damageKind: 'PROJECTILE',
-          fromTurret: !!p.fromTurret,
-          fromPierce: true,
-          skipLoot: !!p.noLootOnPierce,
-        });
+    const hitBlock = projectileHitsBlock(match, p);
+    if (hitBlock) {
+      const weapon = p.weaponId ? getWeaponDef(p.weaponId) : null;
+      const cost = getBlockPierceCost(weapon, hitBlock);
+      const canPierceBlock =
+        (p.blockPierceLeft | 0) >= cost &&
+        weapon &&
+        weapon.pierceConfig &&
+        cost < 999;
+
+      applyDamageToBlock(match, hitBlock, p.damage, p.damageType, {
+        sourceTeam: p.team,
+        damageKind: 'PROJECTILE',
+        fromTurret: !!p.fromTurret,
+        fromPierce: true,
+        skipLoot: !!p.noLootOnPierce,
+      });
+
+      if (canPierceBlock) {
+        p.blockPierceLeft = (p.blockPierceLeft | 0) - cost;
         if (!p.hitBlockIds) p.hitBlockIds = [];
-        p.hitBlockIds.push(hit.block.id);
-        if (cost > pierce) {
-          stopped = true;
-          break;
-        }
-        pierce -= cost;
-        p.pierceLeft = pierce;
-        p.blockPierceLeft = pierce;
+        p.hitBlockIds.push(hitBlock.id);
+        // Continue flight after paying block pierce cost (no loot from pierce kill).
+      } else {
+        p.active = false;
         continue;
       }
-      const unit = hit.unit;
-      const cost = getEntityPierceCost(unit);
-      const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
-      const dmg = p.damage < 0 ? p.damage : p.damage * mult;
-      applyDamageToUnit(match, unit, dmg, {
-        sourceTeam: p.team,
-        fromTurret: !!p.fromTurret,
-        sourceBlockId: p.sourceBlockId,
-        sourceX: p.prevX,
-        sourceY: p.prevY,
-      });
-      if (dmg > 0) match.stats.damageDealt += dmg;
-      if (cost > pierce) {
-        stopped = true;
+    }
+
+    let pierce = p.pierceLeft | 0;
+    let hitUnit = false;
+    for (let u = 0; u < units.length; u++) {
+      const unit = units[u];
+      if (!unitMatchesFaction(unit, p.team, p.targetFaction || 'ENEMY')) continue;
+      if (
+        segmentHitsCircle(
+          p.prevX,
+          p.prevY,
+          p.x,
+          p.y,
+          unit.x,
+          unit.y,
+          unit.radius + p.radius
+        )
+      ) {
+        const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
+        // Heal beams / medic: negative baseDamage → restore HP (skip armor invert).
+        const dmg =
+          p.damage < 0 ? p.damage : p.damage * mult;
+        applyDamageToUnit(match, unit, dmg, {
+          sourceTeam: p.team,
+          fromTurret: !!p.fromTurret,
+          sourceBlockId: p.sourceBlockId,
+          sourceX: p.prevX,
+          sourceY: p.prevY,
+        });
+        if (dmg > 0) match.stats.damageDealt += dmg;
+        hitUnit = true;
+        if (pierce > 0) {
+          pierce -= 1;
+          p.pierceLeft = pierce;
+          continue;
+        }
         break;
       }
-      pierce -= cost;
-      p.pierceLeft = pierce;
-      p.blockPierceLeft = pierce;
     }
-    if (stopped) p.active = false;
+    if (hitUnit && pierce <= 0) p.active = false;
   }
-}
-
-function collectProjectileSegmentHits(match, p, units) {
-  const hits = [];
-  const hitBlock = projectileHitsBlock(match, p);
-  if (hitBlock) {
-    const t = segmentClosestT(
-      p.prevX,
-      p.prevY,
-      p.x,
-      p.y,
-      hitBlock.x + hitBlock.w * 0.5,
-      hitBlock.y + hitBlock.h * 0.5
-    );
-    hits.push({ kind: 'block', t, block: hitBlock });
-  }
-  for (let u = 0; u < units.length; u++) {
-    const unit = units[u];
-    if (!canHitUnit(p, unit)) continue;
-    if (
-      segmentHitsCircle(
-        p.prevX,
-        p.prevY,
-        p.x,
-        p.y,
-        unit.x,
-        unit.y,
-        unit.radius + p.radius
-      )
-    ) {
-      const t = segmentClosestT(p.prevX, p.prevY, p.x, p.y, unit.x, unit.y);
-      hits.push({ kind: 'unit', t, unit });
-    }
-  }
-  hits.sort((a, b) => a.t - b.t);
-  return hits;
-}
-
-function segmentClosestT(x0, y0, x1, y1, px, py) {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const len2 = dx * dx + dy * dy;
-  if (len2 <= 0) return 0;
-  let t = ((px - x0) * dx + (py - y0) * dy) / len2;
-  if (t < 0) t = 0;
-  if (t > 1) t = 1;
-  return t;
-}
-
-function syncBeamToOwner(match, b) {
-  if (b.sourceBlockId >= 0) {
-    const block = getBlock(match, b.sourceBlockId);
-    if (!block || !block.alive) {
-      b.active = false;
-      return false;
-    }
-    const aim =
-      typeof block.turretAimRad === 'number'
-        ? block.turretAimRad
-        : block.turretTargetAimRad || 0;
-    const ox = block.x + block.w / 2;
-    const oy = block.y + block.h / 2;
-    const muzzle = Math.min(block.w, block.h) * 0.35 + 2;
-    b.aimRad = aim;
-    b.x0 = ox + Math.cos(aim) * muzzle;
-    b.y0 = oy + Math.sin(aim) * muzzle;
-    return true;
-  }
-  if (b.ownerId >= 0 && match.pools && match.pools.units[b.ownerId]) {
-    const owner = match.pools.units[b.ownerId];
-    if (!owner || !owner.active) {
-      b.active = false;
-      return false;
-    }
-    const aim = owner.aimRad || 0;
-    const muzzle = (owner.radius || 20) + 2;
-    b.aimRad = aim;
-    b.x0 = owner.x + Math.cos(aim) * muzzle;
-    b.y0 = owner.y + Math.sin(aim) * muzzle;
-    return true;
-  }
-  return true;
 }
 
 function updateBeams(match, dt) {
@@ -1527,71 +1145,33 @@ function updateBeams(match, dt) {
   for (let i = 0; i < match.beams.length; i++) {
     const b = match.beams[i];
     if (!b.active) continue;
-    if (!syncBeamToOwner(match, b)) continue;
-
     b.durationLeft -= dt;
     if (b.durationLeft <= 0) continue;
-
-    const tip = castBeamRay(match, b, units, false);
-    b.x1 = tip.x1;
-    b.y1 = tip.y1;
 
     b.tickAcc += dt;
     while (b.tickAcc >= b.tickInterval) {
       b.tickAcc -= b.tickInterval;
-      syncBeamToOwner(match, b);
-      b.pierceLeft = b.pierceBudgetMax | 0;
-      const tickTip = castBeamRay(match, b, units, true);
-      b.x1 = tickTip.x1;
-      b.y1 = tickTip.y1;
-    }
-    next.push(b);
-  }
-  match.beams = next;
-}
+      const cos = Math.cos(b.aimRad);
+      const sin = Math.sin(b.aimRad);
+      const x1 = b.x0 + cos * b.maxRange;
+      const y1 = b.y0 + sin * b.maxRange;
 
-/**
- * Cast beam ray with shared pierce budget. Updates visual end tip.
- * @param {boolean} applyDamage — when true, apply tick damage along segment.
- */
-function castBeamRay(match, b, units, applyDamage) {
-  const cos = Math.cos(b.aimRad);
-  const sin = Math.sin(b.aimRad);
-  const xMax = b.x0 + cos * b.maxRange;
-  const yMax = b.y0 + sin * b.maxRange;
-  const hits = [];
-
-  for (let u = 0; u < units.length; u++) {
-    const unit = units[u];
-    if (!canHitUnit(b, unit)) continue;
-    const hit = rayHitsCircle(b.x0, b.y0, xMax, yMax, unit.x, unit.y, unit.radius + 6);
-    if (hit) hits.push({ kind: 'unit', t: hit.t, unit });
-  }
-
-  for (let i = 0; i < match.blocks.length; i++) {
-    const block = match.blocks[i];
-    if (!canHitBlock(b, block)) continue;
-    const hit = rayHitsAABB(b.x0, b.y0, xMax, yMax, block.x, block.y, block.w, block.h);
-    if (hit) hits.push({ kind: 'block', t: hit.t, block });
-  }
-
-  hits.sort((a, c) => a.t - c.t);
-
-  let pierce = b.pierceLeft | 0;
-  let endT = 1;
-  for (let h = 0; h < hits.length; h++) {
-    const hit = hits[h];
-    const cost =
-      hit.kind === 'block'
-        ? getBlockPierceCost(b.weaponId ? getWeaponDef(b.weaponId) : null, hit.block)
-        : getEntityPierceCost(hit.unit);
-
-    if (applyDamage) {
-      if (hit.kind === 'unit') {
-        const unit = hit.unit;
-        const mult = getDamageMult(b.damageType, unit.armorType || 'DEFAULT');
+      // First unit along beam (friendly or enemy per targetFaction).
+      let bestT = 1.01;
+      let bestUnit = null;
+      for (let u = 0; u < units.length; u++) {
+        const unit = units[u];
+        if (!unitMatchesFaction(unit, b.team, b.targetFaction || 'ENEMY')) continue;
+        const hit = rayHitsCircle(b.x0, b.y0, x1, y1, unit.x, unit.y, unit.radius + 6);
+        if (hit && hit.t < bestT) {
+          bestT = hit.t;
+          bestUnit = unit;
+        }
+      }
+      if (bestUnit) {
+        const mult = getDamageMult(b.damageType, bestUnit.armorType || 'DEFAULT');
         const dmg = b.damage < 0 ? b.damage : b.damage * mult;
-        applyDamageToUnit(match, unit, dmg, {
+        applyDamageToUnit(match, bestUnit, dmg, {
           sourceTeam: b.team,
           fromTurret: !!b.fromTurret,
           sourceBlockId: b.sourceBlockId,
@@ -1599,28 +1179,11 @@ function castBeamRay(match, b, units, applyDamage) {
           sourceY: b.y0,
         });
         if (dmg > 0) match.stats.damageDealt += dmg;
-      } else {
-        applyDamageToBlock(match, hit.block, b.damage, b.damageType, {
-          sourceTeam: b.team,
-          damageKind: 'PROJECTILE',
-          fromTurret: !!b.fromTurret,
-          fromPierce: true,
-          skipLoot: true,
-        });
       }
     }
-
-    if (cost > pierce) {
-      endT = hit.t;
-      break;
-    }
-    pierce -= cost;
+    next.push(b);
   }
-  b.pierceLeft = pierce;
-  return {
-    x1: b.x0 + (xMax - b.x0) * endT,
-    y1: b.y0 + (yMax - b.y0) * endT,
-  };
+  match.beams = next;
 }
 
 /** Ray-circle: returns {t} in [0,1] if hit. */
@@ -1630,40 +1193,14 @@ function rayHitsCircle(x0, y0, x1, y1, cx, cy, r) {
   const fx = x0 - cx;
   const fy = y0 - cy;
   const a = dx * dx + dy * dy;
-  const bb = 2 * (fx * dx + fy * dy);
+  const b = 2 * (fx * dx + fy * dy);
   const c = fx * fx + fy * fy - r * r;
-  let disc = bb * bb - 4 * a * c;
+  let disc = b * b - 4 * a * c;
   if (disc < 0 || a <= 0) return null;
   disc = Math.sqrt(disc);
-  const t = (-bb - disc) / (2 * a);
+  const t = (-b - disc) / (2 * a);
   if (t < 0 || t > 1) return null;
   return { t };
-}
-
-/** Segment vs AABB (Liang-Barsky); returns entry {t} in [0,1]. */
-function rayHitsAABB(x0, y0, x1, y1, bx, by, bw, bh) {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  let t0 = 0;
-  let t1 = 1;
-  const p = [-dx, dx, -dy, dy];
-  const q = [x0 - bx, bx + bw - x0, y0 - by, by + bh - y0];
-  for (let i = 0; i < 4; i++) {
-    if (p[i] === 0) {
-      if (q[i] < 0) return null;
-    } else {
-      const r = q[i] / p[i];
-      if (p[i] < 0) {
-        if (r > t1) return null;
-        if (r > t0) t0 = r;
-      } else {
-        if (r < t0) return null;
-        if (r < t1) t1 = r;
-      }
-    }
-  }
-  if (t0 > t1) return null;
-  return { t: t0 };
 }
 
 function projectileHitsBlock(match, p) {
@@ -1680,7 +1217,10 @@ function projectileHitsBlock(match, p) {
     if (owner < 0) continue;
     if (p.hitBlockIds && p.hitBlockIds.indexOf(owner) >= 0) continue;
     const block = getBlock(match, owner);
-    if (!canHitBlock(p, block)) continue;
+    if (!block || !blockProjectileSolid(block)) continue;
+    // Own-team placeables are a non-collision layer for that team's projectiles
+    // (turret/base/player guns pass through walls/turrets/base). Harvest/resources still hit.
+    if (block.team === p.team && !block.isHarvest) continue;
     return block;
   }
   return null;
@@ -1730,10 +1270,6 @@ function destroyBlock(match, block, opts = {}) {
   if (!block || !block.alive) return;
   block.alive = false;
   block.hp = 0;
-  if (block.isGen) {
-    block.genStock = 0;
-    block.genTimer = 0;
-  }
   clearFootprint(match.occupancy, block.gx, block.gy, block.fw, block.fh);
 
   // Piercing resources counts as block cost only — no loot drop.
@@ -1861,19 +1397,15 @@ function updateBlockSystems(match, dt) {
   }
 }
 
-function spawnDrop(match, x, y, itemId, count, vx = 0, vy = 0) {
+function spawnDrop(match, x, y, itemId, count) {
   const drop = acquireDrop(match.pools);
   if (!drop) {
     addItemToInventory(match.inventory, itemId, count);
     return;
   }
-  const pack = GAME_PACK;
   drop.active = true;
   drop.x = x;
   drop.y = y;
-  drop.vx = vx || 0;
-  drop.vy = vy || 0;
-  drop.radius = pack.dropRadius != null ? pack.dropRadius : Math.round(L3_SIZE * 0.16);
   drop.itemId = itemId;
   drop.itemTypeId = itemId;
   drop.stack = count;
@@ -1882,10 +1414,9 @@ function spawnDrop(match, x, y, itemId, count, vx = 0, vy = 0) {
 
 /**
  * Throw entire hotbar slot contents as a world drop (drag-drop outside hotbar).
- * Spawn uses unit facing + velocity — cursor world coords are ignored for position.
  * @returns {{ ok: boolean, reason?: string }}
  */
-export function throwHotbarSlot(match, slotIndex, _worldX, _worldY) {
+export function throwHotbarSlot(match, slotIndex, worldX, worldY) {
   if (!match || !match.inventory) return { ok: false, reason: 'No inventory' };
   const slot = match.inventory[slotIndex];
   if (!slot || !slot.itemId || slot.count <= 0) {
@@ -1894,19 +1425,15 @@ export function throwHotbarSlot(match, slotIndex, _worldX, _worldY) {
   const itemId = slot.itemId;
   const count = slot.count;
   const player = getPlayerUnit(match);
-  if (!player) return { ok: false, reason: 'No player' };
-  const pack = GAME_PACK;
-  const ang =
-    typeof player.aimRad === 'number'
-      ? player.aimRad
-      : player.facingRad || 0;
-  const off = player.radius + (pack.dropThrowOffset || 28);
-  const speed = pack.dropThrowSpeed || 220;
-  const cos = Math.cos(ang);
-  const sin = Math.sin(ang);
-  const x = player.x + cos * off;
-  const y = player.y + sin * off;
-  spawnDrop(match, x, y, itemId, count, cos * speed, sin * speed);
+  let x = worldX;
+  let y = worldY;
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    if (!player) return { ok: false, reason: 'No player' };
+    const ang = player.aimRad || 0;
+    x = player.x + Math.cos(ang) * (player.radius + 24);
+    y = player.y + Math.sin(ang) * (player.radius + 24);
+  }
+  spawnDrop(match, x, y, itemId, count);
   match.inventory[slotIndex] = emptySlot();
   match.interactPrompt = `Dropped ${itemId}`;
   return { ok: true };
@@ -1914,54 +1441,22 @@ export function throwHotbarSlot(match, slotIndex, _worldX, _worldY) {
 
 function updateDrops(match, dt) {
   const drops = match.pools.drops;
-  const pack = GAME_PACK;
-  const friction = pack.dropFriction != null ? pack.dropFriction : 6.5;
-  const stopSpeed = pack.dropStopSpeed != null ? pack.dropStopSpeed : 8;
-  const damp = Math.exp(-friction * dt);
-  const getter = (id) => getBlock(match, id);
   for (let i = 0; i < drops.length; i++) {
     const d = drops[i];
     if (!d.active) continue;
-    if (d.radius == null || !(d.radius > 0)) {
-      d.radius = pack.dropRadius != null ? pack.dropRadius : Math.round(L3_SIZE * 0.16);
-    }
-    if (d.vx || d.vy) {
-      d.x += (d.vx || 0) * dt;
-      d.y += (d.vy || 0) * dt;
-      d.vx = (d.vx || 0) * damp;
-      d.vy = (d.vy || 0) * damp;
-      if (Math.hypot(d.vx, d.vy) < stopSpeed) {
-        d.vx = 0;
-        d.vy = 0;
-      }
-    }
-    // Same solid push as units — eject out of Gen/Base footprint if overlapping.
-    if (match.occupancy) {
-      resolveUnitVsOccupancy(d, match.occupancy, getter);
-    }
     d.age = (d.age || 0) + dt;
-    if (d.age >= pack.dropExpireSec) d.active = false;
+    if (d.age >= GAME_PACK.dropExpireSec) d.active = false;
   }
 }
 
 function pickupDrops(match) {
   const player = getPlayerUnit(match);
   if (!player) return;
-  const pack = GAME_PACK;
-  const magnet =
-    pack.dropMagnetRange != null ? pack.dropMagnetRange : Math.round(L3_SIZE * 0.28);
   const drops = match.pools.drops;
   for (let i = 0; i < drops.length; i++) {
     const d = drops[i];
     if (!d.active) continue;
-    const dropR =
-      d.radius != null && d.radius > 0
-        ? d.radius
-        : pack.dropRadius != null
-          ? pack.dropRadius
-          : Math.round(L3_SIZE * 0.16);
-    const reach = player.radius + magnet + dropR;
-    if (Math.hypot(d.x - player.x, d.y - player.y) > reach) continue;
+    if (Math.hypot(d.x - player.x, d.y - player.y) > player.radius + 18) continue;
     const left = addItemToInventory(match.inventory, d.itemId || d.itemTypeId, d.stack);
     if (left < d.stack) {
       match.stats.resourcesGathered += d.stack - left;
@@ -1992,7 +1487,7 @@ function updateInteractPrompt(match) {
   }
   const slot = getActiveSlot(match.inventory, match.activeHotbar);
   if (isToolSlot(slot)) {
-    hint = hint || 'LMB: tool (facing volume — harvest / walls)';
+    hint = hint || 'LMB: tool (harvest / own walls — not base)';
   }
   if (hint) match.interactPrompt = hint;
 }
@@ -2514,8 +2009,6 @@ function spawnWave(match, waveIndex) {
       u.typeId = 2;
       u.team = TEAM.ENEMY;
       u.role = 'enemy';
-      u.collisionLayer = deriveCollisionLayer({ team: TEAM.ENEMY, role: 'enemy' });
-      u.pierceCost = 1;
       u.archetypeId = archetype ? archetype.id : null;
       u.isBoss = !!(archetype && archetype.isBoss);
       u.sizeScale = sizeScale || 1;
@@ -2656,239 +2149,6 @@ function updatePlayerRespawn(match, dt) {
   match.respawnTimer -= dt;
   if (match.respawnTimer > 0) return;
   spawnPlayer(match);
-}
-
-export function getMeleeVolume(unit, opts = {}) {
-  const pack = GAME_PACK;
-  const weaponId = opts.weaponId || unit.weaponId || null;
-  const toolId = opts.toolId || null;
-  // Optional future hook: weapon/tool-specific reach/width tables.
-  // const custom = resolveMeleeVolumeDef(weaponId || toolId);
-  const ang =
-    typeof unit.aimRad === 'number' ? unit.aimRad : unit.facingRad || 0;
-  const reach = pack.meleeReach;
-  const halfW = pack.meleeHalfWidth;
-  const start = unit.radius * 0.35;
-  return {
-    ang,
-    reach,
-    halfW,
-    start,
-    ox: unit.x,
-    oy: unit.y,
-    weaponId,
-    toolId,
-  };
-}
-
-export function restoreMatchFromSnapshot(match, snap) {
-  if (!match || !snap) return false;
-  initMatchGameplay(match, {
-    gameMode: snap.gameMode || match.gameMode,
-    host: match.host,
-  });
-
-  match.phase = snap.phase || 'await_base';
-  match.waveIndex = snap.waveIndex || 0;
-  match.waveCountdown = snap.waveCountdown || 0;
-  match.waveActive = !!snap.waveActive;
-  match.enemiesAlive = 0;
-  match.outcome = snap.outcome || null;
-  match.activeHotbar = snap.activeHotbar || 0;
-  match.playerDead = !!snap.playerDead;
-  match.respawnTimer = snap.respawnTimer || 0;
-  match.cameraZoom = snap.cameraZoom || GAME_PACK.cameraFollowZoom;
-  match.freeCraft = !!snap.freeCraft;
-  if (snap.stats) match.stats = { ...match.stats, ...snap.stats };
-
-  // Clear world harvest then rebuild from snap blocks only (snapshot owns world objects).
-  match.blocks = [];
-  match.blockById = Object.create(null);
-  match.base = null;
-  match.basePlaced = false;
-  match.baseChunk = null;
-  clearBaseChunkL1Mask(match);
-  const cells = match.occupancy.cells;
-  for (let i = 0; i < cells.length; i++) cells[i] = -1;
-  match.occupancy.nextBlockId = 1;
-
-  resetPools(match.pools);
-  // resetPools is imported? — use deactivate via acquire cycle instead
-  for (let i = 0; i < match.pools.units.length; i++) {
-    match.pools.units[i].active = false;
-  }
-  for (let i = 0; i < match.pools.drops.length; i++) {
-    match.pools.drops[i].active = false;
-  }
-  for (let i = 0; i < match.pools.projectiles.length; i++) {
-    match.pools.projectiles[i].active = false;
-  }
-
-  if (Array.isArray(snap.inventory)) {
-    match.inventory = createEmptyInventory(GAME_PACK.hotbarSlots);
-    for (let i = 0; i < snap.inventory.length && i < match.inventory.length; i++) {
-      const s = snap.inventory[i];
-      if (!s || !s.itemId) {
-        match.inventory[i] = emptySlot();
-        continue;
-      }
-      const slot = makeSlotFromItem(s.itemId, s.count || 1);
-      slot.ammoInMag = s.ammoInMag || 0;
-      slot.mags = s.mags || 0;
-      slot.reloadTimer = s.reloadTimer || 0;
-      if (s.weaponId) slot.weaponId = s.weaponId;
-      match.inventory[i] = slot;
-    }
-    match.hotbar = match.inventory;
-  }
-
-  if (Array.isArray(snap.blocks)) {
-    let maxId = 0;
-    for (let i = 0; i < snap.blocks.length; i++) {
-      const sb = snap.blocks[i];
-      const def = getBlockDef(sb.itemId);
-      if (!def) continue;
-      const block = createPlacedBlock(match, sb.itemId, sb.gx, sb.gy, def);
-      // Prefer saved id if unique
-      if (sb.id > 0) {
-        clearFootprint(match.occupancy, block.gx, block.gy, block.fw, block.fh);
-        block.id = sb.id;
-        markFootprint(match.occupancy, block.gx, block.gy, block.fw, block.fh, block.id);
-        if (sb.id >= match.occupancy.nextBlockId) {
-          match.occupancy.nextBlockId = sb.id + 1;
-        }
-      }
-      block.hp = sb.hp != null ? sb.hp : block.maxHp;
-      block.maxHp = sb.maxHp != null ? sb.maxHp : block.maxHp;
-      block.isOpen = !!sb.isOpen;
-      if (block.isOpen) {
-        block.walkSolid = false;
-        block.projectileSolid = false;
-      }
-      block.fireCooldown = sb.fireCooldown || 0;
-      block.turretAimRad = sb.turretAimRad || 0;
-      block.genStock = sb.genStock || 0;
-      block.genTimer = sb.genTimer || block.genTimer;
-      if (sb.generatorList && block.generatorList) {
-        for (let g = 0; g < block.generatorList.length && g < sb.generatorList.length; g++) {
-          block.generatorList[g].timer = sb.generatorList[g].timer;
-          block.generatorList[g].stock = sb.generatorList[g].stock;
-        }
-      }
-      block.factoryBusy = !!sb.factoryBusy;
-      block.factoryTimer = sb.factoryTimer || 0;
-      block.factoryWeaponId = sb.factoryWeaponId || null;
-      registerBlock(match, block);
-      if (block.isDefeatCondition) {
-        match.base = block;
-        match.basePlaced = true;
-        match.baseChunk = buildBaseChunk(match, block);
-        applyBaseChunkPipeMask(match);
-      }
-      if (block.id > maxId) maxId = block.id;
-    }
-  }
-
-  if (snap.baseChunk && match.basePlaced) {
-    match.baseChunk = {
-      ...snap.baseChunk,
-      navPoints: snap.baseChunk.navPoints || buildBaseChunkNavPoints(snap.baseChunk),
-    };
-    applyBaseChunkPipeMask(match);
-  }
-
-  if (snap.pathPipeMask) {
-    match.pathPipeMask = {
-      active: !!snap.pathPipeMask.active,
-      maskedKeys: new Set(snap.pathPipeMask.maskedKeys || []),
-      navPoints: (match.baseChunk && match.baseChunk.navPoints) || [],
-    };
-  }
-
-  match.playerUnitId = -1;
-  if (Array.isArray(snap.units)) {
-    for (let i = 0; i < snap.units.length; i++) {
-      const su = snap.units[i];
-      const u = acquireUnit(match.pools);
-      if (!u) break;
-      u.active = true;
-      u.role = su.role;
-      u.team = su.team;
-      u.collisionLayer =
-        typeof su.collisionLayer === 'number'
-          ? su.collisionLayer
-          : deriveCollisionLayer({ team: su.team, role: su.role });
-      u.pierceCost = typeof su.pierceCost === 'number' ? su.pierceCost : 1;
-      u.x = su.x;
-      u.y = su.y;
-      u.hp = su.hp;
-      u.maxHp = su.maxHp;
-      u.speed = su.speed;
-      u.radius = su.radius;
-      u.armorType = su.armorType || 'DEFAULT';
-      u.weaponId = su.weaponId || null;
-      u.ammoInMag = su.ammoInMag || 0;
-      u.mags = su.mags || 0;
-      u.reloadTimer = su.reloadTimer || 0;
-      u.facingRad = su.facingRad || 0;
-      u.aimRad = su.aimRad || 0;
-      u.targetAimRad = su.aimRad || 0;
-      u.targetFacingRad = su.facingRad || 0;
-      u.archetypeId = su.archetypeId || null;
-      u.sizeScale = su.sizeScale || 1;
-      u.isBoss = !!su.isBoss;
-      u.groupId = su.groupId != null ? su.groupId : -1;
-      u.pivotIndex = su.pivotIndex || 0;
-      u.aiStage = su.aiStage || 'approach';
-      u.aggroChase = !!su.aggroChase;
-      u.combatTargetKind = su.combatTargetKind || null;
-      u.combatTargetId = su.combatTargetId != null ? su.combatTargetId : -1;
-      u.aggroBlockId = su.aggroBlockId != null ? su.aggroBlockId : -1;
-      u.localGeneral = !!su.localGeneral;
-      u.fireCooldown = 0;
-      u.vx = 0;
-      u.vy = 0;
-      if (u.role === 'player') {
-        match.playerUnitId = u.id;
-        match.playerDead = false;
-      }
-      if (u.role === 'enemy') match.enemiesAlive += 1;
-    }
-  }
-
-  if (match.playerUnitId < 0 && !match.playerDead) {
-    spawnPlayerNearWorldCenter(match);
-  }
-
-  if (Array.isArray(snap.drops)) {
-    for (let i = 0; i < snap.drops.length; i++) {
-      const sd = snap.drops[i];
-      spawnDrop(match, sd.x, sd.y, sd.itemId, sd.stack, sd.vx || 0, sd.vy || 0);
-    }
-  }
-
-  if (snap.general) {
-    match.general = createGeneralState();
-    match.general.targetPathIndex = snap.general.targetPathIndex;
-    match.general.laneCursorBySide = { ...(snap.general.laneCursorBySide || {}) };
-    if (Array.isArray(snap.general.groups)) {
-      match.general.groups = snap.general.groups.map((g) => ({
-        id: g.id,
-        lane: g.lane,
-        side: g.side,
-        pivots: g.pivots || [],
-        segmentIndex: g.segmentIndex || 0,
-        unitIds: g.unitIds || [],
-        spotted: !!g.spotted,
-        sectorStart: g.sectorStart != null ? g.sectorStart : 0,
-        sectorEnd: g.sectorEnd != null ? g.sectorEnd : Math.PI * 2,
-      }));
-    }
-  }
-
-  match.beams = [];
-  match.cameraSnapPending = true;
-  return true;
 }
 
 function clamp(v, lo, hi) {

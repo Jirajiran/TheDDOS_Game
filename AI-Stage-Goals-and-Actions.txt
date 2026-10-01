@@ -1,0 +1,236 @@
+AI Stage — Goals & Actions (blueprint)
+======================================
+คู่กับ AskKeep.txt §4 (General vs Unit stage) · ยังไม่ใช่โค้ดแยกเต็ม
+
+สถานะโค้ดปัจจุบัน
+- decideEnemyActions ใน js/sim.js ยังเป็นก้อน monolithic (approach / engage / retreat ในฟังก์ชันเดียว)
+- ไฟล์นี้ = เข็มทิศแยก stage ในอนาคต · ไม่บังคับรีแฟคเตอร์ทันที
+- ส่ง Action เข้า Unified Input เดียวกับ Player (MOVE / AIM / FIRE / RELOAD …) — ไม่โกงกฎ
+
+────────────────────────────────────────
+โมเดลสั้น (จำสูตรนี้)
+────────────────────────────────────────
+  สิ่งที่ “รู้” มีแค่ Input → ไม่ใช่ Stage รู้ Stage อื่น
+
+  [ Enum / Dictionary ชนิดเป้าหมาย ]
+    UnitKind / TargetKind + ข้อมูลย่อยบน entity (hp, weaponId, team, …)
+
+  [ Event รอบเฟรม ]  ← “ใครทำอะไรกับฉัน”
+    = ชื่อเหตุการณ์ + Δpriority(int) + ปัจจัยอื่น + อาจจอง target
+    ไม่เลือก stage เอง
+
+  [ Goal มี priority int ]
+    Mediator รวม baseWeight + eventBoost + factors → argmax Goal
+
+  [ Mediator ]
+    activeGoal = Goal ที่ int สูงสุด
+    activeStage = GoalToStage[activeGoal]
+    เรียก stage นั้นอย่างเดียว
+
+  [ Stage ]
+    อ่าน blackboard (path / combatTarget* / seek*) → ออก Action
+    ไม่รู้ชื่อ Event · ไม่เรียก stage อื่น · ไม่ถือ “ความสำคัญของ stage”
+
+  priority อยู่ที่ Goal (และช่อง target บน blackboard)
+  ไม่เก็บ “priority ของ stage” เป็นตัวหลัก
+
+สูตรคะแนน (data-driven · ปรับใน pack/config ได้)
+  priority[Goal] =
+      baseWeight[Goal]
+    + Σ eventBoost[Event → Goal]
+    + factors(hpRatio, range, aggroLock, …)
+  activeGoal  = argmax priority[Goal]
+  activeStage = GoalToStage[activeGoal]
+
+ตัวอย่าง: กระสุน Player โดน
+  Event HIT_BY_PLAYER_BULLET(sourceId=player)
+    → +priority ให้ Goal ELIMINATE_PLAYER (หรือ combat)
+    → จอง blackboard.combatTargetId = player · combatTargetKind = UNIT
+  Mediator เห็น ELIMINATE_* สูงสุด → Stage ENGAGE
+  ENGAGE อ่าน target ที่จองไว้แล้ว AIM/FIRE
+  · แค่ยก priority ไม่จอง target → อาจ ENGAGE แต่ไม่รู้ยิงใคร
+  · แค่จอง target ไม่ยก priority → อาจยังติด REACH_PATH_GOAL เดิน A→B
+
+────────────────────────────────────────
+หลักการ (MUST)
+────────────────────────────────────────
+1) Stages ไม่รู้จักกัน — stage A ห้ามเรียก stage B โดยตรง
+2) Mediator / Blackboard เป็นคนสลับตาม priority int ของ Goal (+ Event เป็น Δ)
+3) แต่ละ stage ทำงานเดียว (single job) แล้วคืน Action list
+4) Goal ≠ Stage — Goal = “อยากได้อะไร” (+ int); Stage = “วิธีทำตอนนี้”
+5) Event ≠ Stage — Event = คำอธิบาย input ที่เขียน Δpriority / target / flags
+6) ผลสำคัญ Deterministic จาก state · Random แค่ noise เบาๆ (strafe sign ฯลฯ)
+7) ไม่ “รู้บทบาทเรื่องราว” ใน stage — medic/heal = จุดบน blackboard ไม่ใช่ชื่อ archetype
+
+คู่ชั้นกับ AskKeep
+- General (แผนที่/กลุ่ม): Path/L1 pivots · เส้นทางกลุ่ม · sector — ดู AskKeep §4
+- Unit stage (ตัวนี้): รับเป้าจาก blackboard · เดิน/เล็ง/ยิง/ถอย — ไม่ค้นทั้งแมพคนละฉบับ
+- ไฟล์นี้โฟกัส Unit-level Goals / Events / Stages · General คงเป็นผู้ปู path ตาม AskKeep
+
+────────────────────────────────────────
+Enum / Dictionary (ชนิดเป้าหมาย — ไม่ใช่ logic กระจาย)
+────────────────────────────────────────
+ระบบรับรู้ชนิดผ่าน enum / dictionary ไม่ให้ AI “เดาบทบาทเอง”
+
+TargetKind / UnitKind (ตัวอย่าง)
+  PLAYER          ผู้เล่น
+  ENEMY_UNIT      ยูนิตฝ่ายตรงข้าม (จากมุมมองผู้ตัดสิน)
+  ALLY_UNIT       ฝ่ายเดียวกัน
+  BLOCK_BASE      ฐาน (defeat condition)
+  BLOCK_TURRET    ป้อม
+  BLOCK_OTHER     บล็อกอื่น
+  POINT_SEEK      จุดเปล่าบนแมพ (heal/cover/rally) — ไม่ใช่ “หน่วยหมอ”
+
+ข้อมูลย่อยบน entity / snapshot (อ่านตอนคิด factors ไม่ใช่ตอน stage “เข้าใจเรื่อง”)
+  team, hp, maxHp, weaponId, armorType, role/archetypeId (ถ้ามี)
+  radius, x, y, alive, …
+
+Perception / Damage pipeline แปลง entity → TargetKind + id
+แล้ว Event / Mediator ใช้ id + kind — Stage เห็นแค่ combatTargetKind/Id หรือ seekX/Y
+
+────────────────────────────────────────
+Goals (ความต้องการ — มี priority int · Mediator จัดอันดับ)
+────────────────────────────────────────
+เก็บน้ำหนักที่ Goal ไม่ใช่ที่ Stage
+
+1. DESTROY_BASE
+   ทำลายฐานผู้เล่นเมื่อรู้ตำแหน่ง / อยู่ในโซ่ปลายทาง
+
+2. ELIMINATE_PLAYER
+   กำจัด / กดดันผู้เล่นเมื่อ spotted / aggro / โดนยิงแล้วจองเป้า
+
+3. ELIMINATE_TARGET (ทั่วไป)
+   เป้า combat ที่ blackboard จองไว้ (unit/block อื่น) — ใช้เมื่อไม่เฉพาะ PLAYER
+
+4. REACH_PATH_GOAL
+   ไปให้ถึงจุดปลายโซ่ General / pivot ปัจจุบัน (default เดินทาง)
+
+5. SURVIVE_RETREAT
+   HP ต่ำ → ถอยออกจากแรงกด
+
+6. SEEK_HEAL_POINT
+   ไปจุดฮีลบน blackboard (พิกัด) — ไม่รู้ว่าใครเป็น medic
+   · Mediator/โลกใส่ seekX/Y · stage แค่ไปจุด
+
+7. HOLD_SECTOR / REGROUP_ALLIES (เฟสถัดไป)
+   รวมกลุ่ม · รอ lane
+
+baseWeight ตัวอย่าง (สูง→ต่ำ · ตัวเลขจริงอยู่ใน data/pack)
+  SURVIVE_RETREAT     900
+  SEEK_HEAL_POINT     700   (เมื่อมีจุด + HP ต่ำ)
+  ELIMINATE_PLAYER    500   (+boost แรงเมื่อ aggro/โดนยิง)
+  DESTROY_BASE        400   (เมื่อถึงโซนฐาน)
+  REACH_PATH_GOAL     100   (default)
+
+────────────────────────────────────────
+Events (Input อธิบาย — Δpriority + ปัจจัย + อาจจอง target)
+────────────────────────────────────────
+Event = ชื่อเหตุการณ์ ไม่ใช่ฟังก์ชันเลือก stage
+Implementation จริงต่อ event หนึ่งครั้ง:
+
+  1) Δpriority ใส่ Goal ที่เกี่ยวข้อง (int)
+  2) ปัจจัยอื่น (damage, range, hpRatio, …) สำหรับสูตร factors
+  3) ถ้ามีแหล่งที่มา → จอง blackboard target (kind + id + lockTimer)
+  4) ตั้ง flag บน blackboard ให้ Mediator รอบนี้/รอบถัดไปอ่าน
+
+รายการตัวอย่าง
+  HIT_BY_PLAYER_BULLET   source=PLAYER → +ELIMINATE_PLAYER · จอง combatTarget=player
+  HIT_BY_ENEMY_BULLET    (จากมุมมองฝ่ายอื่น) รูปแบบเดียวกันตาม team
+  LOW_HP                 hp/maxHp ≤ retreatHpRatio → +SURVIVE_RETREAT / SEEK_HEAL
+  LEFT_GENERAL_SECTOR    หลุด sector ตอน combat → ดันกลับ REACH_PATH หรือลด ENGAGE
+  SPOTTED_PLAYER         เห็นในระยะ/มุม → +ELIMINATE_PLAYER · อาจจอง target
+  BASE_IN_RANGE          +DESTROY_BASE · อาจจอง target=base
+  PATH_GOAL_REACHED      ลดน้ำหนัก REACH / เปิด engage ใน Path
+  HEAL_POINT_AVAILABLE   มีจุดฮีล → ใส่ seek* + เปิดน้ำหนัก SEEK_HEAL
+  ALLY_DOWN / GROUP_BROKEN  (เฟสถัดไป)
+
+กฎ: Event ห้ามเรียก stage · ห้ามยิง/วาร์ปเอง — แค่เขียน blackboard แล้วจบ
+
+────────────────────────────────────────
+Actions (Unified Input — ออกจาก stage ผ่าน pipeline)
+────────────────────────────────────────
+MOVE(dx, dy)     ความตั้งใจเคลื่อนที่ (sim รวมความเร็ว)
+AIM(aimRad)      เล็ง / หันหน้า
+FIRE             ยิงถ้าอาวุธพร้อม
+RELOAD           เติมแม็ก
+(อนาคต unit) PLACE / INTERACT / HARVEST — ถ้าบอทได้สิทธิ์เท่ากันผ่าน Action
+
+ห้าม: แก้ HP / วาร์ป / ข้าม cooldown นอก applyActions
+
+────────────────────────────────────────
+Stages (แต่ละอันหนึ่งงาน · ไม่ถือ priority int)
+────────────────────────────────────────
+Stage อ่าน blackboard อย่างเดียว · ไม่เลือก Goal เอง
+
+APPROACH_PATH
+  งาน: เดินตาม pivots / pathGoal บน blackboard
+  ไม่วิเคราะห์ยิง · ไม่ถอย · ไม่หา heal
+  Action: MOVE (+ AIM ตามทิศเดินเบาๆ ได้)
+
+ENGAGE
+  งาน: ใช้ combatTarget* ที่จองไว้ · รักษาระยะ · AIM + FIRE / RELOAD
+  ไม่สร้างเส้นทาง General ใหม่ · ไม่สลับเป้าเองนอกที่ blackboard อนุญาต
+
+RETREAT
+  งาน: ถอยจากแหล่งดาเมจ / ออกจากระยะคุกคาม
+  ไม่เปลี่ยนเป็น ENGAGE เอง — Mediator เป็นคนจบ retreat
+
+REGROUP
+  งาน: เดินเข้าจุดรวมกลุ่ม / ally centroid
+  ไม่ไล่ผู้เล่น
+
+SEEK_POINT
+  งาน: ไป seekX/Y (heal/cover/rally) — รู้แค่พิกัด
+  ถึงแล้วเขียน event เบาๆ “ถึงจุด” ให้ Mediator รอบถัดไป
+  ไม่รู้ว่าจุดนั้นเป็นยาหรือที่กำบัง
+
+(ชื่อในโค้ดเก่า: approach / engage / retreat — map เข้าชุดนี้เมื่อแยกไฟล์)
+
+────────────────────────────────────────
+Mediator / Blackboard
+────────────────────────────────────────
+Blackboard ต่อ unit (หรือ group + override ต่อ unit):
+  activeGoal, activeStage
+  priorityScratch[Goal] หรือคำนวณใหม่ทุกเฟรม
+  pathGoalX/Y, pivotIndex, groupId
+  combatTargetKind (TargetKind), combatTargetId, combatLockTimer
+  aggroChase, aggroBlockId
+  seekX, seekY, seekKind ('heal'|'cover'|'rally'|null)
+  sectorStart/End (จาก General)
+  eventQueue / eventFlags รอบเฟรม
+
+Mediator.tick(unit, match, dt):
+  1. รับ Events รอบนี้ → apply Δpriority + จอง target/flags ตามนิยาม Event
+  2. อ่าน entity state (hp, …) → factors
+  3. คะแนน priority[Goal] → activeGoal = argmax
+  4. activeStage = GoalToStage[activeGoal]
+  5. เรียกเฉพาะ stage นั้น → actions[]
+  6. ห้าม stage เรียก Mediator ย้อนหรือสลับ stage เอง
+     (เขียน event เบาๆ ได้ เช่น ARRIVED_SEEK_POINT)
+
+ตาราง Goal → Stage
+  REACH_PATH_GOAL     → APPROACH_PATH
+  ELIMINATE_PLAYER    → ENGAGE   (เป้าควรเป็น PLAYER บน blackboard)
+  ELIMINATE_TARGET    → ENGAGE
+  DESTROY_BASE        → ENGAGE   (เป้า = BLOCK_BASE)
+  SURVIVE_RETREAT     → RETREAT
+  SEEK_HEAL_POINT     → SEEK_POINT
+  REGROUP_ALLIES      → REGROUP
+
+────────────────────────────────────────
+อย่าสับสน
+────────────────────────────────────────
+- Priority int ของ Goal ≠ priority ของ Stage
+- จอง target (blackboard) ≠ การเลือก Stage — Mediator ทำทั้งสองคนละขั้น
+- Enum UnitKind/TargetKind = พจนานุกรมชนิด · ไม่ใช่ Goal
+- Event = คำอธิบาย input (+ Δpriority) · ไม่ใช่ wire ไปเรียก stage
+- “ใกล้ตายเข้าหาหมอ” ในภาพ = priority + seek point · unit ไม่รู้ว่าอีกฝ่ายเป็น medic
+- General pathing (AskKeep §4) ≠ Unit ENGAGE
+- freeCraft / Hub ≠ AI · WebShell ≠ AI
+
+────────────────────────────────────────
+ทางแยก implementation (อนาคต)
+────────────────────────────────────────
+- แยก js/ai/mediator.js + stages/*.js · decideEnemyActions เหลือแค่ห่อ Mediator
+- baseWeight / eventBoost / GoalToStage อยู่ใน config หรือ pack (data-driven)
+- ทดสอบ: event เดียวกัน + seed เดียวกัน → Action ชุดเดียวกัน (Deterministic)

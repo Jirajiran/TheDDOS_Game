@@ -1,0 +1,193 @@
+WebShell — Bootstrap & Load Path
+================================
+คู่กับ AskKeep.txt (เกมเพลย์ / กฎ / Set A)
+คู่กับ แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint)
+
+ไฟล์นี้ = ชั้นที่ AskKeep ยังไม่ครอบลึก:
+  จากเปิดเว็บ → โมดูลพร้อม → เมนู → โหลดแมทช์ → GamePlay ใช้ได้จริง
+
+ชื่อโดเมน (เรียกถูกตอนไปศึกษาต่อ)
+--------------------------------
+โปรเจกต์นี้เป็นเกมเว็บ static — ไม่มี backend REST “API” ปลายน้ำ
+
+สิ่งที่พาไปถึง GamePlay เรียกรวมว่า:
+  Application Bootstrap / Game Shell & Load Path
+  (บาง engine เรียก Runtime Host / Game Host)
+
+คำค้นศึกษาที่ตรง:
+  - application bootstrap
+  - game shell loading / readiness gate
+  - ES module graph · dynamic import()
+  - HTTP cache · Cache-Control · cache busting
+  - asset loading pipeline (manifest / prefetch)
+  - canvas DPR · resize before first paint
+  - sim vs view separation (DOM HUD ≠ world canvas)
+
+อย่าสับสนกับ:
+  - REST / GraphQL API ของเซิร์ฟเวอร์เกม (ยังไม่ใช่เฟสนี้)
+  - WebRTC / room join API (เฟสถัดไป — ดู AskKeep § Menu + Hashing)
+
+
+1. Shell vs Engine
+------------------
+Shell (ก่อนเล่น):
+  index.html · css/main.css · js/main.js · js/boot.js
+  · หน้า loading · เมนู · progress bar · watchdog
+  · ตั้ง window.__theDdos / __theDdosPhase
+
+Engine (หลัง gate):
+  js/app.js + sim / render / input / world / occupancy / inventory / weapons …
+  · AppState · match loop · HUD ที่ผูก state
+
+กฎสั้น: Shell พร้อม ≠ โลกวาดได้ · Engine โหลดครึ่งชุด (แคชเก่าปนใหม่) = อาการ “ใช้ได้บางส่วน”
+
+
+2. Two gates (บังคับรอ — Hard wait)
+----------------------------------
+BOOT → MENU
+  - HTML เริ่มที่หน้า loading · เมนูกดไม่ได้จนกว่า bootReady
+  - งาน: dynamic import app · ตรวจ DOM · prefetch asset (timeout ต่อไฟล์ · พลาดไม่บล็อก) · sanitize autosave
+  - "Loading modules…" = กำลัง import กราฟโมดูล · ไม่ใช่แถบ MATCH LOADING
+
+LOADING → PLAYING
+  - กดเริ่มแมทช์ → AppState.LOADING · loadingLocked
+  - await runLoading (js/loading.js + loadPipeline.js)
+  - ขนาน: pools + world → แล้ว occupancy / placeSlots
+  - timeout ต่อช่วง · fail ขึ้น label ชัด ไม่ค้างเงียบ
+  - ครบ + match ใช้ได้ → PLAYING + startLoop
+
+ยังไม่ gate:
+  - ทุก SVG/SFX พร้อมก่อนยิง (media โหลดทีหลังได้)
+
+Gate 2b (ทำแล้ว): First world paint
+  - หลัง pools/world ครบ ยังไม่ซ่อน LOADING
+  - เปิด PLAYING ใต้ overlay เพื่อ layout จริง · resize · draw ≥2 เฟรม
+  - ตรวจ canvas buffer · paths · player · sample พิกเซลไม่ใช่สี clear
+  - ถ้าพัง → ติด loading / กลับเมนู พร้อมข้อความ ไม่หลุดจอดำเงียบ
+  - โค้ด: warmFirstWorldPaint() ใน js/app.js
+
+
+3. Browser “API” ที่เกี่ยวกับโหลด (ไม่ใช่ REST)
+---------------------------------------------
+สิ่งที่เบราว์เซอร์ให้มา — คือ “ปลายน้ำ” จริงของ static game:
+
+HTTP
+  - GET index.html / js/*.js / Asset/** · status 200 vs 304
+  - Content-Type ของ .js ต้องเป็น JavaScript (ผิด MIME → module ไม่รัน)
+  - ต้องเล่นผ่าน http:// (localhost / โฮสต์) — file:// พังง่ายกับ ES modules
+
+Cache
+  - 304 / disk cache ทำให้ได้ไฟล์เก่าปนใหม่ → Unexpected token / พฤติกรรมครึ่งระบบ
+  - play-local.bat → serve_nocache.py (Cache-Control: no-store) ลดปัญหานี้ตอนพัฒนา
+  - cache-bust: js/main.js?v=… และ import app.js?v=… (bump เมื่อเปลี่ยนกราฟหลัก)
+
+Fetch / prefetch
+  - boot prefetch asset · timeout ต่อไฟล์
+  - พลาดไม่ควรบล็อกเข้าเมนู (optional vs required)
+
+ES modules
+  - <script type="module"> · import / export
+  - dynamic import() ใน main → app
+  - syntax error ในไฟล์หนึ่ง = ทั้งกราฟล้ม หรือ Boot failed ใน UI
+  - ตัวอย่างที่เจอแล้ว: brace ไม่ปิดใน sim.js → Unexpected token 'export'
+
+
+4. Module graph failures (อาการที่เจอในโปรเจกต์นี้)
+-------------------------------------------------
+อาการ → มักชี้ไปที่ชั้นนี้ (ไม่ใช่กฎเกมใน AskKeep):
+
+  Boot failed / Modules not ready
+    → import ไม่จบ · __theDdos ไม่ถูกเซ็ต · watchdog
+
+  Unexpected token 'export'
+    → ไฟล์ในกราฟมี syntax พัง หรือแคชไฟล์เก่าปนใหม่
+    → แก้โค้ด + hard refresh (Ctrl+Shift+R) + ตรวจ ?v= + no-store
+
+  ConnectionAborted ตอนรีเฟรชกลางโอน
+    → ตัดโหลดกลางทาง — ลองโหลดใหม่ ไม่ใช่บั๊กกฎเกม
+
+  เมนูช้า / โหลดค้าง 0%
+    → มอง BOOT / network / cache ก่อนไปแตะ sim
+
+  จอดำใน PLAYING แต่ Craft / โยนของใน UI ยังใช้ได้
+    → Shell + DOM inventory รอด · world pipeline (canvas / camera / DPR / input→โลก) พัง
+    → อย่าสรุปแค่ “render หาย” — ปืน/วางของพึ่งพิกัดโลกด้วย
+
+
+5. Readiness vs first paint (canvas)
+------------------------------------
+แม้ LOADING (ทรัพยากร) ผ่านแล้ว เฟรมแรกยังพังได้ถ้า:
+
+  - canvas กว้าง×สูง 0 หรือยังไม่ layout ตอน resize
+  - setTransform ไม่คูณ devicePixelRatio (DPR) ให้ตรง buffer
+  - ล้าง/วาดโลกด้วย transform ผิด → จอดำทั้งที่ match.state มี Path / player
+
+แยกให้ชัดตอนดีบัก:
+  DOM HUD (wave / HP / hotbar HTML / craft panel)  ≠  canvas world (Path, unit, ghost, กระสุน)
+
+Gate 2b — First paint (บังคับก่อนซ่อน loading):
+  warmFirstWorldPaint ใน app.js · เล่น layout ใต้ loading · draw 2 เฟรม · sample พิกเซล
+  ล้ม → ไม่เข้า PLAYING เงียบ (ข้อความ fail บนแถบ loading)
+
+Play handoff (หลัง paint → ลูปเล่นได้):
+  startLoop ต้อง tick updatePlaying ทุกเฟรม (try/catch กันตายเงียบ)
+  อาการค้าง: เห็นโลก / hotbar เต็ม แต่ Wave ยังเป็น "Wave 0" + ขยับไม่ได้
+    → มัก throw ใน tickMatch (เคย: playerReloadOpts ไม่มีนิยามใน updateWeaponReloads)
+  ตรวจ: wave-hud ต้องเป็น "Place Base…" ภายในเฟรมแรก
+
+Gameplay session (state ครบหลังวางฐาน):
+  เคยพัง: syncBaseStorageFromGenerators ไม่มี → วาง Base แล้ว throw ทุกเฟรม
+    → HUD ค้าง Place Base / ชิปค้าง ทั้งที่มีบล็อกบนแมพ
+  แก้แล้ว: ensureBaseStorage + syncBaseStorageFromGenerators
+  SELECT ก่อน PLACE/FIRE · Hub click → pendingHotbarSelect · updateHud ใน finally
+  cache-bust: ?v=20261001j
+
+
+6. Match load pipeline (โค้ดอ้างอิง)
+-----------------------------------
+ไฟล์หลัก:
+  js/boot.js          — BOOT work
+  js/loading.js       — MATCH LOADING stages
+  js/loadPipeline.js  — parallel + timed helpers
+  js/app.js           — AppState · startMatch · bootReady · startLoop
+  js/main.js          — entry · dynamic import · CACHE_BUST
+  serve_nocache.py    — local HTTP no-store
+  index.html          — boot UI · watchdog phase
+
+ลำดับ stage (ย่อ):
+  report → parallel(pools, world) → occupancy+placeSlots → finalize match → PLAYING
+
+
+7. สิ่งที่ยังไม่ใช่เฟสนี้ (อย่าปนกับไฟล์นี้)
+------------------------------------------
+  - WebRTC / hash join / room code
+  - เซิร์ฟเวอร์คลัง pack / lobby API
+  - Service Worker offline cache production (ยังไม่บังคับ)
+  - Bundler / hashed filenames ทั้งโฟลเดอร์ (ตอนนี้ cache-bust มือที่ entry)
+
+
+8. เช็คลิสต์เมื่อ “เข้าเกมแล้วระบบพัง”
+------------------------------------
+ก่อนแก้กฎใน AskKeep / sim บาลานซ์:
+
+  [ ] Console มี Boot failed / Unexpected token / failed to fetch ไหม
+  [ ] Network: ไฟล์ js ได้ 200 จริงหรือ 304 เก่า · ?v= ตรงที่แก้ไหม
+  [ ] เล่นผ่าน play-local.bat (HTTP no-store) ไม่ใช่ file://
+  [ ] เข้า MENU ได้ = BOOT ผ่าน · เข้า PLAYING ได้ = MATCH LOAD ผ่าน
+  [ ] Craft/โยนได้แต่ยิง/วาง/จอดำ = ดีบัก world/input/render/DPR ไม่ใช่ inventory UI
+  [ ] SeeLog.txt เก็บบรรทัดล่าสุดจาก Console + server (อย่าค้าง log เก่าเป็นสัจจะ)
+
+
+9. ความสัมพันธ์กับคติโปรเจกต์
+-----------------------------
+  Unified Input — คน/AI ส่ง action ช่องเดียว หลัง engine พร้อม (gate ก่อนนั้นกลืน input)
+  Deterministic State — โหลดแมทช์สร้าง world จากสูตร/seed ไม่พึ่งสุ่มตอน bootstrap
+  Memento Snapshot — FEATURE_SNAPSHOT · restore หลัง LOADING ไม่ใช่ก่อน pools/world พร้อม
+  Deploy static — Shell+Engine+Asset ต้องเสิร์ฟ HTTP ได้บน itch/Netlify/Pages
+
+
+อัปเดตเมื่อ
+----------
+- เปลี่ยนลำดับ gate / เพิ่ม asset manifest บังคับ
+- เปลี่ยนวิธี cache-bust หรือมี bundler
+- เริ่มเฟส net/join (แยกไฟล์หรือตอนใน AskKeep — อย่ายัดรายละเอียด lobby ลงที่นี่)

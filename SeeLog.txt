@@ -1,0 +1,11 @@
+Boot failed
+Unexpected token 'export' — Ctrl+Shift+R / check Console
+
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/main.js?v=20261001e HTTP/1.1" 200 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/app.js?v=20261001e HTTP/1.1" 200 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/config.js HTTP/1.1" 304 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/boot.js HTTP/1.1" 304 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/loading.js HTTP/1.1" 304 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/memento.js HTTP/1.1" 304 -
+127.0.0.1 - - [01/Oct/2026 14:11:19] "GET /js/loadPipeline.js HTTP/1.1" 304 -
