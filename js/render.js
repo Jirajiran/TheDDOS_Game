@@ -1,4 +1,5 @@
 import { L1_SIZE, L3_SIZE, TEAM } from './config.js';
+import { drawUnitEquipCosmetics } from './cosmetics.js';
 import { getMeleeVolume } from './sim.js';
 
 /**
@@ -75,10 +76,12 @@ export function renderWorld(ctx, world, camera, match, dpr = 1) {
     drawBlocks(ctx, match.blocks, zoom);
     drawDrops(ctx, match.pools && match.pools.drops, zoom);
     drawPlaceGhost(ctx, match.placeGhost, zoom);
-    drawUnits(ctx, match.pools && match.pools.units, zoom);
+    drawUnits(ctx, match.pools && match.pools.units, zoom, match);
     if (match.showMeleeVolume) {
       drawMeleeVolumes(ctx, match, zoom);
     }
+    drawMeleeVfx(ctx, match.meleeVfx, zoom);
+    drawExplosionVfx(ctx, match.explosionVfx, zoom);
     drawProjectiles(ctx, match.pools && match.pools.projectiles, zoom);
     drawBeams(ctx, match.beams);
   }
@@ -241,7 +244,7 @@ function drawPlaceGhost(ctx, ghost, zoom) {
   }
 }
 
-function drawUnits(ctx, units, zoom) {
+function drawUnits(ctx, units, zoom, match) {
   if (!units) return;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
@@ -264,10 +267,13 @@ function drawUnits(ctx, units, zoom) {
     ctx.lineTo(u.x + Math.cos(u.aimRad) * len, u.y + Math.sin(u.aimRad) * len);
     ctx.stroke();
 
-    if (u.weaponId && !isPlayer) {
-      ctx.fillStyle = '#333';
-      ctx.fillRect(u.x + 4, u.y - 4, 10, 4);
+    // Held weapon / tool / armor / shield — front-rim anchors; mirror sim only.
+    const cosOpts = { isPlayer };
+    if (isPlayer && match) {
+      cosOpts.inventory = match.inventory || match.hotbar;
+      cosOpts.activeHotbar = match.activeHotbar;
     }
+    drawUnitEquipCosmetics(ctx, u, zoom, cosOpts);
 
     if (u.maxHp > 0 && u.hp < u.maxHp) {
       const ratio = Math.max(0, u.hp / u.maxHp);
@@ -280,6 +286,54 @@ function drawUnits(ctx, units, zoom) {
   }
 }
 
+function drawMeleeVfx(ctx, list, zoom) {
+  if (!list || !list.length) return;
+  for (let i = 0; i < list.length; i++) {
+    const fx = list[i];
+    const t = Math.max(0, fx.life / (fx.maxLife || 0.14));
+    const size = (fx.size || L3_SIZE * 0.7) * (0.55 + 0.45 * t);
+    ctx.save();
+    ctx.translate(fx.x, fx.y);
+    ctx.rotate(fx.ang || 0);
+    ctx.globalAlpha = 0.25 + 0.55 * t;
+    ctx.fillStyle = fx.color || '#e8dcc0';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 0.55, size * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = fx.color || '#fff';
+    ctx.lineWidth = 2 / zoom;
+    ctx.globalAlpha = 0.4 + 0.4 * t;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.4, -0.9, 0.9);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/** Red AoE ring at explosion impact — fades with life (mirrors meleeVfx spirit). */
+function drawExplosionVfx(ctx, list, zoom) {
+  if (!list || !list.length) return;
+  for (let i = 0; i < list.length; i++) {
+    const fx = list[i];
+    const maxLife = fx.maxLife || 0.35;
+    const t = Math.max(0, fx.life / maxLife);
+    const rad = fx.radius || L3_SIZE;
+    ctx.save();
+    ctx.globalAlpha = 0.15 + 0.45 * t;
+    ctx.fillStyle = fx.color || '#e04040';
+    ctx.beginPath();
+    ctx.arc(fx.x, fx.y, rad, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.35 + 0.55 * t;
+    ctx.strokeStyle = fx.color || '#ff6060';
+    ctx.lineWidth = Math.max(1.5, 3 / zoom);
+    ctx.beginPath();
+    ctx.arc(fx.x, fx.y, rad, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function stageColor(u) {
   if (u.aiStage === 'retreat') return '#c48a5c';
   if (u.aiStage === 'engage') return '#c45c5c';
@@ -288,16 +342,34 @@ function stageColor(u) {
 
 function drawProjectiles(ctx, projectiles, zoom) {
   if (!projectiles) return;
+  const z = zoom > 0 ? zoom : 1;
+  const strokeW = Math.max(2.5, 3.5 / z);
   for (let i = 0; i < projectiles.length; i++) {
     const p = projectiles[i];
     if (!p.active) continue;
-    ctx.fillStyle = p.team === TEAM.PLAYER ? '#ffe08a' : '#ff8866';
-    ctx.fillRect(
-      p.x - p.radius,
-      p.y - p.radius,
-      p.radius * 2,
-      p.radius * 2
-    );
+    // World-space length — do NOT scale() then divide lineWidth (that made ~0.2px strokes).
+    const len = Math.max(10, (p.radius || 4) * 3.2);
+    const aim =
+      p.vx || p.vy ? Math.atan2(p.vy || 0, p.vx || 0) : 0;
+    const cos = Math.cos(aim);
+    const sin = Math.sin(aim);
+    const half = len * 0.5;
+    const color = p.team === TEAM.PLAYER ? '#ffe08a' : '#ff8866';
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = strokeW;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p.x - cos * half, p.y - sin * half);
+    ctx.lineTo(p.x + cos * half, p.y + sin * half);
+    ctx.stroke();
+    // Tip dot — easier to spot at high bullet speeds.
+    ctx.beginPath();
+    ctx.arc(p.x + cos * half, p.y + sin * half, Math.max(2, strokeW * 0.85), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 

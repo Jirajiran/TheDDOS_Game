@@ -1,4 +1,5 @@
 import {
+  makeCastSkillAction,
   makeSelectHotbarAction,
   makeTakeBaseAction,
   makeTakeGenAction,
@@ -70,6 +71,8 @@ export function createApp(dom) {
     autosaveAcc: 0,
     /** Hub click → SELECT_HOTBAR applied next tick (Unified Input). */
     pendingHotbarSelect: -1,
+    /** Fist (Q / button) → CAST_SKILL FIST next tick. */
+    pendingFistCast: false,
     /** Hub Take → TAKE_GEN / TAKE_BASE applied next tick (Unified Input). */
     pendingTake: null,
   };
@@ -102,6 +105,7 @@ export function createApp(dom) {
     btnFreeCraft,
     btnManualSave,
     btnMeleeVol,
+    btnFist,
     btnCheat,
     cheatPanel,
     cheatClose,
@@ -826,6 +830,10 @@ export function createApp(dom) {
           ...actions.filter((a) => a.type !== 'SELECT_HOTBAR'),
         ];
       }
+      if (state.pendingFistCast) {
+        state.pendingFistCast = false;
+        actions = actions.concat([makeCastSkillAction(playerId, 'FIST')]);
+      }
       if (state.pendingTake) {
         const pend = state.pendingTake;
         state.pendingTake = null;
@@ -1271,6 +1279,13 @@ export function createApp(dom) {
       if (!state.match) return;
       state.match.showMeleeVolume = !state.match.showMeleeVolume;
       syncDebugHudButtons(state.match);
+    });
+  }
+
+  if (btnFist) {
+    btnFist.addEventListener('click', () => {
+      if (!state.match || state.match.playerDead) return;
+      state.pendingFistCast = true;
     });
   }
 

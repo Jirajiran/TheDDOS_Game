@@ -1,5 +1,6 @@
 import {
   makeAimAction,
+  makeCastSkillAction,
   makeFireAction,
   makeHarvestAction,
   makeInteractAction,
@@ -11,6 +12,7 @@ import {
 import { GAME_PACK } from './config.js';
 import {
   getActiveSlot,
+  isArmorSlot,
   isPlaceableSlot,
   isToolSlot,
   isWeaponSlot,
@@ -18,7 +20,7 @@ import {
 
 /**
  * Local human input → Action objects each frame.
- * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · E interact/toggle panel · F craft toggle · 1-0 hotbar
+ * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · Q Fist · E interact · F craft · 1-0 hotbar
  * When uiBlocked (panel open), suppress gameplay actions but still allow F/E/Esc toggle.
  * Hotbar drag sets actionBusy — suppress fire/place/harvest while held.
  */
@@ -31,6 +33,7 @@ export function createInput(canvas) {
   let interactPressed = false;
   let craftTogglePressed = false;
   let reloadPressed = false;
+  let fistPressed = false;
   let meleeVolumeTogglePressed = false;
   let wheelDelta = 0;
   const digitPress = [];
@@ -44,6 +47,7 @@ export function createInput(canvas) {
       fireHeld = false;
       firePressed = false;
       reloadPressed = false;
+      fistPressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
       // Keep interactPressed / craftTogglePressed so E/F can close panels.
@@ -90,6 +94,10 @@ export function createInput(canvas) {
       fireHeld = true;
     }
     if (e.code === 'KeyR') reloadPressed = true;
+    if (e.code === 'KeyQ') {
+      fistPressed = true;
+      e.preventDefault();
+    }
     const digit = digitFromCode(e.code);
     if (digit !== -1) digitPress.push(digit);
   }
@@ -170,6 +178,7 @@ export function createInput(canvas) {
       interactPressed = false;
       firePressed = false;
       reloadPressed = false;
+      fistPressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
       const zoom = camera.zoom > 0 ? camera.zoom : 1;
@@ -246,9 +255,18 @@ export function createInput(canvas) {
       if (firePressed || fireHeld) {
         actions.push(makeFireAction(playerUnitId));
       }
+    } else if (isArmorSlot(slot)) {
+      if (firePressed) {
+        actions.push(makeSelectHotbarAction(playerUnitId, effectiveHotbar));
+      }
     }
   }
   firePressed = false;
+
+  if (fistPressed) {
+    actions.push(makeCastSkillAction(playerUnitId, 'FIST'));
+    fistPressed = false;
+  }
 
   if (reloadPressed) {
     actions.push(makeReloadAction(playerUnitId));

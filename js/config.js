@@ -150,7 +150,48 @@ export const ItemKind = Object.freeze({
   WEAPON: 'WEAPON',
   RESOURCE: 'RESOURCE',
   TOOL: 'TOOL',
+  /** Single active armor slot on unit — equip new deactivates old. */
+  ARMOR: 'ARMOR',
+  /**
+   * Single active shield slot (separate from armor).
+   * Equip enables/refreshes unit.shield from item stats; ORs with archetype
+   * hasPassiveShield (item wins while equipped; unequip restores passive).
+   */
+  SHIELD: 'SHIELD',
 });
+
+/**
+ * Archetype preferredRange → standoff as fraction of weapon maxDistancePath.
+ * Never invent a separate short L3 band; always scale from weapon range.
+ */
+export const PREFERRED_RANGE_MULT = Object.freeze({
+  MELEE: 0.12,
+  EXTREME_CLOSE: 0.22,
+  CLOSE: 0.4,
+  MEDIUM_CLOSE: 0.55,
+  MEDIUM: 0.75,
+  LONG_RANGE: 0.92,
+  LONG_SUPPORT: 0.95,
+  MAX_WEAPON_RANGE: 1.0,
+});
+
+/** Weapon fire / max reach in world px (same as sim projectile maxRange). */
+export function getWeaponMaxRangePx(weapon) {
+  if (!weapon) return 0;
+  return (weapon.maxDistancePath || 1) * PATH_SIZE;
+}
+
+/** Standoff hold distance from weapon range × preferredRange mult. */
+export function getPreferredStandoffPx(weapon, preferredRangeKey) {
+  const max = getWeaponMaxRangePx(weapon);
+  if (max <= 0) return 0;
+  const key = preferredRangeKey || 'MEDIUM';
+  const mult =
+    typeof PREFERRED_RANGE_MULT[key] === 'number'
+      ? PREFERRED_RANGE_MULT[key]
+      : PREFERRED_RANGE_MULT.MEDIUM;
+  return max * mult;
+}
 
 export const ReloadType = Object.freeze({
   MAGAZINE: 'MAGAZINE',
@@ -226,13 +267,15 @@ export const WEAPON_REGISTRY = Object.freeze({
     label: 'M1991',
     color: '#6b9fbf',
     baseDamage: 24,
-    cooldownSec: 1.2,
+    /** Fire rate ×2 vs prior 1.2. Mag 9 + 3 spare mags → full load 9/27 rounds. */
+    cooldownSec: 0.6,
     spreadDeg: 25,
-    magCapacity: 30,
+    magCapacity: 9,
     maxMags: 4,
     ammoTypeId: 'AMMO_5_56',
     maxDistancePath: 1.0,
-    bulletSpeedPxSec: PATH_SIZE,
+    /** Projectile speed ×2 (real bullets only; beams stay 9999). */
+    bulletSpeedPxSec: PATH_SIZE * 2,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
   }),
@@ -241,13 +284,14 @@ export const WEAPON_REGISTRY = Object.freeze({
     label: 'SMG',
     color: '#7a9e6b',
     baseDamage: 24,
-    cooldownSec: 0.6,
+    /** Fire rate ×2 vs prior 0.6. */
+    cooldownSec: 0.3,
     spreadDeg: 45,
     magCapacity: 30,
     maxMags: 4,
     ammoTypeId: 'AMMO_5_56',
     maxDistancePath: 1.0,
-    bulletSpeedPxSec: PATH_SIZE,
+    bulletSpeedPxSec: PATH_SIZE * 2,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     burstCount: 3,
@@ -257,13 +301,14 @@ export const WEAPON_REGISTRY = Object.freeze({
     label: 'AK47',
     color: '#6b8a4a',
     baseDamage: 37,
-    cooldownSec: 0.9,
+    /** Fire rate ×2 vs prior 0.9. */
+    cooldownSec: 0.45,
     spreadDeg: 30,
     magCapacity: 30,
     maxMags: 4,
     ammoTypeId: 'AMMO_7_62',
     maxDistancePath: 1.5,
-    bulletSpeedPxSec: PATH_SIZE * 0.78,
+    bulletSpeedPxSec: PATH_SIZE * 1.56,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
   }),
@@ -278,7 +323,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 30,
     ammoTypeId: 'AMMO_SHELL',
     maxDistancePath: 0.5,
-    bulletSpeedPxSec: PATH_SIZE * 0.73,
+    bulletSpeedPxSec: PATH_SIZE * 1.46,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.INDIVIDUAL_SHELL,
     pelletCount: 5,
@@ -290,12 +335,12 @@ export const WEAPON_REGISTRY = Object.freeze({
     color: '#d4a060',
     baseDamage: 24,
     cooldownSec: 1.2,
-    spreadDeg: 45,
+    spreadDeg: 10,
     magCapacity: 3,
     maxMags: 30,
     ammoTypeId: 'AMMO_SHELL',
     maxDistancePath: 0.8,
-    bulletSpeedPxSec: PATH_SIZE * 0.78,
+    bulletSpeedPxSec: PATH_SIZE * 1.56,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.INDIVIDUAL_SHELL,
     pelletCount: 5,
@@ -312,7 +357,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_7_62',
     maxDistancePath: 2.0,
-    bulletSpeedPxSec: PATH_SIZE * 1.76,
+    bulletSpeedPxSec: PATH_SIZE * 3.52,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     pierceUnits: 2,
@@ -345,7 +390,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_MEDIC',
     maxDistancePath: 0.35,
-    bulletSpeedPxSec: PATH_SIZE * 1.56,
+    bulletSpeedPxSec: PATH_SIZE * 3.12,
     damageType: DamageType.DEFAULT,
     reloadType: ReloadType.MAGAZINE,
     targetFaction: 'FRIENDLY',
@@ -361,6 +406,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 0,
     ammoTypeId: null,
     maxDistancePath: 0.35,
+    /** Beam/hitscan — not projectile speed; leave unchanged. */
     bulletSpeedPxSec: 9999,
     damageType: DamageType.LAZER,
     reloadType: ReloadType.MAGAZINE,
@@ -380,6 +426,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 0,
     ammoTypeId: null,
     maxDistancePath: 2.5,
+    /** Beam/hitscan — not projectile speed; leave unchanged. */
     bulletSpeedPxSec: 9999,
     damageType: DamageType.LAZER,
     reloadType: ReloadType.MAGAZINE,
@@ -399,7 +446,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 1,
     ammoTypeId: null,
     maxDistancePath: 2.5,
-    bulletSpeedPxSec: PATH_SIZE * 1.95,
+    bulletSpeedPxSec: PATH_SIZE * 3.9,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
   }),
@@ -414,7 +461,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 5,
     ammoTypeId: 'AMMO_5_56',
     maxDistancePath: 1.1,
-    bulletSpeedPxSec: PATH_SIZE * 0.49,
+    bulletSpeedPxSec: PATH_SIZE * 0.98,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     burstCount: 4,
@@ -430,7 +477,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 5,
     ammoTypeId: 'AMMO_7_62',
     maxDistancePath: 1.8,
-    bulletSpeedPxSec: PATH_SIZE * 0.88,
+    bulletSpeedPxSec: PATH_SIZE * 1.76,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
   }),
@@ -445,7 +492,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 42,
     ammoTypeId: 'AMMO_SHELL',
     maxDistancePath: 0.65,
-    bulletSpeedPxSec: PATH_SIZE * 0.83,
+    bulletSpeedPxSec: PATH_SIZE * 1.66,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.INDIVIDUAL_SHELL,
     pelletCount: 5,
@@ -457,12 +504,12 @@ export const WEAPON_REGISTRY = Object.freeze({
     color: '#e0b070',
     baseDamage: 35,
     cooldownSec: 0.9,
-    spreadDeg: 30,
+    spreadDeg: 10,
     magCapacity: 7,
     maxMags: 36,
     ammoTypeId: 'AMMO_SHELL',
     maxDistancePath: 1.0,
-    bulletSpeedPxSec: PATH_SIZE * 0.88,
+    bulletSpeedPxSec: PATH_SIZE * 1.76,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.INDIVIDUAL_SHELL,
     pelletCount: 5,
@@ -479,7 +526,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_7_62',
     maxDistancePath: 2.5,
-    bulletSpeedPxSec: PATH_SIZE * 2.15,
+    bulletSpeedPxSec: PATH_SIZE * 4.3,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     pierceUnits: 3,
@@ -499,6 +546,26 @@ export const WEAPON_REGISTRY = Object.freeze({
         DEFAULT_BLOCK: 1,
       }),
     }),
+  }),
+  /** Explosive projectile — AoE via explosionRadius (Phase 1 area groundwork). */
+  GRENADE_LAUNCHER: weaponBase({
+    id: 'GRENADE_LAUNCHER',
+    label: 'Grenade Launcher',
+    color: '#bf6b4a',
+    baseDamage: 55,
+    cooldownSec: 1.8,
+    spreadDeg: 8,
+    magCapacity: 4,
+    maxMags: 3,
+    ammoTypeId: 'AMMO_SHELL',
+    maxDistancePath: 1.2,
+    bulletSpeedPxSec: PATH_SIZE * 1.1,
+    damageType: DamageType.EXPLOSION,
+    reloadType: ReloadType.MAGAZINE,
+    projectileRadius: Math.max(8, Math.round(L3_SIZE * 0.18)),
+    explosionRadius: Math.round(L3_SIZE * 2.2),
+    explosionDamage: 70,
+    pierceUnits: 0,
   }),
 });
 
@@ -654,8 +721,10 @@ export const BLOCK_REGISTRY = Object.freeze({
     footprint: Object.freeze({ w: 1, h: 1 }),
     maxHp: 150,
     armorType: ArmorType.DEFAULT,
-    allowProjectilePass: true,
-    projectileSolid: false,
+    /** Blocks gun projectiles — fist/melee still effective (WIRE_MELEE_MULT). */
+    allowProjectilePass: false,
+    projectileSolid: true,
+    blocksProjectiles: true,
     isWire: true,
     pierceCost: 1,
   }),
@@ -765,9 +834,56 @@ export const BLOCK_REGISTRY = Object.freeze({
     maxHp: 300,
     armorType: ArmorType.DEFAULT,
     isHeal: true,
+    healFriendly: true,
     healRadius: Math.round(L3_SIZE * 2.5),
     healPerSec: 12,
+    /** Area Trigger CONTINUOUS_TICK (heal pad). */
+    areaMode: 'CONTINUOUS_TICK',
+    triggerRadius: Math.round(L3_SIZE * 2.5),
+    effectRadius: Math.round(L3_SIZE * 2.5),
+    tickIntervalSec: 0.5,
+    tickValue: 6,
     maxStack: 4,
+  }),
+  /** Proximity mine — ONE_SHOT AoE then self-destruct. */
+  TRAP_MINE: blockBase({
+    id: 'TRAP_MINE',
+    typeId: 'TRAP',
+    label: 'Mine',
+    color: '#8a4a3a',
+    footprint: Object.freeze({ w: 1, h: 1 }),
+    maxHp: 80,
+    armorType: ArmorType.EXPLOSION,
+    walkSolid: false,
+    allowProjectilePass: true,
+    areaMode: 'ONE_SHOT',
+    triggerRadius: Math.round(L3_SIZE * 1.1),
+    effectRadius: Math.round(L3_SIZE * 2.5),
+    explosionRadius: Math.round(L3_SIZE * 2.5),
+    tickValue: 90,
+    damageType: DamageType.EXPLOSION,
+    tripHostile: true,
+    maxStack: 8,
+  }),
+  /** Durability trap — ticks damage + self HP loss until broken. */
+  TRAP_SPIKE: blockBase({
+    id: 'TRAP_SPIKE',
+    typeId: 'TRAP',
+    label: 'Spike Trap',
+    color: '#6a5a4a',
+    footprint: Object.freeze({ w: 1, h: 1 }),
+    maxHp: 200,
+    armorType: ArmorType.DEFAULT,
+    walkSolid: false,
+    allowProjectilePass: true,
+    areaMode: 'DURABILITY_TRAP',
+    triggerRadius: Math.round(L3_SIZE * 0.85),
+    effectRadius: Math.round(L3_SIZE * 0.85),
+    tickIntervalSec: 0.5,
+    tickValue: 18,
+    selfDamageRatio: 0.25,
+    damageType: DamageType.DEFAULT,
+    maxStack: 8,
   }),
   GEN_WOOD: blockBase({
     id: 'GEN_WOOD',
@@ -883,6 +999,8 @@ export const ITEM_REGISTRY = Object.freeze({
   TURRET_AK47: BLOCK_REGISTRY.TURRET_AK47,
   TURRET_LAZER: BLOCK_REGISTRY.TURRET_LAZER,
   HEAL_BLOCK: BLOCK_REGISTRY.HEAL_BLOCK,
+  TRAP_MINE: BLOCK_REGISTRY.TRAP_MINE,
+  TRAP_SPIKE: BLOCK_REGISTRY.TRAP_SPIKE,
   GEN_WOOD: BLOCK_REGISTRY.GEN_WOOD,
   GEN_STONE: BLOCK_REGISTRY.GEN_STONE,
   GEN_IRON: BLOCK_REGISTRY.GEN_IRON,
@@ -1024,6 +1142,11 @@ export const ITEM_REGISTRY = Object.freeze({
     toolTier: 'TIER0',
     maxStack: 1,
     harvestDamage: 25,
+    structureDamage: 35,
+    meleeRole: 'HARVEST_AXE',
+    /** Open collider 0.1s then cooldown 0.2s. */
+    activeDurationSec: 0.1,
+    cooldownSec: 0.2,
   }),
   TOOL_PICK: Object.freeze({
     id: 'TOOL_PICK',
@@ -1033,6 +1156,57 @@ export const ITEM_REGISTRY = Object.freeze({
     toolTier: 'TIER1',
     maxStack: 1,
     harvestDamage: 30,
+    structureDamage: 30,
+    meleeRole: 'HARVEST_AXE',
+    activeDurationSec: 0.1,
+    cooldownSec: 0.2,
+  }),
+  /** Repair wrench — friendly BLOCK/TURRET only; never heals living units. */
+  TOOL_WRENCH: Object.freeze({
+    id: 'TOOL_WRENCH',
+    label: 'Wrench',
+    color: '#7a8a9a',
+    kind: ItemKind.TOOL,
+    toolTier: 'TIER0',
+    maxStack: 1,
+    harvestDamage: 0,
+    repairAmount: 45,
+    meleeRole: 'REPAIR_WRENCH',
+    activeDurationSec: 0.1,
+    cooldownSec: 0.2,
+  }),
+  /** Light vest — single active armor slot (equip replaces previous). */
+  ARMOR_VEST: Object.freeze({
+    id: 'ARMOR_VEST',
+    label: 'Armor Vest',
+    color: '#5a6a7a',
+    kind: ItemKind.ARMOR,
+    maxStack: 1,
+    damageReduction: 0.2,
+    markerColor: '#7a9ab0',
+  }),
+  /** Handheld / equippable shield — single activeShieldId channel (not armor). */
+  SHIELD_BASIC: Object.freeze({
+    id: 'SHIELD_BASIC',
+    label: 'Basic Shield',
+    color: '#4a7a9a',
+    kind: ItemKind.SHIELD,
+    maxStack: 1,
+    shieldMaxHp: 100,
+    shieldRadius: Math.round(L3_SIZE * 0.55),
+    shieldOffset: Math.round(L3_SIZE * 0.65),
+    shieldPierceCost: 2,
+    shieldAbsorbRatio: 1,
+    shieldRegenPerSec: 4,
+    markerColor: '#6a9ccc',
+  }),
+  GRENADE_LAUNCHER: Object.freeze({
+    id: 'GRENADE_LAUNCHER',
+    label: 'Grenade Launcher',
+    color: '#bf6b4a',
+    kind: ItemKind.WEAPON,
+    weaponId: 'GRENADE_LAUNCHER',
+    maxStack: 1,
   }),
 });
 
@@ -1102,7 +1276,28 @@ export const CRAFT_RECIPES = Object.freeze([
     resultCount: 1,
     cost: Object.freeze({ WOOD: 8, STONE: 4 }),
   }),
+  Object.freeze({
+    id: 'craft_trap_mine',
+    itemId: 'TRAP_MINE',
+    category: 'Block',
+    resultCount: 2,
+    cost: Object.freeze({ IRON: 2, STONE: 2 }),
+  }),
+  Object.freeze({
+    id: 'craft_trap_spike',
+    itemId: 'TRAP_SPIKE',
+    category: 'Block',
+    resultCount: 2,
+    cost: Object.freeze({ WOOD: 4, IRON: 1 }),
+  }),
   // Gun
+  Object.freeze({
+    id: 'craft_m1991',
+    itemId: 'M1991',
+    category: 'Gun',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 4, WOOD: 2 }),
+  }),
   Object.freeze({
     id: 'craft_smg',
     itemId: 'SMG',
@@ -1153,11 +1348,25 @@ export const CRAFT_RECIPES = Object.freeze([
     cost: Object.freeze({ IRON: 20, STONE: 15 }),
   }),
   Object.freeze({
+    id: 'craft_lazer_heal',
+    itemId: 'LAZER_HEAL',
+    category: 'Gun',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 12, WOOD: 8, STONE: 6 }),
+  }),
+  Object.freeze({
     id: 'craft_50cal',
     itemId: 'WEAPON_50CAL',
     category: 'Gun',
     resultCount: 1,
     cost: Object.freeze({ IRON: 25, STONE: 20 }),
+  }),
+  Object.freeze({
+    id: 'craft_grenade_launcher',
+    itemId: 'GRENADE_LAUNCHER',
+    category: 'Gun',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 18, STONE: 10 }),
   }),
   // Turret
   Object.freeze({
@@ -1166,6 +1375,13 @@ export const CRAFT_RECIPES = Object.freeze([
     category: 'Turret',
     resultCount: 1,
     cost: Object.freeze({ STONE: 10, IRON: 1 }),
+  }),
+  Object.freeze({
+    id: 'craft_turret_m1911',
+    itemId: 'TURRET_M1911',
+    category: 'Turret',
+    resultCount: 1,
+    cost: Object.freeze({ STONE: 10, IRON: 2 }),
   }),
   Object.freeze({
     id: 'craft_turret_50cal',
@@ -1246,7 +1462,21 @@ export const CRAFT_RECIPES = Object.freeze([
     resultCount: 1,
     cost: Object.freeze({ IRON: 15, STONE: 10 }),
   }),
-  // Other
+  // Other — tools, base, factory, wire, armor (raw WOOD/STONE/IRON omitted: harvest/gen only)
+  Object.freeze({
+    id: 'craft_base_core',
+    itemId: 'BASE_CORE_3X3',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 30, STONE: 20, IRON: 10 }),
+  }),
+  Object.freeze({
+    id: 'craft_factory',
+    itemId: 'FACTORY_WEAPON',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 15, STONE: 10, WOOD: 8 }),
+  }),
   Object.freeze({
     id: 'craft_wire',
     itemId: 'WIRE_BLOCK',
@@ -1254,114 +1484,483 @@ export const CRAFT_RECIPES = Object.freeze([
     resultCount: 8,
     cost: Object.freeze({ WOOD: 2, IRON: 1 }),
   }),
+  Object.freeze({
+    id: 'craft_axe',
+    itemId: 'TOOL_AXE',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 4, IRON: 1 }),
+  }),
+  Object.freeze({
+    id: 'craft_pick',
+    itemId: 'TOOL_PICK',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 2, IRON: 3, STONE: 2 }),
+  }),
+  Object.freeze({
+    id: 'craft_wrench',
+    itemId: 'TOOL_WRENCH',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 4, WOOD: 2 }),
+  }),
+  Object.freeze({
+    id: 'craft_armor_vest',
+    itemId: 'ARMOR_VEST',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 8, STONE: 4 }),
+  }),
+  Object.freeze({
+    id: 'craft_shield_basic',
+    itemId: 'SHIELD_BASIC',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ IRON: 6, WOOD: 4, STONE: 2 }),
+  }),
 ]);
 
 /**
- * Unit archetypes as DATA — Boss = stats + sizeScale 1.5, not a special JSON type.
+ * Active skill defs — CAST_SKILL resolves by skillId (data-driven).
+ * Stages emit Actions only; they never branch on skill name strings.
+ */
+export const SKILL_REGISTRY = Object.freeze({
+  /** Default melee on every unit — open volume 0.1s, then wait 0.3s. */
+  FIST: Object.freeze({
+    id: 'FIST',
+    label: 'Fist',
+    castTimeSec: 0,
+    activeDurationSec: 0.1,
+    cooldownSec: 0.3,
+    effect: Object.freeze({
+      type: 'MELEE_SWING',
+      damage: 18,
+      hitUnits: true,
+      hitBlocks: true,
+      /** Slash VFX size ≤ ~1 L3 cell. */
+      vfxSize: Math.round(L3_SIZE * 0.85),
+      color: '#e8dcc0',
+    }),
+  }),
+  TAUNT_ROAR: Object.freeze({
+    id: 'TAUNT_ROAR',
+    label: 'Taunt Roar',
+    castTimeSec: 0.35,
+    activeDurationSec: 0.5,
+    cooldownSec: 12,
+    effect: Object.freeze({
+      type: 'TAUNT_PULSE',
+      radius: Math.round(L3_SIZE * 4.5),
+      durationSec: 5,
+    }),
+  }),
+  SPEED_BOOST: Object.freeze({
+    id: 'SPEED_BOOST',
+    label: 'Speed Boost',
+    castTimeSec: 0,
+    activeDurationSec: 3,
+    cooldownSec: 10,
+    effect: Object.freeze({
+      type: 'SPEED_BOOST',
+      speedMult: 1.35,
+    }),
+  }),
+  SHIELD_OVERCHARGE: Object.freeze({
+    id: 'SHIELD_OVERCHARGE',
+    label: 'Shield Overcharge',
+    castTimeSec: 0.2,
+    activeDurationSec: 0.1,
+    cooldownSec: 14,
+    effect: Object.freeze({
+      type: 'SHIELD_OVERCHARGE',
+      shieldBonus: 60,
+    }),
+  }),
+});
+
+/**
+ * Unit archetypes as DATA (NextPlan Phase 3).
+ * Mediator filters Goals to allowedGoals; Stages stay archetype-agnostic.
+ * Boss = stats + sizeScale + optional isDynamicDriver phases — not a special class.
  */
 export const UNIT_ARCHETYPE_REGISTRY = Object.freeze({
-  CLASS_BRIGADIER: Object.freeze({
-    id: 'CLASS_BRIGADIER',
+  GRUNT_BASIC: Object.freeze({
+    id: 'GRUNT_BASIC',
+    description: '1. Basic grunt — full decision cycle',
     hpRange: Object.freeze([100, 450]),
     defaultWeapon: 'SMG',
     armorType: ArmorType.DEFAULT,
     sizeScale: 1,
     meleeMultiplier: 1,
-    aiBehavior: Object.freeze({
-      preferredRange: 'MEDIUM_CLOSE',
-      retreatHpRatio: 0.3,
-    }),
-  }),
-  CLASS_ASSAULT: Object.freeze({
-    id: 'CLASS_ASSAULT',
-    hpRange: Object.freeze([450, 650]),
-    defaultWeapon: 'AK47',
-    armorType: ArmorType.BULLET,
-    sizeScale: 1,
-    meleeMultiplier: 1,
-    aiBehavior: Object.freeze({
-      preferredRange: 'MEDIUM',
+    allowedGoals: Object.freeze([
+      'DESTROY_BASE',
+      'ELIMINATE_PLAYER',
+      'SURVIVE_RETREAT',
+      'SEEK_HEAL_POINT',
+      'REGROUP_ALLIES',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER', 'BLOCK_TURRET', 'BLOCK_BASE']),
+    behaviorFlags: Object.freeze({
       retreatHpRatio: 0.25,
+      canRegroup: true,
+      preferredRange: 'MEDIUM',
     }),
   }),
-  CLASS_QUARTER: Object.freeze({
-    id: 'CLASS_QUARTER',
+  SUICIDE_BERSERKER: Object.freeze({
+    id: 'SUICIDE_BERSERKER',
+    description: '2. Berserker — no retreat/heal; fight to death',
     hpRange: Object.freeze([450, 650]),
     defaultWeapon: 'SHOTGUN_SHELL',
     armorType: ArmorType.BULLET,
     sizeScale: 1,
     meleeMultiplier: 1.2,
-    aiBehavior: Object.freeze({
-      preferredRange: 'EXTREME_CLOSE',
-      retreatHpRatio: 0.1,
+    allowedGoals: Object.freeze([
+      'DESTROY_BASE',
+      'ELIMINATE_PLAYER',
+      'ELIMINATE_TARGET',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER', 'BLOCK_TURRET', 'BLOCK_BASE']),
+    behaviorFlags: Object.freeze({
+      retreatHpRatio: 0.0,
+      canRegroup: false,
       relentless: true,
+      preferredRange: 'EXTREME_CLOSE',
     }),
   }),
-  CLASS_SNIPER_CAMP: Object.freeze({
-    id: 'CLASS_SNIPER_CAMP',
+  STEALTH_SNIPER: Object.freeze({
+    id: 'STEALTH_SNIPER',
+    description: '3.1 Stealth sniper — player only, long range',
     hpRange: Object.freeze([250, 400]),
     defaultWeapon: 'KAR98',
     armorType: ArmorType.DEFAULT,
     sizeScale: 1,
     meleeMultiplier: 1,
-    aiBehavior: Object.freeze({
-      preferredRange: 'LONG_RANGE',
+    allowedGoals: Object.freeze(['ELIMINATE_PLAYER', 'SURVIVE_RETREAT']),
+    targetPriorityList: Object.freeze(['PLAYER']),
+    behaviorFlags: Object.freeze({
       retreatHpRatio: 0.5,
       fleeOnApproach: true,
+      preferredRange: 'LONG_RANGE',
     }),
   }),
-  CLASS_SUPPORT_MEDIC: Object.freeze({
-    id: 'CLASS_SUPPORT_MEDIC',
+  STEALTH_SHADOW_MELEE: Object.freeze({
+    id: 'STEALTH_SHADOW_MELEE',
+    description: '3.2 Shadow melee — player focus, path blockers only',
+    hpRange: Object.freeze([300, 480]),
+    defaultWeapon: 'SHOTGUN_SHELL',
+    armorType: ArmorType.DEFAULT,
+    sizeScale: 1,
+    meleeMultiplier: 1.4,
+    allowedGoals: Object.freeze(['ELIMINATE_PLAYER', 'ELIMINATE_TARGET']),
+    targetPriorityList: Object.freeze(['PLAYER', 'BLOCK_OTHER']),
+    behaviorFlags: Object.freeze({
+      canRegroup: false,
+      ignoreNonPathObstacles: true,
+      preferredRange: 'MELEE',
+      retreatHpRatio: 0.0,
+      relentless: true,
+    }),
+  }),
+  STEALTH_ASSAULT_HEAVY: Object.freeze({
+    id: 'STEALTH_ASSAULT_HEAVY',
+    description: '3.3 Heavy assault — turrets first (registry; light wave use)',
+    hpRange: Object.freeze([500, 700]),
+    defaultWeapon: 'AK47',
+    armorType: ArmorType.BULLET,
+    sizeScale: 1.1,
+    meleeMultiplier: 1.3,
+    allowedGoals: Object.freeze(['ELIMINATE_TARGET', 'DESTROY_BASE']),
+    targetPriorityList: Object.freeze([
+      'BLOCK_TURRET',
+      'BLOCK_OTHER',
+      'PLAYER',
+      'ENEMY_UNIT',
+    ]),
+    behaviorFlags: Object.freeze({
+      canRegroup: false,
+      preferredRange: 'CLOSE',
+      retreatHpRatio: 0.1,
+    }),
+  }),
+  STEALTH_DEMOLITION_SIEGE: Object.freeze({
+    id: 'STEALTH_DEMOLITION_SIEGE',
+    description: '3.4 Siege demolition — long-range structures (registry stub wave)',
+    hpRange: Object.freeze([400, 600]),
+    defaultWeapon: 'LAZER',
+    armorType: ArmorType.EXPLOSION,
+    sizeScale: 1.1,
+    meleeMultiplier: 1,
+    allowedGoals: Object.freeze(['ELIMINATE_TARGET', 'DESTROY_BASE']),
+    targetPriorityList: Object.freeze([
+      'BLOCK_TURRET',
+      'BLOCK_OTHER',
+      'PLAYER',
+      'ENEMY_UNIT',
+    ]),
+    behaviorFlags: Object.freeze({
+      canRegroup: false,
+      preferredRange: 'LONG_RANGE',
+      retreatHpRatio: 0.15,
+    }),
+  }),
+  SUPPORT_MEDIC: Object.freeze({
+    id: 'SUPPORT_MEDIC',
+    description: '4.1 Support medic — allies / heal / regroup',
     hpRange: Object.freeze([300, 450]),
     defaultWeapon: 'MEDIC_GUN',
     armorType: ArmorType.DEFAULT,
     sizeScale: 1,
     meleeMultiplier: 1,
-    aiBehavior: Object.freeze({
+    allowedGoals: Object.freeze([
+      'SEEK_HEAL_POINT',
+      'REGROUP_ALLIES',
+      'SURVIVE_RETREAT',
+    ]),
+    targetPriorityList: Object.freeze(['ALLY_UNIT']),
+    behaviorFlags: Object.freeze({
+      targetSelectionRule: 'LOWEST_HP_FRIENDLY_IN_GROUP',
+      stayInBackline: true,
+      allowCrossGroupHelp: false,
       preferredRange: 'LONG_SUPPORT',
-      targetPriority: 'LOWEST_HP_FRIENDLY',
       retreatHpRatio: 0.4,
+      canRegroup: true,
     }),
   }),
-  CLASS_HIGH_RANK: Object.freeze({
-    id: 'CLASS_HIGH_RANK',
-    hpRange: Object.freeze([650, 850]),
-    defaultWeapon: 'LAZER',
-    armorType: ArmorType.EXPLOSION,
+  COWARD_UNIT: Object.freeze({
+    id: 'COWARD_UNIT',
+    description: '5. Coward — morale drops on hit; flee then regroup',
+    hpRange: Object.freeze([200, 380]),
+    defaultWeapon: 'SMG',
+    armorType: ArmorType.DEFAULT,
     sizeScale: 1,
-    meleeMultiplier: 1.5,
-    aiBehavior: Object.freeze({
-      preferredRange: 'MEDIUM_CLOSE',
-      retreatHpRatio: 0.05,
-      relentless: true,
+    meleeMultiplier: 1,
+    allowedGoals: Object.freeze([
+      'ELIMINATE_TARGET',
+      'SURVIVE_RETREAT',
+      'REGROUP_ALLIES',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER', 'ENEMY_UNIT']),
+    behaviorFlags: Object.freeze({
+      useMoraleSystem: true,
+      initialMorale: 100,
+      moraleDropOnHit: 40,
+      moraleRecoverRate: 15,
+      fleeMoraleThreshold: 30,
+      preferredRange: 'MAX_WEAPON_RANGE',
+      retreatHpRatio: 0.35,
+      canRegroup: true,
     }),
   }),
-  CLASS_BOSS: Object.freeze({
-    id: 'CLASS_BOSS',
-    hpRange: Object.freeze([850, 1200]),
+  COMMANDER_LEADER: Object.freeze({
+    id: 'COMMANDER_LEADER',
+    description: '6. Local General — morale aura + regroup centroid',
+    hpRange: Object.freeze([550, 750]),
     defaultWeapon: 'AK47',
+    armorType: ArmorType.BULLET,
+    sizeScale: 1.15,
+    meleeMultiplier: 1.2,
+    isLocalGeneral: true,
+    moraleAuraRadius: 300,
+    allowedGoals: Object.freeze([
+      'HOLD_SECTOR',
+      'REGROUP_ALLIES',
+      'ELIMINATE_PLAYER',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER', 'BLOCK_TURRET']),
+    behaviorFlags: Object.freeze({
+      isGroupLeader: true,
+      preferredRange: 'MEDIUM',
+      retreatHpRatio: 0.2,
+      canRegroup: true,
+    }),
+  }),
+  COMBAT_ENGINEER: Object.freeze({
+    id: 'COMBAT_ENGINEER',
+    description: '7. Engineer — PLACE / REPAIR when blackboard primed',
+    hpRange: Object.freeze([350, 520]),
+    defaultWeapon: 'SMG',
+    armorType: ArmorType.DEFAULT,
+    sizeScale: 1,
+    meleeMultiplier: 1,
+    hasPlacementSkill: true,
+    placeableBlockTypes: Object.freeze(['TURRET_PISTOL', 'WALL_WOOD']),
+    allowedGoals: Object.freeze([
+      'REPAIR_STRUCTURE',
+      'PLACE_TRAP',
+      'ELIMINATE_TARGET',
+    ]),
+    targetPriorityList: Object.freeze(['BLOCK_TURRET', 'BLOCK_OTHER']),
+    behaviorFlags: Object.freeze({
+      interactTargetType: 'FRIENDLY_BUILDINGS_FIRST',
+      preferredRange: 'CLOSE',
+      retreatHpRatio: 0.3,
+      canRegroup: true,
+    }),
+  }),
+  SHIELD_VANGUARD: Object.freeze({
+    id: 'SHIELD_VANGUARD',
+    description: '8. Shield tank — passive shield + TAUNT_ROAR',
+    hpRange: Object.freeze([650, 900]),
+    defaultWeapon: 'SHOTGUN_SHELL',
+    armorType: ArmorType.BULLET,
+    sizeScale: 1.2,
+    meleeMultiplier: 1.5,
+    hasPassiveShield: true,
+    shieldColliderRadius: 60,
+    shieldMaxHp: 180,
+    activeSkills: Object.freeze(['TAUNT_ROAR']),
+    allowedGoals: Object.freeze([
+      'PROTECT_ALLY',
+      'ELIMINATE_PLAYER',
+      'HOLD_SECTOR',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER', 'ENEMY_UNIT']),
+    behaviorFlags: Object.freeze({
+      armorType: 'BULLET',
+      bodyguardMode: true,
+      retreatHpRatio: 0.05,
+      preferredRange: 'EXTREME_CLOSE',
+      canRegroup: true,
+    }),
+  }),
+  FLANK_SKIRMISHER: Object.freeze({
+    id: 'FLANK_SKIRMISHER',
+    description: '9. Skirmisher — burst then FLANK_POSITION relocate',
+    hpRange: Object.freeze([280, 420]),
+    defaultWeapon: 'SMG',
+    armorType: ArmorType.DEFAULT,
+    sizeScale: 1,
+    meleeMultiplier: 1,
+    useLocalFlankPathing: true,
+    burstDurationSec: 2.0,
+    allowedGoals: Object.freeze([
+      'ELIMINATE_PLAYER',
+      'FLANK_POSITION',
+      'SURVIVE_RETREAT',
+    ]),
+    targetPriorityList: Object.freeze(['PLAYER']),
+    behaviorFlags: Object.freeze({
+      relocateAfterBurst: true,
+      preferredRange: 'MEDIUM_CLOSE',
+      retreatHpRatio: 0.3,
+      canRegroup: true,
+      lowHpSpeedBuff: 1.25,
+      lowHpSpeedThreshold: 0.5,
+    }),
+  }),
+  DYNAMIC_PHASE_BOSS: Object.freeze({
+    id: 'DYNAMIC_PHASE_BOSS',
+    description: '10. Phase boss — weapon/goals swap by hpRatio',
+    hpRange: Object.freeze([850, 1200]),
+    defaultWeapon: 'LAZER',
     armorType: ArmorType.LAZER,
     sizeScale: 1.5,
     isBoss: true,
+    isDynamicDriver: true,
     meleeMultiplier: 5.0,
-    aiBehavior: Object.freeze({
-      preferredRange: 'ALL_OUT_ATTACK',
+    activeSkills: Object.freeze(['SPEED_BOOST']),
+    allowedGoals: Object.freeze(['ELIMINATE_PLAYER', 'HOLD_SECTOR']),
+    targetPriorityList: Object.freeze(['PLAYER', 'BLOCK_TURRET']),
+    behaviorFlags: Object.freeze({
+      preferredRange: 'LONG_RANGE',
       retreatHpRatio: 0.0,
       relentless: true,
+      canRegroup: false,
     }),
+    phases: Object.freeze([
+      Object.freeze({
+        hpRatio: 0.5,
+        weaponId: 'LAZER',
+        activeSkills: Object.freeze(['SPEED_BOOST']),
+        allowedGoals: Object.freeze(['ELIMINATE_PLAYER', 'HOLD_SECTOR']),
+        behaviorFlags: Object.freeze({
+          preferredRange: 'LONG_RANGE',
+          retreatHpRatio: 0.0,
+          relentless: true,
+          canRegroup: false,
+        }),
+      }),
+      Object.freeze({
+        hpRatio: 0.0,
+        /** Stand-in for MELEE_SAW — shotgun close; no dedicated saw weapon yet. */
+        weaponId: 'SHOTGUN_SHELL',
+        activeSkills: Object.freeze(['SPEED_BOOST']),
+        allowedGoals: Object.freeze(['SUICIDE_ATTACK', 'ELIMINATE_TARGET']),
+        behaviorFlags: Object.freeze({
+          preferredRange: 'EXTREME_CLOSE',
+          relentless: true,
+          retreatHpRatio: 0.0,
+          canRegroup: false,
+        }),
+      }),
+    ]),
   }),
 });
 
-/** Wave → archetype id (data-driven spawn). */
+/**
+ * Legacy CLASS_* ids → NextPlan ids (saves / old WAVE table).
+ */
+export const ARCHETYPE_ALIASES = Object.freeze({
+  CLASS_BRIGADIER: 'GRUNT_BASIC',
+  CLASS_ASSAULT: 'GRUNT_BASIC',
+  CLASS_QUARTER: 'SUICIDE_BERSERKER',
+  CLASS_SNIPER_CAMP: 'STEALTH_SNIPER',
+  CLASS_SUPPORT_MEDIC: 'SUPPORT_MEDIC',
+  CLASS_HIGH_RANK: 'COMMANDER_LEADER',
+  CLASS_BOSS: 'DYNAMIC_PHASE_BOSS',
+});
+
+/**
+ * Wave → weighted composition (data-driven mixed spawn).
+ * Index 0 unused; waves 1..N.
+ */
+export const WAVE_ARCHETYPE_COMPOSITION = Object.freeze([
+  null,
+  Object.freeze([Object.freeze({ id: 'GRUNT_BASIC', weight: 1 })]),
+  Object.freeze([
+    Object.freeze({ id: 'GRUNT_BASIC', weight: 3 }),
+    Object.freeze({ id: 'SUICIDE_BERSERKER', weight: 1 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ id: 'GRUNT_BASIC', weight: 2 }),
+    Object.freeze({ id: 'STEALTH_SNIPER', weight: 1 }),
+    Object.freeze({ id: 'STEALTH_SHADOW_MELEE', weight: 1 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ id: 'GRUNT_BASIC', weight: 2 }),
+    Object.freeze({ id: 'SUPPORT_MEDIC', weight: 1 }),
+    Object.freeze({ id: 'COWARD_UNIT', weight: 2 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ id: 'COMMANDER_LEADER', weight: 1 }),
+    Object.freeze({ id: 'GRUNT_BASIC', weight: 2 }),
+    Object.freeze({ id: 'SHIELD_VANGUARD', weight: 1 }),
+    Object.freeze({ id: 'COWARD_UNIT', weight: 1 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ id: 'COMBAT_ENGINEER', weight: 1 }),
+    Object.freeze({ id: 'FLANK_SKIRMISHER', weight: 2 }),
+    Object.freeze({ id: 'SHIELD_VANGUARD', weight: 1 }),
+    Object.freeze({ id: 'STEALTH_ASSAULT_HEAVY', weight: 1 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ id: 'DYNAMIC_PHASE_BOSS', weight: 1 }),
+    Object.freeze({ id: 'GRUNT_BASIC', weight: 2 }),
+    Object.freeze({ id: 'FLANK_SKIRMISHER', weight: 1 }),
+  ]),
+]);
+
+/** @deprecated prefer WAVE_ARCHETYPE_COMPOSITION — primary id per wave. */
 export const WAVE_ARCHETYPE_TABLE = Object.freeze([
   null,
-  'CLASS_BRIGADIER',
-  'CLASS_BRIGADIER',
-  'CLASS_QUARTER',
-  'CLASS_ASSAULT',
-  'CLASS_SNIPER_CAMP',
-  'CLASS_HIGH_RANK',
-  'CLASS_BOSS',
+  'GRUNT_BASIC',
+  'GRUNT_BASIC',
+  'SUICIDE_BERSERKER',
+  'SUPPORT_MEDIC',
+  'COMMANDER_LEADER',
+  'FLANK_SKIRMISHER',
+  'DYNAMIC_PHASE_BOSS',
 ]);
 
 export const MEMENTO_STORAGE_KEY = 'theddos_local_host_snapshot_v1';
@@ -1488,6 +2087,13 @@ export const GAME_PACK = Object.freeze({
     Object.freeze({ itemId: 'TOOL_AXE', count: 1 }),
     Object.freeze({ itemId: 'WIRE_BLOCK', count: 12 }),
   ]),
+  /** Player starts with this armor active (single slot; craft adds more to bag). */
+  startingArmorId: 'ARMOR_VEST',
+  /**
+   * Optional starting shield item (activeShieldId channel, separate from armor).
+   * null = craft SHIELD_BASIC / select hotbar to equip. Passive archetype shields unaffected.
+   */
+  startingShieldId: null,
   /** @deprecated prefer WAVE_ARCHETYPE_TABLE + UNIT_ARCHETYPE_REGISTRY */
   enemyWeaponByWave: Object.freeze([
     null,
@@ -1499,6 +2105,88 @@ export const GAME_PACK = Object.freeze({
     'LAZER',
     'AK47',
   ]),
+});
+
+/** AI Goal baseWeight catalog (Mediator). Preconditions gate via factors. */
+export const AI_GOAL_BASE_WEIGHTS = Object.freeze({
+  SURVIVE_RETREAT: 900,
+  SEEK_HEAL_POINT: 700,
+  PLACE_TRAP: 620,
+  REPAIR_STRUCTURE: 580,
+  ELIMINATE_PLAYER: 500,
+  ELIMINATE_TARGET: 480,
+  SUICIDE_ATTACK: 520,
+  DESTROY_BASE: 400,
+  PROTECT_ALLY: 280,
+  FLANK_POSITION: 260,
+  HOLD_SECTOR: 150,
+  REGROUP_ALLIES: 120,
+  REACH_PATH_GOAL: 100,
+});
+
+/** Goal → Stage map (Mediator only; Stages do not know Goals). */
+export const AI_GOAL_TO_STAGE = Object.freeze({
+  REACH_PATH_GOAL: 'APPROACH_PATH',
+  ELIMINATE_PLAYER: 'ENGAGE',
+  ELIMINATE_TARGET: 'ENGAGE',
+  DESTROY_BASE: 'ENGAGE',
+  SUICIDE_ATTACK: 'ENGAGE',
+  SURVIVE_RETREAT: 'RETREAT',
+  SEEK_HEAL_POINT: 'SEEK_POINT',
+  HOLD_SECTOR: 'REGROUP',
+  REGROUP_ALLIES: 'REGROUP',
+  PROTECT_ALLY: 'REGROUP',
+  FLANK_POSITION: 'RETREAT',
+  PLACE_TRAP: 'PLACE',
+  REPAIR_STRUCTURE: 'PLACE',
+});
+
+/** Event → Goal Δpriority (data-driven). */
+export const AI_EVENT_BOOSTS = Object.freeze({
+  HIT_BY_PLAYER: Object.freeze({ ELIMINATE_PLAYER: 400 }),
+  HIT_BY_TURRET: Object.freeze({ ELIMINATE_TARGET: 380 }),
+  SPOTTED_PLAYER: Object.freeze({ ELIMINATE_PLAYER: 220 }),
+  TAUNT_TRIGGERED: Object.freeze({ ELIMINATE_TARGET: 450 }),
+  LOW_HP: Object.freeze({
+    SURVIVE_RETREAT: 500,
+    SEEK_HEAL_POINT: 200,
+  }),
+  LEFT_GENERAL_SECTOR: Object.freeze({
+    REACH_PATH_GOAL: 350,
+    ELIMINATE_PLAYER: -180,
+    ELIMINATE_TARGET: -180,
+    PLACE_TRAP: -120,
+    REPAIR_STRUCTURE: -80,
+  }),
+  BASE_IN_RANGE: Object.freeze({ DESTROY_BASE: 280 }),
+  PATH_GOAL_REACHED: Object.freeze({ REACH_PATH_GOAL: -40 }),
+  HEAL_POINT_AVAILABLE: Object.freeze({ SEEK_HEAL_POINT: 260 }),
+  PATH_BLOCKED: Object.freeze({ ELIMINATE_TARGET: 420 }),
+  PLACE_SLOT_RESERVED: Object.freeze({ PLACE_TRAP: 480 }),
+  REPAIR_TARGET_RESERVED: Object.freeze({ REPAIR_STRUCTURE: 460 }),
+  /** Skirmisher burst finished → relocate (FLANK_POSITION). */
+  BURST_COMPLETE: Object.freeze({
+    FLANK_POSITION: 520,
+    ELIMINATE_PLAYER: -120,
+  }),
+  /** Coward morale below threshold. */
+  MORALE_BROKEN: Object.freeze({
+    SURVIVE_RETREAT: 600,
+    REGROUP_ALLIES: -200,
+  }),
+});
+
+/**
+ * Local path layer (Phase 2b) — raycast fan + rear Pi + steering budget.
+ * General clear-corridor pivots stay in js/general.js (Path/L1, no nature BFS).
+ */
+export const AI_LOCAL_PATH = Object.freeze({
+  fanSpanRad: Math.PI / 4,
+  fanStages: Object.freeze([1, 3, 5]),
+  fanRange: Math.round(L3_SIZE * 5),
+  rearPiRadius: Math.round(L3_SIZE * 1.5),
+  steeringBudgetMax: 10,
+  dodgeLateral: L1_SIZE * 0.35,
 });
 
 /** @deprecated use GAME_PACK.waveCountdownSec */
@@ -1522,16 +2210,74 @@ export function getItemDef(itemId) {
   return ITEM_REGISTRY[itemId] || null;
 }
 
+export function getSkillDef(skillId) {
+  return SKILL_REGISTRY[skillId] || null;
+}
+
 export function getUnitArchetype(archetypeId) {
-  return UNIT_ARCHETYPE_REGISTRY[archetypeId] || null;
+  if (!archetypeId) return null;
+  const resolved = ARCHETYPE_ALIASES[archetypeId] || archetypeId;
+  return (
+    UNIT_ARCHETYPE_REGISTRY[resolved] ||
+    UNIT_ARCHETYPE_REGISTRY[archetypeId] ||
+    null
+  );
 }
 
 export function getArchetypeForWave(waveIndex) {
   const id =
     WAVE_ARCHETYPE_TABLE[
       Math.min(waveIndex, WAVE_ARCHETYPE_TABLE.length - 1)
-    ] || 'CLASS_BRIGADIER';
+    ] || 'GRUNT_BASIC';
   return getUnitArchetype(id);
+}
+
+/**
+ * Deterministic weighted pick from WAVE_ARCHETYPE_COMPOSITION.
+ * Boss slots: at most one DYNAMIC_PHASE_BOSS per wave (first matching index).
+ */
+export function pickArchetypeIdForWaveSlot(waveIndex, unitIndex) {
+  const table = WAVE_ARCHETYPE_COMPOSITION;
+  const row =
+    table[Math.min(Math.max(0, waveIndex), table.length - 1)] ||
+    table[1] ||
+    null;
+  if (!row || !row.length) {
+    const fallback = getArchetypeForWave(waveIndex);
+    return (fallback && fallback.id) || 'GRUNT_BASIC';
+  }
+
+  // Reserve unitIndex 0 for boss when composition includes one.
+  let bossId = null;
+  for (let i = 0; i < row.length; i++) {
+    if (row[i].id === 'DYNAMIC_PHASE_BOSS') {
+      bossId = 'DYNAMIC_PHASE_BOSS';
+      break;
+    }
+  }
+  if (bossId && unitIndex === 0) return bossId;
+
+  let total = 0;
+  const pool = [];
+  for (let i = 0; i < row.length; i++) {
+    const e = row[i];
+    if (bossId && e.id === bossId) continue;
+    const w = Math.max(0, e.weight || 0);
+    if (w <= 0) continue;
+    pool.push(e);
+    total += w;
+  }
+  if (!pool.length) {
+    return row[0].id || 'GRUNT_BASIC';
+  }
+
+  // Deterministic: wave*31 + unitIndex (no Math.random).
+  let ticket = (waveIndex * 31 + unitIndex * 17) % total;
+  for (let i = 0; i < pool.length; i++) {
+    ticket -= pool[i].weight;
+    if (ticket < 0) return pool[i].id;
+  }
+  return pool[pool.length - 1].id;
 }
 
 export function getToolHarvestMult(toolTier, harvestKind) {

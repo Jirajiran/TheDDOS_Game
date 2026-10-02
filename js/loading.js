@@ -13,6 +13,7 @@ import { createWorld } from './world.js';
 import { PATH_GRID_N } from './config.js';
 import { createOccupancy } from './occupancy.js';
 import { runParallelStages, timed, wait } from './loadPipeline.js';
+import { preloadEquipArtCache } from './cosmetics.js';
 
 const STAGE_TIMEOUT_MS = 10000;
 
@@ -39,6 +40,12 @@ export async function runLoading(onProgress) {
         required: true,
         timeoutMs: STAGE_TIMEOUT_MS,
         run: () => createWorld(PATH_GRID_N),
+      },
+      {
+        id: 'equip_art_cache',
+        required: false,
+        timeoutMs: 2000,
+        run: () => preloadEquipArtCache(),
       },
     ],
     {

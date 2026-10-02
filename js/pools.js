@@ -41,11 +41,39 @@ function makeInactiveUnit(i) {
     aggroChase: false,
     aggroBlockId: -1,
     localGeneral: false,
+    steeringUsed: 0,
+    steeringBudgetMax: 10,
     archetypeId: null,
     sizeScale: 1,
     isBoss: false,
     retreatHpRatio: 0.3,
     meleeMultiplier: 1,
+    /** Phase 1 — skills / morale / shield / taunt stubs. */
+    skillIds: null,
+    skills: null,
+    skillSpeedMult: 1,
+    meleeSwing: null,
+    activeArmorId: null,
+    activeShieldId: null,
+    moraleState: null,
+    shield: null,
+    blackboard: null,
+    tauntedById: -1,
+    tauntTimer: 0,
+    lockRetreat: false,
+    _moralePressureTimer: 0,
+    _pendingTauntPulse: null,
+    /** Phase 2c — optional per-unit bag for PLACE / wrench (AI engineer). */
+    inventory: null,
+    activeHotbar: 0,
+    hasPlacementSkill: false,
+    allowedGoals: null,
+    targetPriorityList: null,
+    behaviorFlags: null,
+    _effectiveArchetype: null,
+    _archetypePhaseKey: null,
+    _burstTimer: 0,
+    _flankTimer: 0,
   };
 }
 
@@ -78,6 +106,8 @@ function makeInactiveProjectile(i) {
     sourceBlockId: -1,
     noLootOnPierce: false,
     isBeam: false,
+    explosionRadius: 0,
+    explosionDamage: 0,
   };
 }
 
@@ -149,11 +179,28 @@ export function resetPools(pools) {
     u.aggroChase = false;
     u.aggroBlockId = -1;
     u.localGeneral = false;
+    u.steeringUsed = 0;
+    u.steeringBudgetMax = 10;
     u.archetypeId = null;
     u.sizeScale = 1;
     u.isBoss = false;
     u.targetAimRad = 0;
     u.targetFacingRad = 0;
+    u.inventory = null;
+    u.activeHotbar = 0;
+    u.hasPlacementSkill = false;
+    u.allowedGoals = null;
+    u.targetPriorityList = null;
+    u.behaviorFlags = null;
+    u._effectiveArchetype = null;
+    u._archetypePhaseKey = null;
+    u._burstTimer = 0;
+    u._flankTimer = 0;
+    u.meleeSwing = null;
+    u.activeArmorId = null;
+    u.activeShieldId = null;
+    u.skillIds = null;
+    u.skills = null;
   }
   for (let i = 0; i < pools.projectiles.length; i++) {
     pools.projectiles[i].active = false;

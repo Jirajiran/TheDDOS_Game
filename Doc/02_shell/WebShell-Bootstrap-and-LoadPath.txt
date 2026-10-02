@@ -1,7 +1,11 @@
 WebShell — Bootstrap & Load Path
 ================================
-คู่กับ AskKeep.txt (เกมเพลย์ / กฎ / Set A)
-คู่กับ แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint)
+ที่อยู่: Doc/02_shell/WebShell-Bootstrap-and-LoadPath.txt
+แผนที่: Doc/INDEX.md
+
+คู่กับ Doc/00_hub/AskKeep.txt (เกมเพลย์ / กฎ / Set A)
+คู่กับ Doc/01_blueprint/แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint)
+คู่กับ Doc/02_shell/สถาปัตยกรรมระบบเว็บเกมโฮสต์.md (แชท/ขยาย)
 
 ไฟล์นี้ = ชั้นที่ AskKeep ยังไม่ครอบลึก:
   จากเปิดเว็บ → โมดูลพร้อม → เมนู → โหลดแมทช์ → GamePlay ใช้ได้จริง

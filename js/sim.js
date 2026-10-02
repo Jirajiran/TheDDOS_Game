@@ -1,5 +1,14 @@
 import { ActionType } from './actions.js';
 import {
+  attachAreaTriggerFromDef,
+  tickAreaTriggers,
+  tryProjectileExplosion,
+} from './areaTriggers.js';
+import {
+  AI_EVENT_BOOSTS,
+  AI_GOAL_BASE_WEIGHTS,
+  AI_GOAL_TO_STAGE,
+  AI_LOCAL_PATH,
   GAME_PACK,
   L3_SIZE,
   PATH_SIZE,
@@ -9,20 +18,20 @@ import {
   defaultProjectileHitMask,
   deriveCollisionLayer,
   getArchetypeForWave,
+  getUnitArchetype,
+  pickArchetypeIdForWaveSlot,
   getBlockDef,
   getBlockPierceCost,
   getDamageMult,
   getEntityPierceCost,
   getItemDef,
   getPierceUnitBudget,
-  getToolHarvestMult,
   getUpgradeRecipe,
   getWeaponDef,
   layerHitsMask,
 } from './config.js';
 import {
   advanceUnitAlongChain,
-  applyLocalGeneralStub,
   attachUnitToGroup,
   buildBaseChunkNavPoints,
   clearBaseChunkL1Mask,
@@ -32,9 +41,12 @@ import {
   maskBaseChunkL1Pipes,
   prepareGroupPathsSequential,
   resetGeneral,
-  resolveObstacleOnPath,
   updateGeneralTarget,
 } from './general.js';
+import {
+  applyLocalPathLayer,
+  writeGeneralPathToBlackboard,
+} from './ai/local_group_manager.js';
 import {
   addItemToInventory,
   applyStartingLoadout,
@@ -45,12 +57,33 @@ import {
   emptySlot,
   getActiveSlot,
   getWeaponFromSlot,
+  equipArmorOnUnit,
+  equipShieldOnUnit,
+  getArmorDamageReduction,
+  isArmorSlot,
+  isShieldSlot,
   isPlaceableSlot,
   isToolSlot,
   isWeaponSlot,
   makeSlotFromItem,
 } from './inventory.js';
 import { generateWorldObjects } from './mapgen.js';
+import {
+  applyBlockRepair,
+  ensureMeleeSwing,
+  resolveFistVsUnit,
+  resolveMeleeVsBlock,
+  tickMeleeSwing,
+  tryBeginMeleeSwing,
+} from './meleeTools.js';
+import {
+  ensureUnitMorale,
+  getEffectiveSpeedMult,
+  getPassiveDamageReduction,
+  noteMoralePressure,
+  seedMoraleFromArchetype,
+  tickMoralePassives,
+} from './morale.js';
 import {
   blockProjectileSolid,
   canPlaceFootprint,
@@ -64,6 +97,25 @@ import {
   worldToL3,
 } from './occupancy.js';
 import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit, resetPools } from './pools.js';
+import {
+  absorbDamageWithShield,
+  segmentHitsShield,
+  seedShieldFromArchetype,
+  tickShields,
+} from './shield.js';
+import {
+  ensureUnitSkills,
+  tickAllSkills,
+  tryBeginCastSkill,
+} from './skills.js';
+import { ensureBlackboard } from './ai/blackboard.js';
+import { noteHitEvent } from './ai/events.js';
+import { decideUnitViaMediator } from './ai/mediator.js';
+import {
+  applyEffectiveArchetypeToUnit,
+  resolveEffectiveArchetype,
+} from './ai/archetypes.js';
+import { ensureBlackboardStub, tickTauntFlags } from './taunt.js';
 import {
   beginReload,
   canFireAmmo,
@@ -119,6 +171,8 @@ export function initMatchGameplay(match, options = {}) {
   match.pendingUi = null;
   match.lastTakeResult = null;
   match.showMeleeVolume = false;
+  match.meleeVfx = [];
+  match.explosionVfx = [];
   match.freeCraft = false;
   match.stats = {
     kills: 0,
@@ -131,6 +185,7 @@ export function initMatchGameplay(match, options = {}) {
   match.factoryQueue = [];
   match.beams = [];
   match.pathPipeMask = { active: false, maskedKeys: new Set(), navPoints: [] };
+  match.simTime = 0;
 
   generateWorldObjects(match);
   spawnPlayerNearWorldCenter(match);
@@ -194,6 +249,25 @@ function resetPlayerStats(u, pack) {
   u.pivotIndex = 0;
   u.attackBlockId = -1;
   Object.assign(u, createAmmoState('M1991'));
+  ensureUnitMorale(u);
+  ensureBlackboardStub(u);
+  u.skillIds = u.skillIds || [];
+  ensureUnitSkills(u);
+  ensureMeleeSwing(u);
+  u.skillSpeedMult = 1;
+  u.shield = null;
+  u.tauntTimer = 0;
+  u.tauntedById = -1;
+  if (pack.startingArmorId) {
+    equipArmorOnUnit(u, pack.startingArmorId);
+  } else {
+    u.activeArmorId = null;
+  }
+  if (pack.startingShieldId) {
+    equipShieldOnUnit(u, pack.startingShieldId);
+  } else {
+    u.activeShieldId = null;
+  }
 }
 
 export function spawnPlayer(match) {
@@ -282,6 +356,7 @@ export function updatePlaceGhost(match, mouseWorld) {
 export function tickMatch(match, actions, mouseWorld, dt) {
   if (match.outcome) return match.outcome;
 
+  match.simTime = (match.simTime || 0) + dt;
   updatePlaceGhost(match, mouseWorld);
 
   const botActions = decideEnemyActions(match, dt);
@@ -293,9 +368,20 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   separateUnits(match);
   updateCooldowns(match, dt);
   updateWeaponReloads(match, dt);
+  tickAllSkills(match, dt);
+  tickAllMeleeSwings(match, dt);
+  tickMeleeVfx(match, dt);
+  tickExplosionVfx(match, dt);
+  tickMoralePassives(match, dt);
+  tickShields(match, dt);
+  tickTauntFlags(match, dt);
   updateProjectiles(match, dt);
   updateBeams(match, dt);
   updateBlockSystems(match, dt);
+  tickAreaTriggers(match, dt, {
+    applyDamageToUnit,
+    applyDamageToBlock,
+  });
   updateFactory(match, dt);
   applyEnemyContactDamage(match, dt);
   updateDrops(match, dt);
@@ -324,6 +410,21 @@ function applyActions(match, actions, mouseWorld, dt) {
     if (a.type !== ActionType.SELECT_HOTBAR) continue;
     if (player && a.unitId === player.id) {
       match.activeHotbar = a.slot | 0;
+      const slot = getActiveSlot(match.inventory, match.activeHotbar);
+      if (isArmorSlot(slot) && player) {
+        equipArmorOnUnit(player, slot.itemId);
+      }
+      if (isShieldSlot(slot) && player) {
+        equipShieldOnUnit(player, slot.itemId);
+      }
+    } else {
+      const u = match.pools.units[a.unitId];
+      if (u && u.active && u.inventory) {
+        u.activeHotbar = a.slot | 0;
+        const slot = getActiveSlot(u.inventory, u.activeHotbar);
+        if (isArmorSlot(slot)) equipArmorOnUnit(u, slot.itemId);
+        if (isShieldSlot(slot)) equipShieldOnUnit(u, slot.itemId);
+      }
     }
   }
 
@@ -362,9 +463,8 @@ function applyActions(match, actions, mouseWorld, dt) {
     } else if (a.type === ActionType.INTERACT) {
       if (unit.role === 'player') tryInteract(match, unit);
     } else if (a.type === ActionType.HARVEST) {
-      if (unit.role === 'player') {
-        tryHarvest(match, unit, a.worldX, a.worldY);
-      }
+      // Player + AI units with inventory share tool/wrench path (no cheat).
+      tryHarvest(match, unit, a.worldX, a.worldY);
     } else if (a.type === ActionType.TAKE_GEN) {
       if (unit.role === 'player') {
         match.lastTakeResult = {
@@ -382,22 +482,13 @@ function applyActions(match, actions, mouseWorld, dt) {
         };
       }
     } else if (a.type === ActionType.PLACE) {
-      if (unit.role === 'player') {
-        const ghost = match.placeGhost;
-        if (ghost) {
-          tryPlace(match, unit, ghost.gx, ghost.gy);
-        } else if (typeof a.worldX === 'number') {
-          const blockDef = getBlockDef(
-            getActiveSlot(match.inventory, match.activeHotbar).itemId
-          );
-          if (blockDef) {
-            const snapped = snapWorldToL3Origin(a.worldX, a.worldY);
-            const ox = snapped.gx - Math.floor(blockDef.footprint.w / 2);
-            const oy = snapped.gy - Math.floor(blockDef.footprint.h / 2);
-            tryPlace(match, unit, ox, oy);
-          }
-        }
-      }
+      tryPlaceFromAction(match, unit, a);
+    } else if (a.type === ActionType.CAST_SKILL) {
+      tryBeginCastSkill(unit, {
+        skillId: a.skillId,
+        targetPosVec2: a.targetPosVec2,
+        targetEntityId: a.targetEntityId,
+      });
     }
   }
 
@@ -407,9 +498,10 @@ function applyActions(match, actions, mouseWorld, dt) {
     const u = units[i];
     if (!u.active) continue;
     const intent = moveIntent[u.id];
+    const speedMult = getEffectiveSpeedMult(u);
     if (intent) {
-      u.vx = intent.dx * u.speed;
-      u.vy = intent.dy * u.speed;
+      u.vx = intent.dx * u.speed * speedMult;
+      u.vy = intent.dy * u.speed * speedMult;
     } else if (u.role === 'player') {
       u.vx = 0;
       u.vy = 0;
@@ -429,6 +521,53 @@ function applyActions(match, actions, mouseWorld, dt) {
   }
 }
 
+/** Resolve inventory bag for player (match-shared) or AI unit bag. */
+function resolveUnitInventory(match, unit) {
+  if (!unit) return null;
+  if (unit.role === 'player') {
+    return {
+      inventory: match.inventory,
+      activeHotbar: match.activeHotbar,
+      shared: true,
+    };
+  }
+  if (unit.inventory) {
+    return {
+      inventory: unit.inventory,
+      activeHotbar: unit.activeHotbar != null ? unit.activeHotbar : 0,
+      shared: false,
+    };
+  }
+  return null;
+}
+
+/** PLACE Action → same tryPlace / occupancy / consume path for player + AI. */
+function tryPlaceFromAction(match, unit, a) {
+  const inv = resolveUnitInventory(match, unit);
+  if (!inv) return false;
+
+  if (unit.role === 'player' && match.placeGhost) {
+    return tryPlace(match, unit, match.placeGhost.gx, match.placeGhost.gy);
+  }
+
+  if (typeof a.gx === 'number' && typeof a.gy === 'number') {
+    return tryPlace(match, unit, a.gx | 0, a.gy | 0);
+  }
+
+  if (typeof a.worldX === 'number' && typeof a.worldY === 'number') {
+    const slot = getActiveSlot(inv.inventory, inv.activeHotbar);
+    const blockDef = getBlockDef(slot.itemId);
+    if (!blockDef) return false;
+    const snapped = snapWorldToL3Origin(a.worldX, a.worldY);
+    const ox = snapped.gx - Math.floor(blockDef.footprint.w / 2);
+    const oy = snapped.gy - Math.floor(blockDef.footprint.h / 2);
+    return tryPlace(match, unit, ox, oy);
+  }
+
+  return false;
+}
+
+
 /** Shortest-path angular slew toward target at max rad/sec. */
 function slewAngle(current, target, rateRadPerSec, dt) {
   let diff = target - current;
@@ -440,13 +579,18 @@ function slewAngle(current, target, rateRadPerSec, dt) {
 }
 
 function tryPlace(match, unit, gx, gy) {
-  const slot = getActiveSlot(match.inventory, match.activeHotbar);
+  const inv = resolveUnitInventory(match, unit);
+  if (!inv) return false;
+
+  const slot = getActiveSlot(inv.inventory, inv.activeHotbar);
   if (!isPlaceableSlot(slot)) return false;
 
   const blockDef = getBlockDef(slot.itemId);
   if (!blockDef) return false;
 
   if (blockDef.isDefeatCondition && match.basePlaced) return false;
+  // AI may not place defeat-condition base via engineer path (player-only).
+  if (blockDef.isDefeatCondition && unit.role !== 'player') return false;
 
   const fw = blockDef.footprint.w;
   const fh = blockDef.footprint.h;
@@ -455,13 +599,22 @@ function tryPlace(match, unit, gx, gy) {
     return false;
   }
 
-  const block = createPlacedBlock(match, slot.itemId, gx, gy, blockDef);
+  const placerTeam =
+    unit.team != null
+      ? unit.team
+      : unit.role === 'enemy'
+        ? TEAM.ENEMY
+        : TEAM.PLAYER;
+  const block = createPlacedBlock(match, slot.itemId, gx, gy, blockDef, {
+    team: placerTeam,
+  });
   registerBlock(match, block);
   match.stats.blocksPlaced += 1;
 
+  const placedItemId = slot.itemId;
   // Economy: place always consumes from inventory (freeCraft is craft-only).
   // Hub/UI only displays counts — sim is the sole writer.
-  consumeSlotItem(match.inventory, match.activeHotbar, 1);
+  consumeSlotItem(inv.inventory, inv.activeHotbar, 1);
 
   if (block.isDefeatCondition) {
     match.base = block;
@@ -478,10 +631,21 @@ function tryPlace(match, unit, gx, gy) {
     // Turret + resource gen are inherent BaseBlock systems — no free starter blocks.
   }
 
+  // Clear AI place intent after successful consume.
+  if (unit.blackboard && unit.role !== 'player') {
+    const bb = unit.blackboard;
+    if (bb.placeBlockTypeId === placedItemId) {
+      bb.placeBlockTypeId = null;
+      bb.placeGx = -1;
+      bb.placeGy = -1;
+      if (bb.flags) bb.flags.PLACE_INTENT = false;
+    }
+  }
+
   return true;
 }
 
-function createPlacedBlock(match, itemId, gx, gy, blockDef) {
+function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
   const fw = blockDef.footprint.w;
   const fh = blockDef.footprint.h;
   const blockId = match.occupancy.nextBlockId++;
@@ -489,8 +653,14 @@ function createPlacedBlock(match, itemId, gx, gy, blockDef) {
   const origin = l3OriginWorld(gx, gy);
   const w = fw * L3_SIZE;
   const h = fh * L3_SIZE;
+  const team =
+    opts.team != null
+      ? opts.team
+      : blockDef.team != null
+        ? blockDef.team
+        : TEAM.PLAYER;
 
-  return {
+  const block = {
     id: blockId,
     itemId,
     typeId: blockDef.typeId,
@@ -514,6 +684,7 @@ function createPlacedBlock(match, itemId, gx, gy, blockDef) {
     isFactory: !!blockDef.isFactory,
     isDoor: !!blockDef.isDoor,
     isWire: !!blockDef.isWire,
+    blocksProjectiles: !!blockDef.blocksProjectiles || !!blockDef.isWire,
     isHarvest: !!blockDef.isHarvest,
     harvestKind: blockDef.harvestKind || null,
     dropItemId: blockDef.dropItemId || null,
@@ -541,14 +712,20 @@ function createPlacedBlock(match, itemId, gx, gy, blockDef) {
     factoryTimer: 0,
     factoryBusy: false,
     color: blockDef.color,
-    team: blockDef.team != null ? blockDef.team : TEAM.PLAYER,
+    team,
     pierceCost: typeof blockDef.pierceCost === 'number' ? blockDef.pierceCost : 1,
     collisionLayer: deriveCollisionLayer({
-      team: blockDef.team != null ? blockDef.team : TEAM.PLAYER,
+      team,
       isHarvest: !!blockDef.isHarvest,
       collisionLayer: blockDef.collisionLayer,
     }),
+    tauntTimer: 0,
+    tauntedById: -1,
+    blackboard: null,
   };
+  attachAreaTriggerFromDef(block, blockDef);
+  ensureBlackboardStub(block);
+  return block;
 }
 
 function initGeneratorList(list) {
@@ -723,6 +900,9 @@ function spawnProjectile(match, owner, weapon, aimRad) {
   proj.sourceBlockId = owner.sourceBlockId != null ? owner.sourceBlockId : -1;
   proj.noLootOnPierce = true;
   proj.isBeam = false;
+  proj.explosionRadius = weapon.explosionRadius || 0;
+  proj.explosionDamage =
+    weapon.explosionDamage != null ? weapon.explosionDamage : weapon.baseDamage;
   return proj;
 }
 
@@ -1128,32 +1308,175 @@ function updateFactory(match, dt) {
 }
 
 function tryHarvest(match, unit, _wx, _wy) {
-  const slot = getActiveSlot(match.inventory, match.activeHotbar);
+  const inv = resolveUnitInventory(match, unit);
+  if (!inv) return;
+  const slot = getActiveSlot(inv.inventory, inv.activeHotbar);
   if (!isToolSlot(slot)) return;
   const def = getItemDef(slot.itemId);
   if (!def) return;
 
-  // Hit detection uses unit facing melee volume — cursor worldX/Y ignored.
-  const vol = getMeleeVolume(unit, { toolId: slot.itemId });
-  const targets = blocksOverlappingMeleeVolume(match, vol);
-  if (!targets.length) return;
+  // Shared pipeline: open 0.1s → close → tool cooldown 0.2s (spam fails).
+  tryBeginMeleeSwing(unit, {
+    source: 'TOOL',
+    toolId: slot.itemId,
+    activeDurationSec: def.activeDurationSec != null ? def.activeDurationSec : 0.1,
+    cooldownSec: def.cooldownSec != null ? def.cooldownSec : 0.2,
+    damage: def.harvestDamage || def.structureDamage || 20,
+    hitUnits: false,
+    hitBlocks: true,
+    vfxSize: Math.round(L3_SIZE * 0.9),
+    color: def.color || '#c0b080',
+  });
+}
 
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
-    let dmg = def.harvestDamage || 20;
-    if (target.isHarvest) {
-      const mult = getToolHarvestMult(def.toolTier || 'TIER0', target.harvestKind);
-      if (mult <= 0) {
-        match.interactPrompt = 'Wrong tool tier';
-        continue;
+function tickAllMeleeSwings(match, dt) {
+  const units = match.pools && match.pools.units;
+  if (!units) return;
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    if (!unit.active) continue;
+    if (!tickMeleeSwing(unit, dt)) continue;
+    applyMeleeSwingHits(match, unit);
+  }
+}
+
+function applyMeleeSwingHits(match, unit) {
+  const sw = unit.meleeSwing;
+  if (!sw) return;
+  const vol = getMeleeVolume(unit, { toolId: sw.toolId });
+  spawnMeleeVfx(match, unit, sw);
+
+  const sourceTeam =
+    unit.team != null
+      ? unit.team
+      : unit.role === 'enemy'
+        ? TEAM.ENEMY
+        : TEAM.PLAYER;
+
+  if (sw.hitBlocks) {
+    const toolDef = sw.toolId ? getItemDef(sw.toolId) : null;
+    const targets = blocksOverlappingMeleeVolume(match, vol);
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      if (toolDef) {
+        const resolved = resolveMeleeVsBlock(sourceTeam, toolDef, target);
+        if (resolved.kind === 'repair') {
+          const healed = applyBlockRepair(target, resolved.amount);
+          if (healed > 0 && unit.role === 'player') {
+            match.interactPrompt = `Repaired ${target.label || target.itemId} +${Math.round(healed)}`;
+          }
+          if (
+            healed > 0 &&
+            unit.blackboard &&
+            unit.blackboard.repairTargetId === target.id &&
+            target.hp >= target.maxHp
+          ) {
+            unit.blackboard.repairTargetId = -1;
+            if (unit.blackboard.flags) unit.blackboard.flags.REPAIR_INTENT = false;
+          }
+          continue;
+        }
+        if (resolved.kind !== 'damage') {
+          if (resolved.reason === 'wrong_tool_tier' && unit.role === 'player') {
+            match.interactPrompt = 'Wrong tool tier';
+          }
+          continue;
+        }
+        applyDamageToBlock(match, target, resolved.amount, 'DEFAULT', {
+          sourceTeam,
+          damageKind: 'TOOL',
+        });
+      } else if (sw.source === 'FIST') {
+        // Fist damages structures / wire (WIRE_MELEE_MULT via DEFAULT type).
+        applyDamageToBlock(match, target, sw.damage, 'DEFAULT', {
+          sourceTeam,
+          damageKind: 'TOOL',
+        });
       }
-      dmg *= mult;
     }
+  }
 
-    applyDamageToBlock(match, target, dmg, 'DEFAULT', {
-      sourceTeam: TEAM.PLAYER,
-      damageKind: 'TOOL',
-    });
+  if (sw.hitUnits || sw.source === 'FIST') {
+    const unitHits = unitsOverlappingMeleeVolume(match, unit, vol);
+    for (let i = 0; i < unitHits.length; i++) {
+      const other = unitHits[i];
+      if (sw.toolId) {
+        const toolDef = getItemDef(sw.toolId);
+        // Tools do not hit living units (wrench/axe matrix).
+        if (toolDef) continue;
+      }
+      const resolved = resolveFistVsUnit(sw.damage, unit.meleeMultiplier);
+      if (resolved.kind !== 'damage') continue;
+      applyDamageToUnit(match, other, resolved.amount, {
+        sourceTeam,
+        sourceX: unit.x,
+        sourceY: unit.y,
+      });
+    }
+  }
+}
+
+function unitsOverlappingMeleeVolume(match, attacker, vol) {
+  const out = [];
+  const units = match.pools.units;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u.active || u.id === attacker.id) continue;
+    if (u.team === attacker.team) continue;
+    if (circleOverlapsMeleeVolume(u.x, u.y, u.radius || 12, vol)) out.push(u);
+  }
+  return out;
+}
+
+function circleOverlapsMeleeVolume(cx, cy, r, vol) {
+  const cos = Math.cos(vol.ang);
+  const sin = Math.sin(vol.ang);
+  const dx = cx - vol.ox;
+  const dy = cy - vol.oy;
+  const lx = dx * cos + dy * sin;
+  const ly = -dx * sin + dy * cos;
+  const x0 = vol.start;
+  const x1 = vol.start + vol.reach;
+  const y0 = -vol.halfW;
+  const y1 = vol.halfW;
+  const qx = Math.max(x0, Math.min(x1, lx));
+  const qy = Math.max(y0, Math.min(y1, ly));
+  const ex = lx - qx;
+  const ey = ly - qy;
+  return ex * ex + ey * ey <= r * r;
+}
+
+function spawnMeleeVfx(match, unit, sw) {
+  if (!match.meleeVfx) match.meleeVfx = [];
+  const ang =
+    typeof unit.aimRad === 'number' ? unit.aimRad : unit.facingRad || 0;
+  const reach = (GAME_PACK.meleeReach || L3_SIZE) * 0.55;
+  match.meleeVfx.push({
+    x: unit.x + Math.cos(ang) * (unit.radius + reach * 0.5),
+    y: unit.y + Math.sin(ang) * (unit.radius + reach * 0.5),
+    ang,
+    life: 0.14,
+    maxLife: 0.14,
+    size: Math.min(L3_SIZE, sw.vfxSize || L3_SIZE * 0.85),
+    color: sw.color || '#e8dcc0',
+  });
+}
+
+function tickMeleeVfx(match, dt) {
+  const list = match.meleeVfx;
+  if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    list[i].life -= dt;
+    if (list[i].life <= 0) list.splice(i, 1);
+  }
+}
+
+function tickExplosionVfx(match, dt) {
+  const list = match.explosionVfx;
+  if (!list || !list.length) return;
+  for (let i = list.length - 1; i >= 0; i--) {
+    list[i].life -= dt;
+    if (list[i].life <= 0) list.splice(i, 1);
   }
 }
 
@@ -1354,6 +1677,13 @@ function canHitBlock(pOrBeam, block) {
   if (!blockProjectileSolid(block)) return false;
   // Heal / friendly beams only target units — do not stop on placeables.
   if ((pOrBeam.targetFaction || 'ENEMY') === 'FRIENDLY') return false;
+  // Wire always collides with projectiles (incl. own-team) — force fist/melee.
+  if (block.isWire || block.blocksProjectiles) {
+    if (pOrBeam.hitMask != null) {
+      return layerHitsMask(entityCollisionLayer(block), pOrBeam.hitMask);
+    }
+    return true;
+  }
   if (pOrBeam.hitMask != null) {
     return layerHitsMask(entityCollisionLayer(block), pOrBeam.hitMask);
   }
@@ -1384,6 +1714,12 @@ function updateProjectiles(match, dt) {
       p.x > match.world.worldW ||
       p.y > match.world.worldH
     ) {
+      if (p.explosionRadius > 0) {
+        tryProjectileExplosion(match, p, {
+          applyDamageToUnit,
+          applyDamageToBlock,
+        });
+      }
       p.active = false;
       continue;
     }
@@ -1414,6 +1750,32 @@ function updateProjectiles(match, dt) {
         p.blockPierceLeft = pierce;
         continue;
       }
+      if (hit.kind === 'shield') {
+        const unit = hit.unit;
+        const abs = absorbDamageWithShield(unit, p.damage);
+        if (abs.leftover > 0) {
+          const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
+          const dmg = p.damage < 0 ? abs.leftover : abs.leftover * mult;
+          applyDamageToUnit(match, unit, dmg, {
+            sourceTeam: p.team,
+            fromTurret: !!p.fromTurret,
+            sourceBlockId: p.sourceBlockId,
+            sourceX: p.prevX,
+            sourceY: p.prevY,
+            skipShield: true,
+          });
+          if (dmg > 0) match.stats.damageDealt += dmg;
+        }
+        const cost = abs.pierceCost || (unit.shield && unit.shield.pierceCost) || 1;
+        if (cost > pierce || abs.broke || abs.leftover <= 0) {
+          stopped = true;
+          break;
+        }
+        pierce -= cost;
+        p.pierceLeft = pierce;
+        p.blockPierceLeft = pierce;
+        continue;
+      }
       const unit = hit.unit;
       const cost = getEntityPierceCost(unit);
       const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
@@ -1434,7 +1796,15 @@ function updateProjectiles(match, dt) {
       p.pierceLeft = pierce;
       p.blockPierceLeft = pierce;
     }
-    if (stopped) p.active = false;
+    if (stopped) {
+      if (p.explosionRadius > 0) {
+        tryProjectileExplosion(match, p, {
+          applyDamageToUnit,
+          applyDamageToBlock,
+        });
+      }
+      p.active = false;
+    }
   }
 }
 
@@ -1455,6 +1825,18 @@ function collectProjectileSegmentHits(match, p, units) {
   for (let u = 0; u < units.length; u++) {
     const unit = units[u];
     if (!canHitUnit(p, unit)) continue;
+    const shieldHit = segmentHitsShield(
+      unit,
+      p.prevX,
+      p.prevY,
+      p.x,
+      p.y,
+      p.radius || 0
+    );
+    if (shieldHit.hit) {
+      hits.push({ kind: 'shield', t: shieldHit.t, unit });
+      continue;
+    }
     if (
       segmentHitsCircle(
         p.prevX,
@@ -1752,15 +2134,28 @@ function destroyBlock(match, block, opts = {}) {
 function applyDamageToUnit(match, unit, damage, ctx = {}) {
   if (!unit || !unit.active) return;
 
-  // Negative damage = heal (friendly medic / heal beam).
+  // Negative damage = heal (friendly medic / heal beam / heal pad).
   if (damage < 0) {
     unit.hp = Math.min(unit.maxHp, unit.hp - damage);
     return;
   }
 
-  unit.hp -= damage;
+  let dmg = damage;
+  if (!ctx.skipShield && unit.shield) {
+    const abs = absorbDamageWithShield(unit, dmg);
+    dmg = abs.leftover;
+  }
+  if (dmg <= 0) return;
 
-  // Player-team projectile / turret hit → sticky aggro (prefer damaging turret).
+  const reduction = getPassiveDamageReduction(unit);
+  if (reduction > 0) dmg *= 1 - reduction;
+  const armorRed = getArmorDamageReduction(unit);
+  if (armorRed > 0) dmg *= 1 - armorRed;
+
+  unit.hp -= dmg;
+  noteMoralePressure(unit, 2);
+
+  // Player-team projectile / turret hit → sticky aggro + HIT Event for Mediator.
   if (
     unit.role === 'enemy' &&
     unit.hp > 0 &&
@@ -1768,6 +2163,12 @@ function applyDamageToUnit(match, unit, damage, ctx = {}) {
   ) {
     unit.aggroChase = true;
     unit.aiStage = 'engage';
+    noteHitEvent(unit, {
+      fromTurret: !!ctx.fromTurret,
+      sourceBlockId: ctx.sourceBlockId,
+      sourceX: ctx.sourceX,
+      sourceY: ctx.sourceY,
+    });
     if (ctx.fromTurret && ctx.sourceBlockId >= 0) {
       const blk = getBlock(match, ctx.sourceBlockId);
       if (blk && blk.alive) {
@@ -1827,7 +2228,8 @@ function updateBlockSystems(match, dt) {
       b.turretAimRad = slewAngle(b.turretAimRad, b.turretTargetAimRad, turnRate, dt);
     }
 
-    if (b.isHeal && player) {
+    if (b.isHeal && player && !b.areaTrigger) {
+      // Legacy fallback if areaTrigger missing — prefer CONTINUOUS_TICK pad.
       const cx = b.x + b.w / 2;
       const cy = b.y + b.h / 2;
       if (Math.hypot(player.x - cx, player.y - cy) <= b.healRadius) {
@@ -1992,7 +2394,12 @@ function updateInteractPrompt(match) {
   }
   const slot = getActiveSlot(match.inventory, match.activeHotbar);
   if (isToolSlot(slot)) {
-    hint = hint || 'LMB: tool (facing volume — harvest / walls)';
+    const def = getItemDef(slot.itemId);
+    if (def && def.meleeRole === 'REPAIR_WRENCH') {
+      hint = hint || 'LMB: wrench (repair friendly structures)';
+    } else {
+      hint = hint || 'LMB: tool (facing volume — harvest / walls)';
+    }
   }
   if (hint) match.interactPrompt = hint;
 }
@@ -2000,6 +2407,10 @@ function updateInteractPrompt(match) {
 /**
  * Enemy AI: General pivots + Approach/Engage/Retreat + firearms.
  * Combat target is sticky (pick once, hold) with hysteresis — no per-frame thrash.
+ */
+/**
+ * Enemy AI entry — path/perception prep, then Mediator → Stage → Unified Input.
+ * Pipeline: Event(+Δpriority) → argmax Goal → GoalToStage → Stage Actions.
  */
 function decideEnemyActions(match, dt) {
   const actions = [];
@@ -2033,176 +2444,87 @@ function decideEnemyActions(match, dt) {
     const e = units[i];
     if (!e.active || e.role !== 'enemy') continue;
 
+    ensureBlackboard(e);
+
+    // General: clear-corridor Path/L1 pivots → blackboard (no per-unit map BFS).
     let pathGoal = advanceUnitAlongChain(match, e);
     if (!pathGoal) {
       pathGoal = { x: bx, y: by, radius: 160 };
       e.pathGoalX = bx;
       e.pathGoalY = by;
     }
-
-    // Sector Pi: leave sector while attacking → return to path stage (Local General stub).
     const group = match.general && match.general.groups[e.groupId];
+    writeGeneralPathToBlackboard(e, group, pathGoal);
+
+    // Sector leave → Event LEFT_GENERAL_SECTOR (Mediator prefers REACH_PATH_GOAL).
     const leftSector =
       group &&
       e.aiStage === 'engage' &&
       !isUnitInsideSector(group, e.x, e.y);
     if (leftSector) {
-      e.aiStage = 'approach';
-      e.combatTargetKind = null;
-      e.combatTargetId = -1;
-      e.combatLockTimer = 0;
-      const localGoal = applyLocalGeneralStub(match, e, bx, by);
-      if (localGoal) pathGoal = localGoal;
-    } else {
-      const localGoal = applyLocalGeneralStub(match, e, bx, by);
-      if (localGoal && e.localGeneral) pathGoal = localGoal;
-    }
-
-    const resolved = resolveObstacleOnPath(match, e, pathGoal);
-    pathGoal = resolved.goal;
-    if (resolved.attackBlock) {
-      e.attackBlockId = resolved.attackBlock.id;
-    }
-
-    const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
-    const retreatRatio =
-      typeof e.retreatHpRatio === 'number'
-        ? e.retreatHpRatio
-        : pack.enemyRetreatHpRatio;
-    const combatTarget = pickStickyCombatTarget(match, e, player, bx, by, pack, dt);
-    let tx = pathGoal.x;
-    let ty = pathGoal.y;
-    let targetDist = Math.hypot(tx - e.x, ty - e.y);
-
-    if (combatTarget) {
-      tx = combatTarget.x;
-      ty = combatTarget.y;
-      targetDist = combatTarget.dist;
-    } else {
       e.combatTargetKind = null;
       e.combatTargetId = -1;
       e.combatLockTimer = 0;
     }
 
-    if (hpRatio <= retreatRatio) {
-      e.aiStage = 'retreat';
-    } else if (e.aggroChase && combatTarget) {
-      // Sticky pursuit after taking player/turret fire — even beyond normal engage radius.
-      e.aiStage =
-        targetDist <= pack.enemyFireRadius ? 'engage' : 'approach';
-    } else if (combatTarget && targetDist <= pack.enemyEngageRadius) {
-      e.aiStage = 'engage';
-    } else {
-      e.aiStage = 'approach';
-    }
-
-    const weapon = e.weaponId ? getWeaponDef(e.weaponId) : null;
-    const needsReload =
-      !!weapon &&
-      !weapon.infiniteAmmo &&
-      e.ammoInMag <= 0 &&
-      e.mags > 0;
-    const reloading = e.reloadTimer > 0;
-    if (needsReload && !reloading) {
-      actions.push({ type: ActionType.RELOAD, unitId: e.id });
-    }
-
-    let dx = 0;
-    let dy = 0;
-
-    if (e.aiStage === 'approach') {
-      if (e.aggroChase && combatTarget) {
-        // Approach + light strafe toward sticky combat target.
-        e.aiStrafeTimer -= dt;
-        if (e.aiStrafeTimer <= 0) {
-          e.aiStrafeSign *= -1;
-          e.aiStrafeTimer = 0.7 + (e.id % 5) * 0.12;
-        }
-        const len = targetDist || 1;
-        const fx = (tx - e.x) / len;
-        const fy = (ty - e.y) / len;
-        const sx = -fy * e.aiStrafeSign;
-        const sy = fx * e.aiStrafeSign;
-        dx = fx * 0.85 + sx * 0.35;
-        dy = fy * 0.85 + sy * 0.35;
-        const m = Math.hypot(dx, dy) || 1;
-        dx /= m;
-        dy /= m;
-      } else {
-        const len = Math.hypot(pathGoal.x - e.x, pathGoal.y - e.y) || 1;
-        dx = (pathGoal.x - e.x) / len;
-        dy = (pathGoal.y - e.y) / len;
-      }
-    } else if (e.aiStage === 'engage') {
-      e.aiStrafeTimer -= dt;
-      if (e.aiStrafeTimer <= 0) {
-        e.aiStrafeSign *= -1;
-        e.aiStrafeTimer = 0.7 + (e.id % 5) * 0.12;
-      }
-      const len = targetDist || 1;
-      const fx = (tx - e.x) / len;
-      const fy = (ty - e.y) / len;
-      const sx = -fy * e.aiStrafeSign;
-      const sy = fx * e.aiStrafeSign;
-      if (e.weaponId) {
-        // Non-melee: keep preferred standoff (also vs player-team blocks). Closer while reloading.
-        let pref = pack.enemyPreferredRange || 560;
-        if (reloading || needsReload) pref *= 0.55;
-        let toward = 0;
-        if (targetDist > pref * 1.12) toward = 0.55;
-        else if (targetDist < pref * 0.88) toward = -0.75;
-        else toward = 0;
-        dx = fx * toward + sx * 0.75;
-        dy = fy * toward + sy * 0.75;
-      } else {
-        const hold = 0.65;
-        dx = fx * hold + sx * 0.55;
-        dy = fy * hold + sy * 0.55;
-      }
-      const m = Math.hypot(dx, dy) || 1;
-      dx /= m;
-      dy /= m;
-    } else {
-      let rx = allyX - e.x;
-      let ry = allyY - e.y;
-      if (allyN <= 1) {
-        rx = e.x - tx;
-        ry = e.y - ty;
-      }
-      const len = Math.hypot(rx, ry) || 1;
-      dx = rx / len;
-      dy = ry / len;
-    }
-
-    actions.push({ type: ActionType.MOVE, unitId: e.id, dx, dy });
-    actions.push({
-      type: ActionType.AIM,
-      unitId: e.id,
-      aimRad: Math.atan2(ty - e.y, tx - e.x),
+    // Local: raycast fan + steering budget dodge around real obstacles.
+    const local = applyLocalPathLayer(match, e, pathGoal, {
+      baseX: bx,
+      baseY: by,
+      leftSector: !!leftSector,
+      config: AI_LOCAL_PATH,
     });
-
-    // Fire when armed + in range. Blocking placeables/resources: shoot even while approaching.
-    // Aggro chase: also fire once within fire radius while closing in.
-    const shootingBlocker =
-      combatTarget &&
-      combatTarget.kind === 'block' &&
-      e.attackBlockId >= 0;
-    const aggroInRange = e.aggroChase && targetDist <= pack.enemyFireRadius;
-    if (
-      e.weaponId &&
-      (e.aiStage !== 'approach' || shootingBlocker || aggroInRange) &&
-      targetDist <= pack.enemyFireRadius &&
-      canFireAmmo(e, weapon)
+    pathGoal = local.goal;
+    if (local.attackBlock) {
+      e.attackBlockId = local.attackBlock.id;
+    } else if (
+      e.attackBlockId >= 0 &&
+      e.aggroBlockId !== e.attackBlockId &&
+      !(e.blackboard && e.blackboard.flags && e.blackboard.flags.STEERING_EXHAUSTED)
     ) {
-      actions.push({ type: ActionType.FIRE, unitId: e.id });
+      e.attackBlockId = -1;
     }
 
-    // Melee-only bots may contact-damage blockers; ranged keep standoff and shoot.
+    const combatTarget = pickStickyCombatTarget(
+      match,
+      e,
+      player,
+      bx,
+      by,
+      pack,
+      dt
+    );
+    if (!combatTarget) {
+      e.combatTargetKind = null;
+      e.combatTargetId = -1;
+      e.combatLockTimer = 0;
+    }
+
+    const unitActions = decideUnitViaMediator(match, e, {
+      dt,
+      pack,
+      pathGoal,
+      combatTarget,
+      allyX,
+      allyY,
+      allyN,
+      leftSector: !!leftSector,
+      canFireAmmo,
+      getWeaponDef,
+      goalBaseWeights: AI_GOAL_BASE_WEIGHTS,
+      goalToStage: AI_GOAL_TO_STAGE,
+      eventBoostTable: AI_EVENT_BOOSTS,
+    });
+    for (let a = 0; a < unitActions.length; a++) {
+      actions.push(unitActions[a]);
+    }
+
+    // Melee-only bots may contact-damage blockers (parity with pre-Mediator loop).
     if (
       !e.weaponId &&
       combatTarget &&
       combatTarget.kind === 'block' &&
-      targetDist < e.radius + 80
+      combatTarget.dist < e.radius + 80
     ) {
       applyDamageToBlock(
         match,
@@ -2228,6 +2550,30 @@ function scoreCombatCandidate(kind, dist, pack, isPathBlocker, aggroChase) {
   else if (kind === 'block') bias = 45;
   else if (kind === 'base') bias = 25;
   return bias + (engage - Math.min(dist, engage));
+}
+
+/**
+ * Phase 3 — bias score by archetype targetPriorityList order (0 = highest).
+ * Maps combat kind (+ block flags) → TargetKind labels from NextPlan.
+ */
+function targetPriorityBias(unit, candidate) {
+  const list = unit && unit.targetPriorityList;
+  if (!list || !list.length || !candidate) return 0;
+  let label = null;
+  if (candidate.kind === 'unit') label = 'PLAYER';
+  else if (candidate.kind === 'base') label = 'BLOCK_BASE';
+  else if (candidate.kind === 'block' && candidate.block) {
+    if (candidate.block.isTurret) label = 'BLOCK_TURRET';
+    else if (candidate.block.isDefeatCondition) label = 'BLOCK_BASE';
+    else label = 'BLOCK_OTHER';
+  }
+  if (!label) return 0;
+  const idx = list.indexOf(label);
+  if (idx < 0) {
+    // Not in list → soft demote (sniper won't prefer turrets).
+    return -80;
+  }
+  return (list.length - idx) * 35;
 }
 
 /** Dogpile: Score = priorityScore / (distance + currentAttackers * K). */
@@ -2370,7 +2716,11 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     if (c.score < 0) continue;
-    if (!best || c.score > best.score) best = c;
+    const scored = c.score + targetPriorityBias(e, c);
+    if (!best || scored > best._scored) {
+      best = c;
+      best._scored = scored;
+    }
   }
 
   const reselectGap = Math.max(50, pack.enemyEngageRadius * 0.14);
@@ -2487,14 +2837,7 @@ function spawnWave(match, waveIndex) {
   // Apply/Deploy only when all group paths are ready.
   const groups = deployPreparedGroups(match, prepared, tx, ty);
 
-  const archetype = getArchetypeForWave(waveIndex);
-  const weaponId =
-    (archetype && archetype.defaultWeapon) ||
-    pack.enemyWeaponByWave[
-      Math.min(waveIndex, pack.enemyWeaponByWave.length - 1)
-    ] ||
-    null;
-
+  // Phase 3 — per-slot archetype from WAVE_ARCHETYPE_COMPOSITION (mixed types).
   let unitSeq = 0;
   for (let gi = 0; gi < prepared.length; gi++) {
     const prep = prepared[gi];
@@ -2504,6 +2847,15 @@ function spawnWave(match, waveIndex) {
       const u = acquireUnit(match.pools);
       if (!u) break;
       const pos = prep.positions[i];
+      const archId = pickArchetypeIdForWaveSlot(waveIndex, unitSeq);
+      const archetype =
+        getUnitArchetype(archId) || getArchetypeForWave(waveIndex);
+      const weaponId =
+        (archetype && archetype.defaultWeapon) ||
+        pack.enemyWeaponByWave[
+          Math.min(waveIndex, pack.enemyWeaponByWave.length - 1)
+        ] ||
+        null;
       const hpLo = archetype ? archetype.hpRange[0] : pack.enemyMaxHp;
       const hpHi = archetype ? archetype.hpRange[1] : pack.enemyMaxHp + waveIndex * 4;
       const t = (unitSeq % 5) / 4;
@@ -2516,7 +2868,7 @@ function spawnWave(match, waveIndex) {
       u.role = 'enemy';
       u.collisionLayer = deriveCollisionLayer({ team: TEAM.ENEMY, role: 'enemy' });
       u.pierceCost = 1;
-      u.archetypeId = archetype ? archetype.id : null;
+      u.archetypeId = archetype ? archetype.id : archId;
       u.isBoss = !!(archetype && archetype.isBoss);
       u.sizeScale = sizeScale || 1;
       u.maxHp = maxHp;
@@ -2527,11 +2879,11 @@ function spawnWave(match, waveIndex) {
         (archetype && archetype.armorType) || pack.enemyArmorType;
       u.meleeMultiplier =
         (archetype && archetype.meleeMultiplier) || 1;
+      const flags =
+        (archetype && (archetype.behaviorFlags || archetype.aiBehavior)) || {};
       u.retreatHpRatio =
-        (archetype &&
-          archetype.aiBehavior &&
-          archetype.aiBehavior.retreatHpRatio) != null
-          ? archetype.aiBehavior.retreatHpRatio
+        typeof flags.retreatHpRatio === 'number'
+          ? flags.retreatHpRatio
           : pack.enemyRetreatHpRatio;
       u.weaponId = weaponId;
       if (weaponId) {
@@ -2559,7 +2911,32 @@ function spawnWave(match, waveIndex) {
       u.combatLockTimer = 0;
       u.aggroChase = false;
       u.aggroBlockId = -1;
-      u.localGeneral = false;
+      u.localGeneral = !!(archetype && archetype.isLocalGeneral);
+      u.steeringUsed = 0;
+      u.steeringBudgetMax = AI_LOCAL_PATH.steeringBudgetMax;
+      u.skillIds = (archetype && archetype.activeSkills) || [];
+      seedMoraleFromArchetype(u, archetype);
+      seedShieldFromArchetype(u, archetype);
+      ensureUnitSkills(u);
+      ensureMeleeSwing(u);
+      ensureBlackboardStub(u);
+      u.skillSpeedMult = 1;
+      u.tauntTimer = 0;
+      u.tauntedById = -1;
+      u.activeArmorId = null;
+      u.activeShieldId = null;
+      u.hasPlacementSkill = !!(archetype && archetype.hasPlacementSkill);
+      u.inventory = null;
+      u.activeHotbar = 0;
+      u._burstTimer = 0;
+      u._flankTimer = 0;
+      u._archetypePhaseKey = null;
+      // Compose Goals+Stages from archetype data (allowedGoals / flags / phase).
+      const effective = resolveEffectiveArchetype(u, u.archetypeId);
+      if (effective) {
+        applyEffectiveArchetypeToUnit(u, effective, { syncWeapon: false });
+        ensureUnitSkills(u);
+      }
       attachUnitToGroup(group, u);
       match.enemiesAlive += 1;
       unitSeq += 1;
@@ -2748,7 +3125,9 @@ export function restoreMatchFromSnapshot(match, snap) {
       const sb = snap.blocks[i];
       const def = getBlockDef(sb.itemId);
       if (!def) continue;
-      const block = createPlacedBlock(match, sb.itemId, sb.gx, sb.gy, def);
+      const block = createPlacedBlock(match, sb.itemId, sb.gx, sb.gy, def, {
+        team: sb.team != null ? sb.team : undefined,
+      });
       // Prefer saved id if unique
       if (sb.id > 0) {
         clearFootprint(match.occupancy, block.gx, block.gy, block.fw, block.fh);
@@ -2845,6 +3224,17 @@ export function restoreMatchFromSnapshot(match, snap) {
       u.combatTargetId = su.combatTargetId != null ? su.combatTargetId : -1;
       u.aggroBlockId = su.aggroBlockId != null ? su.aggroBlockId : -1;
       u.localGeneral = !!su.localGeneral;
+      u.activeArmorId = su.activeArmorId || null;
+      u.activeShieldId = su.activeShieldId || null;
+      if (u.activeArmorId) {
+        equipArmorOnUnit(u, u.activeArmorId);
+      }
+      if (u.activeShieldId) {
+        equipShieldOnUnit(u, u.activeShieldId);
+      } else if (u.archetypeId) {
+        const arch = getUnitArchetype(u.archetypeId);
+        if (arch) seedShieldFromArchetype(u, arch);
+      }
       u.fireCooldown = 0;
       u.vx = 0;
       u.vy = 0;

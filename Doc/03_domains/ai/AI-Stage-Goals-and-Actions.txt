@@ -1,11 +1,17 @@
 AI Stage — Goals & Actions (blueprint)
 ======================================
-คู่กับ AskKeep.txt §4 (General vs Unit stage) · ยังไม่ใช่โค้ดแยกเต็ม
+ที่อยู่: Doc/03_domains/ai/AI-Stage-Goals-and-Actions.txt
+แผนที่: Doc/INDEX.md · README โฟลเดอร์: Doc/03_domains/ai/README.md
+
+คู่กับ Doc/00_hub/AskKeep.txt §4 (General vs Unit stage) · ยังไม่ใช่โค้ดแยกเต็ม
+สเปกต่อยอด (ยังไม่ทำในโค้ด): Doc/03_domains/ai/NextPlan/
 
 สถานะโค้ดปัจจุบัน
-- decideEnemyActions ใน js/sim.js ยังเป็นก้อน monolithic (approach / engage / retreat ในฟังก์ชันเดียว)
-- ไฟล์นี้ = เข็มทิศแยก stage ในอนาคต · ไม่บังคับรีแฟคเตอร์ทันที
-- ส่ง Action เข้า Unified Input เดียวกับ Player (MOVE / AIM / FIRE / RELOAD …) — ไม่โกงกฎ
+- Phase 2a ✓ Mediator + Blackboard + Stages · Phase 2b ✓ General clear corridor + Local path layer
+- Phase 2c ✓ PLACE stage + PLACE_TRAP / REPAIR_STRUCTURE Goals (Unified PLACE / HARVEST)
+- decideEnemyActions = path prep (General pivots → Local fan/dodge) + Mediator → Unified Input
+- ส่ง Action เข้า Unified Input เดียวกับ Player (MOVE / AIM / FIRE / RELOAD / PLACE / HARVEST …) — ไม่โกงกฎ
+- Phase 3 archetypes ยัง
 
 ────────────────────────────────────────
 โมเดลสั้น (จำสูตรนี้)

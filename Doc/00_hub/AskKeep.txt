@@ -1,16 +1,25 @@
 AskKeep — Doc ออกแบบ + สถานะส่งมอบ
-ที่มา: คำถาม/ล็อกจาก แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint คงไว้แยก)
+ที่อยู่: Doc/00_hub/AskKeep.txt
+แผนที่โฟลเดอร์: Doc/INDEX.md
+
+ที่มา: คำถาม/ล็อกจาก Doc/01_blueprint/แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md (blueprint คงไว้แยก)
 ความจริงเชิงสเกลปัจจุบัน = Set A (ดูท้ายไฟล์ «สถานะส่งมอบ»)
 
 คู่เอกสาร (ชั้นเว็บ / โหลดก่อน GamePlay — ไม่ใช่กฎเกม):
-  → WebShell-Bootstrap-and-LoadPath.txt
+  → Doc/02_shell/WebShell-Bootstrap-and-LoadPath.txt
   (Application Bootstrap · Shell & Load Path · ES modules · HTTP cache · gates BOOT/LOADING)
+  → Doc/02_shell/สถาปัตยกรรมระบบเว็บเกมโฮสต์.md
 
 คู่เอกสาร (AI Unit Goals / Stages — blueprint แยก stage ในอนาคต):
-  → AI-Stage-Goals-and-Actions.txt
+  → Doc/03_domains/ai/AI-Stage-Goals-and-Actions.txt
+  → Doc/03_domains/ai/NextPlan/  (Phase 1 ✓ · 2a Mediator+Stages ✓ · 2b General/Local path ✓ · 2c PLACE ✓ · 3 archetypes ✓)
   (Goal มี priority int · Event = Δpriority+จอง target · Enum TargetKind
    · Mediator เลือก Goal→Stage · Stages ไม่รู้จักกัน · Action ผ่าน Unified Input)
-  · คู่กับ §4 General vs Unit stage ด้านล่าง · โค้ดปัจจุบันยังเป็น decideEnemyActions ก้อนเดียว
+  · คู่กับ §4 General vs Unit stage ด้านล่าง · โค้ด: js/ai/* + decideEnemyActions ห่อ Mediator
+
+โดเมนแยกโฟกัส (ประหยัด token — @ โฟลเดอร์ ไม่ทั้ง Doc):
+  map-path · unit · weapon-item · input · block · turret · ai · world-gen · ui · menu-net
+  → Doc/03_domains/<ชื่อ>/
 
 ไอเดียสูงสุดที่จะทำเกมคือ
 ไอเดียเริ่มแรก Player เอาชีวิตรอดให้นานที่สุด  Enemy จะเกิดมาเป็น Wave
@@ -495,7 +504,7 @@ Q3. ตอนอยู่ stage โจมตี การเช็ค "หลุ
 - ลำดับเฟส: ทำระบบหลักให้เสร็จก่อน ค่อยคุยสเปกสิ่งก่อสร้างรอบนี้เต็มๆ
 
 6.Ui UX show
-เจาะลึก / สเปกยาว → ดูไฟล์ แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
+เจาะลึก / สเปกยาว → ดู Doc/01_blueprint/แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
 SVG เมนูสวยยังไม่มี — เฟสนี้ใช้ DOM/CSS placeholder ได้ · เน้น gameplay ก่อน
 สถานะแผน: UI ละเอียด Deferred ได้ · แต่ App Flow ด้านล่างล็อกใช้ทดสอบ Local Host คนเดียว
 
@@ -528,7 +537,7 @@ RESULT (แพ้/ชนะ)
 - แสดงสรุปสั้นได้ (เช่น wave ที่ถึง)
 
 7.Meun + Hashing join
-เจาะลึก lobby / Host / net → ดูไฟล์ แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
+เจาะลึก lobby / Host / net → ดู Doc/01_blueprint/แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
 
 เฟสทดสอบคนเดียว (ล็อกตอนนี้)
 - Local Host ในเครื่องเดียว · ไม่พึ่ง WebRTC / hash join ยัง
@@ -581,8 +590,48 @@ Pool ยูนิต
 
 ---
 สถานะส่งมอบ (Doc สถานะ · อัปเดตเมื่อโค้ดเปลี่ยน)
-อ้างอิง blueprint: แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
+อ้างอิง blueprint: Doc/01_blueprint/แผนงานและสถาปัตยกรรมระบบพัฒนาเกม.md
 ความจริงสเกล: Locked notes ท้ายแผน + บล็อกนี้
+
+NextPlan delivery (AI prerequisites → Stage Mediator) — ติ๊กตามโค้ดจริง
+อ้างอิง: Doc/03_domains/ai/NextPlan/ · Doc/03_domains/ai/AI-Stage-Goals-and-Actions.txt
+
+ข้อ 1 (parallel OOP — prerequisites)
+[✓] Tool ซ่อม (wrench) smallest + turret already exists; unit-specific can use
+[✓] Morale stats (and related) prepared for units/stages
+[✓] Area pad: explosion radius / trigger radius / value-send radius
+[✓] Explosion projectile AoE radius
+[✓] Shield: durability before break + pierce resistance
+[✓] Skill: CAST_SKILL in Unified Input; Player later UI; AI Stage does not “know” skill names — only Actions
+[✓] Heal tick (CONTINUOUS_TICK area mode)
+[✓] Taunt pulse event (TAUNT_TRIGGERED) as part of shield/skill groundwork
+
+ข้อ 2a
+[✓] Mediator + Blackboard + Event + Goal↔Stage basics (refactor out of decideEnemyActions)
+  · js/ai/blackboard.js · mediator.js · events.js · stages/{approach,engage,retreat,regroup,seek_point}.js
+  · decideEnemyActions = path/perception prep + Mediator → Unified Input (MOVE/AIM/FIRE/RELOAD)
+
+ข้อ 2b
+[✓] General main path = clear corridor (Path/L1 pivots, ignore nature micro-bend) → write pathGoal/pivots to Blackboard; Local dodges real obstacles + Raycast fan 1→3→5 (~45°) + rear Pi + steering budget (~10) → PATH_BLOCKED / ELIMINATE_TARGET
+  · js/general.js (clear corridor) · js/ai/local_group_manager.js · decideEnemyActions prep → Mediator
+
+ข้อ 2c
+[✓] Special stages: PLACE (+ PLACE_TRAP / REPAIR_STRUCTURE Goals)
+  · js/ai/stages/place.js · place_kit.js (prime blackboard + inventory)
+  · Goals PLACE_TRAP / REPAIR_STRUCTURE → Stage PLACE → Unified PLACE / HARVEST
+  · tryPlace / tryHarvest shared for unit inventory (AI no cheat path)
+
+ข้อ 3
+[✓] Unit setup / archetypes (incl. Phase Boss) compose Goals+Stages
+  · UNIT_ARCHETYPE_REGISTRY + WAVE_ARCHETYPE_COMPOSITION in js/config.js
+  · Mediator filters Goals → allowedGoals only (berserker never SURVIVE_RETREAT)
+  · Live in waves: GRUNT_BASIC, SUICIDE_BERSERKER, STEALTH_SNIPER, STEALTH_SHADOW_MELEE,
+    SUPPORT_MEDIC, COWARD_UNIT, COMMANDER_LEADER, COMBAT_ENGINEER, SHIELD_VANGUARD,
+    FLANK_SKIRMISHER, DYNAMIC_PHASE_BOSS (hpRatio swaps weapon+allowedGoals)
+  · Registry also: STEALTH_ASSAULT_HEAVY (wave 6 mix), STEALTH_DEMOLITION_SIEGE (data only / no wave)
+  · Gaps (light): medic ally targeting rule full group-scope; engineer PLACE needs place_kit prime;
+    MELEE_SAW/MELEE_DASH = shotgun + SPEED_BOOST stand-in; commander-death morale spike stubbed
+  · NextPlan core (prereqs → Mediator → archetypes) complete for portfolio; polish/balance open
 
 Set A (ล็อก — ตรง config.js)
 - Path 1024 · L1 512 · L2 256 · L3 64 · place 16×16 ต่อ Path
@@ -590,7 +639,10 @@ Set A (ล็อก — ตรง config.js)
 
 ล็อกเกมเพลย์ที่โค้ดทำตามแล้ว
 - WEAPON_REGISTRY เดียว · turret/Base ใช้ weaponId เดียวกัน + infiniteAmmo บนบล็อก
-- Boss = archetype + weapon + sizeScale ~1.5 / isBoss · ไม่แยก JSON boss-only
+- Bot fire/standoff = weapon maxDistancePath (preferredRange = mult ของระยะอาวุธ)
+- FIST + tool melee timings (0.1 open · fist CD 0.3 · tool CD 0.2) · Wire กันกระสุน
+- Craft recipes ครบ weapon/tool/placeable/ammo/turret (ยกเว้น raw resource)
+- Armor slot activeArmorId (cosmetic marker) · Shield slot activeShieldId (ItemKind.SHIELD · craft SHIELD_BASIC) · Boss = archetype + weapon + sizeScale ~1.5 / isBoss · ไม่แยก JSON boss-only
 - Craft UI เปิด = MOVE เท่านั้น (ไม่ยิง/สลับ hotbar/interact) · ไม่บังคับ Action CRAFT_ITEM
 - CollisionLayer type: GROUND1 · NATURE2 · TEAM_1=3 · TEAM_2=4 · TEAM_3=5 · OTHER6 · hitMask บน projectile/beam
 - Laser CONTINUOUS_BEAM ตามปากกระบอก+เล็งทุกเฟรม · pierceCost ร่วม · ไม่ pierce = หยุดที่ชนแรก · lock = beamDuration แล้ว cooldown
@@ -613,11 +665,11 @@ Set A (ล็อก — ตรง config.js)
 [~] Audio mute · asset ASCII path — ASCII path มี · ระบบเสียง mute ยังไม่ครบ
 
 บางส่วน / เบาใน V1
-[~] Sector Pi / Local General — baseline พอเล่น · ยังไม่เต็มสเปกแผน
+[~] Sector Pi / Local General — Phase 2b Local raycast fan + steering budget + PATH_BLOCKED; full flank/detach still light
 [~] Pierce หลายบล็อก / งบ pierce ซับซ้อน — V1 ใช้ pierceCost ร่วมแบบง่าย
 [~] Inventory แผนเดิม 6→10 ช่อง — โค้ดใช้ hotbar/ช่องคงที่ตาม pack (ไม่ครบกระเป๋าหลายขนาด)
 [~] Friendly-fire Host setting — ยังไม่โหมด Host เต็ม
-[~] AI DFS/ชั้นคิด Path→L3 เต็มตามข้อ 4 — มีขั้นใช้ได้ · ยังไม่ครบทุกเคสแผน
+[~] AI DFS/ชั้นคิด Path→L3 เต็มตามข้อ 4 — General clear corridor Path/L1 + Local dodge; ยังไม่ครบทุกเคสแผน
 [~] UI SVG สวย / มินิแมพ — DOM/CSS placeholder + gameplay ก่อน
 [~] Bake SVG→bitmap pool เต็มโควตา — มี pool พื้นฐาน
 
@@ -635,10 +687,29 @@ Deploy checklist (static)
 
 หมายเหตุ agent
 - อย่าแก้ .cursor/
-- แผนงาน MD = blueprint · AskKeep = Doc สถานะ+ล็อกถามตอบ · ตัวเลข Path ต้องตรง Set A
+- แผนที่: Doc/INDEX.md · แผนงาน MD = blueprint · AskKeep = สถานะ+ล็อกถามตอบ · ตัวเลข Path ต้องตรง Set A
+- โฟกัสงาน: @ Doc/03_domains/<โดเมน> หรือ Doc/02_shell — อย่า @ ทั้ง Doc/
 - เมื่อเพิ่มฟีเจอร์ใหญ่: ติ๊กสถานะด้านบน · อย่าปล่อย 800/400/200/100 กลับมาในเอกสารนี้
 - 2026-10-01: Boot `Unexpected token export` = tryPlace ใน sim.js ขาด `}` — แก้แล้ว
 - 2026-10-01: จอดำ PLAYING = canvas resize ก่อน layout + renderWorld ล้าง DPR — แก้ ensureCanvasSize + setTransform(dpr*zoom)
 - 2026-10-01: วางบล็อกไม่หมด = tryPlace ไม่ consume — แก้หักใน sim; freeCraft ไม่เกี่ยว place
 - 2026-10-01: หลังวาง Base ลูปตาย = syncBaseStorageFromGenerators หาย — เติมแล้ว; playerReloadOpts เติมแล้ว
+- 2026-10-02 polish backlog (locked):
+  · WEAPON: M1991 mag 9 / spare 27 (maxMags 4) HUD `9/27` · fire×2 M1991 0.6 / SMG 0.3 / AK47 0.45 · SHOTGUN_BUCK(+mod) spreadDeg 10
+  · Bot engage/approach/fire gate = weapon.maxDistancePath×PATH_SIZE (+ preferredRange mult standoff) — ไม่ใช้ L3*4 band เป็นหลัก
+  · FIST skill ทุกยูนิต: open 0.1s → CD 0.3 · tools open 0.1 / CD 0.2 · shared meleeSwing · scene VFX (MeleeVol = debug only) · Q / Fist button · Unified CAST_SKILL
+  · Wire blocksProjectiles (ยิงทะลุไม่ได้ · รวมทีมตัวเอง) · WIRE_MELEE_MULT คง · fist ใกล้สาย
+  · Craft: ปิดช่องว่าง M1991 / LAZER_HEAL / TOOL_AXE / TOOL_PICK / BASE_CORE_3X3 / FACTORY / GRENADE / ARMOR_VEST / TURRET_M1911 — raw WOOD/STONE/IRON ยัง harvest/gen only
+  · Armor: ItemKind.ARMOR + activeArmorId ช่องเดียว · startingArmorId ARMOR_VEST · canvas marker · shield inventory-active ยังรอ (hook ผ่าน slot pattern เดียวกัน)
+- 2026-10-02 deferred polish landed:
+  · Cosmetics: UNIT_EQUIP_ART ใน js/cosmetics.js · held weapon/tool/fist + armor front-plate + shield ที่ front rim ตาม aimRad (player+AI) · Path2D preload cache
+  · [~] SVG overlay assets ยังไม่มี (Unit_Template pivots ว่าง) — canvas Path2D cosmetics เป็นหลัก · svgHref/bitmapSrc reserved + pixelated เมื่อมี bitmap
+  · Shield item: ItemKind.SHIELD + activeShieldId ช่องแยกจาก armor · SHIELD_BASIC + craft_shield_basic · SELECT_HOTBAR equip · item OR passive archetype (item ชนะตอนใส่ · unequip คืน passive)
+  · Choice: separate activeShieldId channel (ไม่รวมกับ armor) — ทั้งสองใส่พร้อมกันได้
+- 2026-10-02 visual polish (locked):
+  · Front-edge cosmetics: gun/melee/tool/shield ยึดขอบหน้า unit (aimDir×radius) ไม่จากกลางลำตัว · armor = plate หน้าอก ไม่วงเต็ม
+  · Tool/melee silhouettes: TOOL_AXE / TOOL_PICK / TOOL_WRENCH / FIST ใน UNIT_EQUIP_ART · แสดงตาม hotbar tool / swing / ไม่มีปืน
+  · Explosion red AoE fade: match.explosionVfx จาก applyExplosionAoE (projectile + mine ONE_SHOT) · tick ใน sim · draw ใน render
+  · Preload/cache hide-show: Path2D cache ตาม type/shape ที่ BOOT + MATCH LOADING · ไม่ alloc ใหม่ตอน craft/equip
+- 2026-10-02 locked tweaks landed: empty-hands cosmetics (no weaponId/FIST fallback) · bulletSpeed×2 (beams 9999) · SHOTGUN_BUCK spread 10° · projectile draw = oriented line
 

@@ -61,6 +61,7 @@ function collectDom() {
     btnFreeCraft: document.getElementById('btn-free-craft'),
     btnManualSave: document.getElementById('btn-manual-save'),
     btnMeleeVol: document.getElementById('btn-melee-vol'),
+    btnFist: document.getElementById('btn-fist'),
     btnCheat: document.getElementById('btn-cheat'),
     cheatPanel: document.getElementById('panel-cheat'),
     cheatClose: document.getElementById('cheat-close'),

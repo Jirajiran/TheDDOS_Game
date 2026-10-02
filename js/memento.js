@@ -140,6 +140,8 @@ export function serializeMatchSnapshot(match) {
       combatTargetId: u.combatTargetId,
       aggroBlockId: u.aggroBlockId != null ? u.aggroBlockId : -1,
       localGeneral: !!u.localGeneral,
+      activeArmorId: u.activeArmorId || null,
+      activeShieldId: u.activeShieldId || null,
     });
   }
 

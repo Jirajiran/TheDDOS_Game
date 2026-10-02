@@ -101,12 +101,22 @@ export function canFireAmmo(ammo, weaponDef) {
   return ammo.ammoInMag >= (weaponDef.burstCount || 1);
 }
 
+/**
+ * HUD: mag rounds / spare rounds (e.g. M1991 full load → 9/27).
+ * reserveOverride = inventory ammoType stock (mag packs) when provided.
+ */
 export function formatAmmoHud(ammo, weaponDef, reserveOverride = null) {
   if (!weaponDef) return '—';
   if (weaponDef.infiniteAmmo) return '∞';
   if (!ammo) return '0/0';
   const reloading = ammo.reloadTimer > 0 ? ' RLD' : '';
-  const reserve =
-    typeof reserveOverride === 'number' ? reserveOverride : ammo.mags;
-  return `${ammo.ammoInMag}/${weaponDef.magCapacity} · ${reserve} res${reloading}`;
+  const magCap = weaponDef.magCapacity || 1;
+  const shell = weaponDef.reloadType === ReloadType.INDIVIDUAL_SHELL;
+  let spare;
+  if (typeof reserveOverride === 'number') {
+    spare = shell ? reserveOverride : reserveOverride * magCap;
+  } else {
+    spare = shell ? ammo.mags : ammo.mags * magCap;
+  }
+  return `${ammo.ammoInMag}/${spare}${reloading}`;
 }

@@ -2,9 +2,14 @@ import {
   GAME_PACK,
   ItemKind,
   getItemDef,
+  getUnitArchetype,
   getWeaponDef,
 } from './config.js';
 import { createAmmoState } from './weapons.js';
+import {
+  createShieldState,
+  seedShieldFromArchetype,
+} from './shield.js';
 
 /**
  * Real hotbar / inventory slots (not color stubs).
@@ -85,6 +90,76 @@ export function isWeaponSlot(slot) {
 
 export function isToolSlot(slot) {
   return slot && slot.kind === ItemKind.TOOL && slot.count > 0;
+}
+
+export function isArmorSlot(slot) {
+  return slot && slot.kind === ItemKind.ARMOR && slot.count > 0;
+}
+
+export function isShieldSlot(slot) {
+  return slot && slot.kind === ItemKind.SHIELD && slot.count > 0;
+}
+
+/**
+ * Single active armor slot — equipping a new armor deactivates the previous
+ * in the same assignment (never two activeArmorId values).
+ */
+export function equipArmorOnUnit(unit, itemId) {
+  if (!unit) return false;
+  if (!itemId) {
+    unit.activeArmorId = null;
+    return true;
+  }
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== ItemKind.ARMOR) return false;
+  unit.activeArmorId = def.id;
+  return true;
+}
+
+export function getArmorDamageReduction(unit) {
+  if (!unit || !unit.activeArmorId) return 0;
+  const def = getItemDef(unit.activeArmorId);
+  if (!def || typeof def.damageReduction !== 'number') return 0;
+  return Math.max(0, Math.min(0.85, def.damageReduction));
+}
+
+/**
+ * Single active shield slot (separate channel from armor — both can be on).
+ * Equip new = deactivate old same frame; enables/refreshes unit.shield from item.
+ * Unequip restores archetype hasPassiveShield if present (item OR passive).
+ */
+export function equipShieldOnUnit(unit, itemId) {
+  if (!unit) return false;
+  if (!itemId) {
+    unit.activeShieldId = null;
+    restorePassiveOrClearShield(unit);
+    return true;
+  }
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== ItemKind.SHIELD) return false;
+  unit.activeShieldId = def.id;
+  unit.shield = createShieldState({
+    maxHp: def.shieldMaxHp != null ? def.shieldMaxHp : 100,
+    radius: def.shieldRadius != null ? def.shieldRadius : undefined,
+    offset: def.shieldOffset != null ? def.shieldOffset : undefined,
+    pierceCost: def.shieldPierceCost != null ? def.shieldPierceCost : 2,
+    absorbRatio: def.shieldAbsorbRatio != null ? def.shieldAbsorbRatio : 1,
+    regenPerSec: def.shieldRegenPerSec != null ? def.shieldRegenPerSec : 0,
+    enabled: true,
+    broken: false,
+    source: 'item',
+  });
+  return true;
+}
+
+function restorePassiveOrClearShield(unit) {
+  const arch = getUnitArchetype(unit.archetypeId);
+  if (arch && arch.hasPassiveShield) {
+    seedShieldFromArchetype(unit, arch);
+    if (unit.shield) unit.shield.source = 'passive';
+    return;
+  }
+  unit.shield = null;
 }
 
 export function consumeSlotItem(inventory, slotIndex, amount = 1) {

@@ -4,6 +4,7 @@
  */
 
 import { runParallelStages, wait } from './loadPipeline.js';
+import { preloadEquipArtCache } from './cosmetics.js';
 
 export const BOOT_ASSETS = Object.freeze([
   { id: 'css', url: 'css/main.css' },
@@ -69,6 +70,12 @@ export async function runBootPreload(onProgress, options = {}) {
     required: false,
     run: () => fetchAsset(entry),
   }));
+  stages.push({
+    id: 'equip_art_cache',
+    timeoutMs: 2000,
+    required: false,
+    run: () => preloadEquipArtCache(),
+  });
 
   const { results, warnings } = await runParallelStages(stages, {
     defaultTimeoutMs: ASSET_TIMEOUT_MS + 500,

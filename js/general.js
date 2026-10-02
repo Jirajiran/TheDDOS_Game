@@ -2,7 +2,11 @@ import { L1_SIZE, PATH_SIZE, TEAM } from './config.js';
 
 /**
  * AI General — Path/L1 pivot chains, lane booking, segment handoff.
- * Units follow A→B then next; Approach/Engage/Retreat sit on top in sim.
+ *
+ * Clear-corridor planning: pivots are strategic Path/L1 hops only.
+ * Nature wood/stone/ore is ignored here (no per-cell BFS / micro-bend).
+ * Real obstacle dodge + steering budget live in js/ai/local_group_manager.js.
+ * Units follow A→B then next; Unit Stages only read blackboard pathGoal.
  */
 
 const LANE_ORDER = Object.freeze(['left', 'mid', 'right']);
@@ -144,7 +148,8 @@ function bookLane(general, side) {
 
 /**
  * Build A→B→C pivot chain from spawn toward target (base/player Path).
- * Lane offsets snap to L1 edge/center points.
+ * Simulates a clear corridor on Path/L1 — does not query occupancy or nature.
+ * Lane offsets snap to L1 edge/center points (few strategic pivots, not L3 BFS).
  */
 export function buildPivotChain(world, spawnX, spawnY, targetX, targetY, lane, match = null) {
   const startPath = pathIndexOf(world, spawnX, spawnY);
@@ -323,6 +328,9 @@ export function deployPreparedGroups(match, prepared, targetX, targetY) {
       spotted: false,
       sectorStart: 0,
       sectorEnd: Math.PI * 2,
+      /** Shared Local steering budget (~10 dodge pivots). */
+      steeringBudgetMax: 10,
+      steeringUsed: 0,
     };
     if (p.positions && p.positions.length) {
       const sx = p.positions[0].x;
@@ -381,8 +389,9 @@ export function advanceUnitAlongChain(match, unit) {
 }
 
 /**
- * If segment blocked by player-team placeable or resource, return sub-pivot
- * and allow shooting/destroying the blocker.
+ * Segment sample for Local layer (not General planning).
+ * Returns a coarse lateral dodge goal + optional attackBlock.
+ * Prefer applyLocalPathLayer — this is the low-level probe helper.
  */
 export function resolveObstacleOnPath(match, unit, goal) {
   if (!goal || !match.blocks) return { goal, attackBlock: null };
@@ -394,7 +403,7 @@ export function resolveObstacleOnPath(match, unit, goal) {
     const block = findSolidBlockAt(match, x, y);
     if (!block) continue;
     if (!isPathBlockingTarget(block)) continue;
-    // Sub-pivot: offset perpendicular within Path
+    // Sub-pivot: offset perpendicular at Path/L1 scale (Local spends steering budget).
     const dx = goal.x - unit.x;
     const dy = goal.y - unit.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -413,7 +422,10 @@ export function resolveObstacleOnPath(match, unit, goal) {
   return { goal, attackBlock: null };
 }
 
-/** Player structures + harvest resources may be destroyed when blocking. */
+/**
+ * Real walk blockers for Local (nature + player-built).
+ * General clear-corridor planning never calls this.
+ */
 function isPathBlockingTarget(block) {
   if (!block.alive || block.isOpen) return false;
   if (block.walkSolid === false) return false;
