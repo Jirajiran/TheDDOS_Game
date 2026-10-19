@@ -633,13 +633,23 @@ NextPlan delivery (AI prerequisites → Stage Mediator) — ติ๊กตา�
     MELEE_SAW/MELEE_DASH = shotgun + SPEED_BOOST stand-in; commander-death morale spike stubbed
   · NextPlan core (prereqs → Mediator → archetypes) complete for portfolio; polish/balance open
 
+คิวไอเดีย (ยังไม่ทำ)
+- Fog of war หนักตอนกลางคืน — vision/reveal แยกจาก night AI fire-decision mul + purple overlay (day.json) ที่มีแล้ว
+
+GameLoop / บาลานซ์แมตช์ (อ้างอิง)
+- Repo curve + ตารางคลื่น: Doc/01_blueprint/gameloop-curve.md
+- Google Doc (กราฟ/เขียนยาว นอก repo — ไม่ sync JSON อัตโนมัติ):
+  https://docs.google.com/document/d/143kRF3GL2rUaVlI8EGQ4Z8XtC1Hr-DQwRnmXs0lHbgE/edit?hl=th
+- ความจริงตัวเลข = data/pack/rules.json · day.json · archetypes.json · weapons.aiFireRangePath
+- Bot กดยิง = aiFireRangePath (คนละค่า maxDistancePath กระสุน); preferredRange สเกลจาก fire band
+
 Set A (ล็อก — ตรง config.js)
 - Path 1024 · L1 512 · L2 256 · L3 64 · place 16×16 ต่อ Path
 - ตัวเลข 800/400/200/100 = เก่า · ไม่ใช้ในโค้ด/เอกสารนี้อีก
 
 ล็อกเกมเพลย์ที่โค้ดทำตามแล้ว
 - WEAPON_REGISTRY เดียว · turret/Base ใช้ weaponId เดียวกัน + infiniteAmmo บนบล็อก
-- Bot fire/standoff = weapon maxDistancePath (preferredRange = mult ของระยะอาวุธ)
+- Bot fire/standoff = aiFireRangePath (กดยิง) · maxDistancePath = กระสุน · preferredRange = mult ของ fire band
 - FIST + tool melee timings (0.1 open · fist CD 0.3 · tool CD 0.2) · Wire กันกระสุน
 - Craft recipes ครบ weapon/tool/placeable/ammo/turret (ยกเว้น raw resource)
 - Armor slot activeArmorId (cosmetic marker) · Shield slot activeShieldId (ItemKind.SHIELD · craft SHIELD_BASIC) · Boss = archetype + weapon + sizeScale ~1.5 / isBoss · ไม่แยก JSON boss-only
@@ -685,8 +695,14 @@ Deploy checklist (static)
 [ ] เครดิตผู้สร้างตอนส่งมอบ
 [✓] ไม่พึ่ง backend หนักสำหรับเล่นจบ V1
 
+OOP skill pack (ติดตั้งแล้ว — เข้าใจโครงสร้างโค้ด / รีวิวก่อน optimize)
+- ที่มา: https://github.com/45ck/oop-code-structure-skills.git
+- Cursor: `.cursor/skills/` (12 skills · มี description สำหรับ discover)
+- Mirror: `.agents/skills/` · `.claude/skills/`
+- อ่านดัชนี: Doc/99_log/oop-code-structure-PACK_INDEX.md
+
 หมายเหตุ agent
-- อย่าแก้ .cursor/
+- อย่าแก้ .cursor/rules/ · skills ใน .cursor/skills/ ติดตั้งตามแพ็ก OOP ได้
 - แผนที่: Doc/INDEX.md · แผนงาน MD = blueprint · AskKeep = สถานะ+ล็อกถามตอบ · ตัวเลข Path ต้องตรง Set A
 - โฟกัสงาน: @ Doc/03_domains/<โดเมน> หรือ Doc/02_shell — อย่า @ ทั้ง Doc/
 - เมื่อเพิ่มฟีเจอร์ใหญ่: ติ๊กสถานะด้านบน · อย่าปล่อย 800/400/200/100 กลับมาในเอกสารนี้

@@ -1,12 +1,19 @@
 import { L1_SIZE, L3_SIZE, TEAM } from './config.js';
 import { drawUnitEquipCosmetics } from './cosmetics.js';
-import { getMeleeVolume } from './sim.js';
+import {
+  drawUnitVisualBack,
+  drawUnitVisualFront,
+  getUnitArm1PivotWorld,
+} from './unitVisual.js';
+import { getNightOverlayStyle } from './dayCycle.js';
 
 /**
  * World + units + projectiles + blocks + drops + place ghost.
  * @param {number} [dpr=1] devicePixelRatio scale — must match drawPlaying buffer.
+ * @param {number} [viewCssW] CSS viewport width for night overlay
+ * @param {number} [viewCssH] CSS viewport height for night overlay
  */
-export function renderWorld(ctx, world, camera, match, dpr = 1) {
+export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCssH) {
   if (!world) return;
   const zoom = camera && camera.zoom > 0 ? camera.zoom : 1;
   const scale = (dpr > 0 ? dpr : 1) * zoom;
@@ -77,9 +84,6 @@ export function renderWorld(ctx, world, camera, match, dpr = 1) {
     drawDrops(ctx, match.pools && match.pools.drops, zoom);
     drawPlaceGhost(ctx, match.placeGhost, zoom);
     drawUnits(ctx, match.pools && match.pools.units, zoom, match);
-    if (match.showMeleeVolume) {
-      drawMeleeVolumes(ctx, match, zoom);
-    }
     drawMeleeVfx(ctx, match.meleeVfx, zoom);
     drawExplosionVfx(ctx, match.explosionVfx, zoom);
     drawProjectiles(ctx, match.pools && match.pools.projectiles, zoom);
@@ -87,6 +91,21 @@ export function renderWorld(ctx, world, camera, match, dpr = 1) {
   }
 
   ctx.restore();
+
+  // Night tint — screen-space over world, under HTML/SVG HUD.
+  if (match) {
+    const ov = getNightOverlayStyle(match.nightBlend || 0);
+    if (ov.alpha > 0.001) {
+      const cssW = viewCssW > 0 ? viewCssW : ctx.canvas.width / (dpr || 1);
+      const cssH = viewCssH > 0 ? viewCssH : ctx.canvas.height / (dpr || 1);
+      ctx.save();
+      ctx.setTransform(dpr > 0 ? dpr : 1, 0, 0, dpr > 0 ? dpr : 1, 0, 0);
+      ctx.globalAlpha = ov.alpha;
+      ctx.fillStyle = ov.color;
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.restore();
+    }
+  }
 }
 
 function drawBaseChunk(ctx, zone, zoom) {
@@ -193,28 +212,6 @@ function drawBlocks(ctx, blocks, zoom) {
   }
 }
 
-function drawMeleeVolumes(ctx, match, zoom) {
-  const units = match.pools && match.pools.units;
-  if (!units) return;
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    if (!u.active) continue;
-    if (u.role !== 'player' && u.team !== TEAM.PLAYER) continue;
-    const vol = getMeleeVolume(u);
-    ctx.save();
-    ctx.translate(vol.ox, vol.oy);
-    ctx.rotate(vol.ang);
-    ctx.fillStyle = 'rgba(220, 40, 40, 0.28)';
-    ctx.strokeStyle = 'rgba(220, 40, 40, 0.55)';
-    ctx.lineWidth = 2 / zoom;
-    const x0 = vol.start;
-    const y0 = -vol.halfW;
-    ctx.fillRect(x0, y0, vol.reach, vol.halfW * 2);
-    ctx.strokeRect(x0, y0, vol.reach, vol.halfW * 2);
-    ctx.restore();
-  }
-}
-
 function drawDrops(ctx, drops, zoom) {
   if (!drops) return;
   for (let i = 0; i < drops.length; i++) {
@@ -251,29 +248,38 @@ function drawUnits(ctx, units, zoom, match) {
     if (!u.active) continue;
 
     const isPlayer = u.role === 'player' || u.team === TEAM.PLAYER;
-    ctx.fillStyle = isPlayer ? '#f0e6c8' : stageColor(u);
-    ctx.beginPath();
-    ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 2 / zoom;
-    ctx.stroke();
+    // Z: AssetBottom → Arm → Weapon → Body → AssetTop
+    const drewBack = drawUnitVisualBack(ctx, u, zoom);
+    if (!drewBack) {
+      // Fallback circle until Unit_Template raster ready.
+      ctx.fillStyle = isPlayer ? '#f0e6c8' : stageColor(u);
+      ctx.beginPath();
+      ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2 / zoom;
+      ctx.stroke();
 
-    const len = isPlayer ? u.radius + 16 : u.radius + 8;
-    ctx.strokeStyle = isPlayer ? '#ffe08a' : '#ffaaaa';
-    ctx.lineWidth = 2 / zoom;
-    ctx.beginPath();
-    ctx.moveTo(u.x, u.y);
-    ctx.lineTo(u.x + Math.cos(u.aimRad) * len, u.y + Math.sin(u.aimRad) * len);
-    ctx.stroke();
+      const len = isPlayer ? u.radius + 16 : u.radius + 8;
+      ctx.strokeStyle = isPlayer ? '#ffe08a' : '#ffaaaa';
+      ctx.lineWidth = 2 / zoom;
+      ctx.beginPath();
+      ctx.moveTo(u.x, u.y);
+      ctx.lineTo(u.x + Math.cos(u.aimRad) * len, u.y + Math.sin(u.aimRad) * len);
+      ctx.stroke();
+    }
 
-    // Held weapon / tool / armor / shield — front-rim anchors; mirror sim only.
-    const cosOpts = { isPlayer };
+    // Weapon/item between arms and body (tools snap Pivot_Arm_1).
+    const cosOpts = { isPlayer, arm1Pivot: getUnitArm1PivotWorld(u) };
     if (isPlayer && match) {
       cosOpts.inventory = match.inventory || match.hotbar;
       cosOpts.activeHotbar = match.activeHotbar;
     }
     drawUnitEquipCosmetics(ctx, u, zoom, cosOpts);
+
+    if (drewBack) {
+      drawUnitVisualFront(ctx, u, zoom);
+    }
 
     if (u.maxHp > 0 && u.hp < u.maxHp) {
       const ratio = Math.max(0, u.hp / u.maxHp);

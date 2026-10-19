@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "targetWaveToWin": 7,
+  "setupPhaseDurationSec": 60,
+  "waveCountdownSec": 20,
+  "enemiesPerWaveBase": 3,
+  "enemiesPerWaveScale": 1,
+  "waveGroupCount": 3,
+  "playerMaxHp": 850,
+  "playerSpeed": 200,
+  "playerActiveSkills": ["FIST", "SELF_HEAL"]
+}

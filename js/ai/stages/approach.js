@@ -1,11 +1,11 @@
 /**
  * APPROACH_PATH — walk toward pathGoal (or sticky combat while closing if reserved).
  * Single job: MOVE (+ light AIM). No Goal selection.
- * Fire while approaching uses weapon maxDistancePath (same as sim / turrets).
+ * Fire while approaching uses AI fire-decision range (night mul; bullet range unchanged).
  */
 
 import { ActionType } from '../../actions.js';
-import { getWeaponMaxRangePx } from '../../config.js';
+import { getAiFireDecisionRangePx } from '../../dayCycle.js';
 
 export function runApproach(ctx) {
   const { unit, pathGoal, combatTarget, dt } = ctx;
@@ -58,18 +58,18 @@ export function runApproach(ctx) {
 }
 
 function maybeFireWhileApproaching(ctx, actions) {
-  const { unit, combatTarget, canFireAmmo, getWeaponDef } = ctx;
+  const { unit, combatTarget, canFireAmmo, getWeaponDef, match } = ctx;
   if (!unit.weaponId || !combatTarget) return;
   const weapon = getWeaponDef(unit.weaponId);
-  const fireRange = getWeaponMaxRangePx(weapon);
-  if (fireRange <= 0) return;
+  const aiFireRange = getAiFireDecisionRangePx(weapon, match, unit);
+  if (aiFireRange <= 0) return;
   const targetDist = combatTarget.dist;
   const shootingBlocker =
     combatTarget.kind === 'block' && unit.attackBlockId >= 0;
-  const aggroInRange = unit.aggroChase && targetDist <= fireRange;
+  const aggroInRange = unit.aggroChase && targetDist <= aiFireRange;
   if (
     (shootingBlocker || aggroInRange) &&
-    targetDist <= fireRange &&
+    targetDist <= aiFireRange &&
     canFireAmmo(unit, weapon)
   ) {
     actions.push({ type: ActionType.FIRE, unitId: unit.id });

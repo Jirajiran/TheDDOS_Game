@@ -4,9 +4,11 @@
  */
 
 import {
+  getSenseRadiusPx,
   getWeaponDef,
   getWeaponMaxRangePx,
 } from '../config.js';
+import { getAiFireDecisionRangePx } from '../dayCycle.js';
 import {
   Goal,
   addEventBoost,
@@ -152,7 +154,7 @@ export function processUnitEvents(match, unit, ctx) {
   }
 
   if (combat && combat.kind === 'unit') {
-    const engage = pack.enemyEngageRadius;
+    const engage = getSenseRadiusPx(unit) || pack.enemyEngageRadius;
     if (combat.dist <= engage * 1.25 || unit.aggroChase) {
       applyBoostMap(bb, table.SPOTTED_PLAYER);
       bb.flags.SPOTTED_PLAYER = true;
@@ -163,7 +165,10 @@ export function processUnitEvents(match, unit, ctx) {
 
   if (combat && (combat.kind === 'base' || (combat.block && combat.block.isDefeatCondition))) {
     const weapon = unit.weaponId ? getWeaponDef(unit.weaponId) : null;
-    const fireR = getWeaponMaxRangePx(weapon) || pack.enemyFireRadius;
+    const fireR =
+      getAiFireDecisionRangePx(weapon, match, unit) ||
+      getWeaponMaxRangePx(weapon) ||
+      pack.enemyFireRadius;
     if (combat.dist <= fireR * 1.35) {
       applyBoostMap(bb, table.BASE_IN_RANGE);
       bb.flags.BASE_IN_RANGE = true;

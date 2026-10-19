@@ -5,65 +5,100 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TheDDOS — Local Host</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/main.css?v=20261019r" />
   </head>
   <body>
     <div id="app">
-      <!-- MENU (shown after boot preload) -->
+      <!-- MENU (shown after boot preload) — MainMenu.svg + thin HTML overlays -->
       <section id="screen-menu" class="screen" hidden aria-label="Menu">
-        <div class="menu-panel">
-          <h1 class="brand">TheDDOS</h1>
-          <p class="tagline">Local Host · Survival V1</p>
-
-          <div class="lobby-box">
-            <label class="field">
-              <span>World mode</span>
-              <select id="sel-mode">
-                <option value="FLAT_SURVIVAL">Flat (no resources)</option>
-                <option value="WORLD_TYPE">World Type (trees / stone / ore)</option>
-              </select>
-            </label>
-            <div class="room-row">
-              <span class="room-label">Room</span>
-              <code id="room-code" class="room-code">------</code>
-            </div>
-            <button type="button" id="btn-join" class="btn btn-ghost" disabled title="Network join stub">
-              Join (disabled)
-            </button>
-            <p id="join-stub" class="stub-msg">Network join stub — Local Host only.</p>
+        <div id="main-menu-mount" class="main-menu-mount" aria-hidden="false"></div>
+        <div class="main-menu-overlays" aria-label="Menu inputs">
+          <input
+            type="text"
+            id="menu-name-input"
+            class="menu-overlay-input menu-name-input"
+            maxlength="24"
+            placeholder="YOUR NAME"
+            autocomplete="nickname"
+          />
+          <input
+            type="text"
+            id="menu-room-input"
+            class="menu-overlay-input menu-room-input"
+            maxlength="8"
+            inputmode="numeric"
+            placeholder="1234567"
+            hidden
+          />
+          <input
+            type="text"
+            id="menu-join-input"
+            class="menu-overlay-input menu-join-input"
+            maxlength="32"
+            placeholder="Input"
+            hidden
+          />
+        </div>
+        <!-- Legacy hooks kept for app.js / boot (hidden — SVG drives UX) -->
+        <div class="menu-legacy" hidden aria-hidden="true">
+          <select id="sel-mode">
+            <option value="FLAT_SURVIVAL">Flat</option>
+            <option value="WORLD_TYPE">World Type</option>
+          </select>
+          <code id="room-code">------</code>
+          <button type="button" id="btn-join">Join</button>
+          <p id="join-stub"></p>
+          <button type="button" id="btn-start">Start</button>
+          <button type="button" id="btn-restore">Restore</button>
+          <button type="button" id="btn-clear-snap">Clear Snapshot</button>
+          <p id="snap-status"></p>
+          <div id="save-drop-zone" tabindex="-1">
+            <input type="file" id="save-file-input" accept="application/json,.json" />
           </div>
-
-          <button type="button" id="btn-start" class="btn">Start Local Host</button>
-          <button type="button" id="btn-restore" class="btn btn-ghost" hidden>
-            Restore Local Snapshot
-          </button>
-          <button type="button" id="btn-clear-snap" class="btn btn-ghost" hidden>
-            Clear Snapshot
-          </button>
-          <p id="snap-status" class="stub-msg" hidden></p>
-
-          <div class="save-file-opt" aria-label="Optional load save file">
-            <p class="opt-label">Option — Load exported save</p>
-            <div id="save-drop-zone" class="save-drop-zone" tabindex="0">
-              Drop <code>.json</code> save here, or
-              <label class="save-file-label">
-                Load file…
-                <input type="file" id="save-file-input" accept="application/json,.json" hidden />
-              </label>
-            </div>
-            <p id="save-file-status" class="stub-msg" hidden></p>
-          </div>
-
-          <p class="hint">
-            Place Base · build walls/turret/gen · Craft (MOVE only while open) · R reload · E interact · WASD · aim · clear wave 7
-          </p>
+          <p id="save-file-status"></p>
         </div>
       </section>
 
-      <!-- BOOT / MATCH LOADING (visible first so shell is never clickable half-ready) -->
+      <!-- Loading UI = HTML/CSS (SVG files = art reference only) -->
       <section id="screen-loading" class="screen is-active" aria-label="Loading">
-        <div class="loading-panel">
-          <h2 id="loading-title">Booting TheDDOS</h2>
+        <div id="loading-main" class="loading-view loading-view--main" aria-label="Boot loading">
+          <div class="loading-view__center">
+            <h1 id="loading-main-title" class="loading-view__title">THE DDOS</h1>
+            <div class="loading-bar loading-bar--menu" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+              <div id="loading-main-fill" class="loading-bar__fill"></div>
+            </div>
+          </div>
+        </div>
+        <div id="loading-gameplay" class="loading-view loading-view--gameplay" hidden aria-label="Match loading">
+          <div class="loading-gp">
+            <h1 id="loading-gp-map" class="loading-gp__map">NAMEMAP</h1>
+            <div class="loading-gp__mid">
+              <div class="loading-gp__left">
+                <div id="loading-gp-mapicon" class="loading-gp__mapicon" aria-hidden="true"></div>
+              </div>
+              <div class="loading-gp__center">
+                <p id="loading-gp-mode" class="loading-gp__mode">MODE:</p>
+              </div>
+              <div class="loading-gp__col">
+                <h2 class="loading-gp__heading">Enemy Team</h2>
+                <ul id="loading-gp-enemies" class="loading-gp__list"></ul>
+              </div>
+              <div class="loading-gp__col">
+                <h2 class="loading-gp__heading">Player Team</h2>
+                <ul id="loading-gp-players" class="loading-gp__list"></ul>
+              </div>
+            </div>
+            <div class="loading-gp__bar-wrap">
+              <div class="loading-bar loading-bar--gp" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                <div id="loading-gp-fill" class="loading-bar__fill"></div>
+              </div>
+              <p id="loading-gp-ready" class="loading-gp__ready" hidden>Click or tap anywhere to start</p>
+            </div>
+          </div>
+        </div>
+        <!-- Fail-only stub (legacy ids kept for error path) -->
+        <div id="loading-boot-panel" class="loading-panel" hidden>
+          <h2 id="loading-title">Boot failed</h2>
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
             <div id="progress-fill" class="progress-fill"></div>
           </div>
@@ -71,52 +106,15 @@
         </div>
       </section>
 
-      <!-- PLAYING -->
+      <!-- PLAYING — HUD/craft/gen/end = SVG PlayerUI only -->
       <section id="screen-playing" class="screen" hidden aria-label="Playing">
-        <div class="play-hud">
-          <span id="wave-hud" class="hud-chip">Wave 0</span>
-          <span id="hp-hud" class="hud-chip">HP 100/100</span>
-          <span id="base-hud" class="hud-chip">Base —</span>
-          <span id="ammo-hud" class="hud-chip">Ammo —</span>
-          <span id="prompt-hud" class="hud-chip hud-prompt"></span>
-          <button type="button" id="btn-craft" class="btn btn-ghost">Craft</button>
-          <button type="button" id="btn-fist" class="btn btn-ghost" title="Fist melee skill (Q)">Fist (Q)</button>
-          <button type="button" id="btn-melee-vol" class="btn btn-ghost" title="Toggle melee damage volume overlay (V)">MeleeVol (V)</button>
-          <button type="button" id="btn-cheat" class="btn btn-ghost" title="Open cheat panel">Cheat</button>
-        </div>
         <div class="canvas-wrap">
           <canvas id="game-canvas" width="800" height="600"></canvas>
         </div>
-        <div id="hotbar" class="hotbar" aria-label="Hotbar"></div>
-
-        <!-- Craft panel -->
-        <div id="panel-craft" class="game-panel" hidden aria-label="Craft">
-          <div class="game-panel-card">
-            <header class="game-panel-head">
-              <h2>Craft</h2>
-              <button type="button" id="craft-close" class="btn btn-ghost panel-x" aria-label="Close">×</button>
-            </header>
-            <div id="craft-tabs" class="panel-tabs" role="tablist"></div>
-            <div id="craft-list" class="panel-list"></div>
-            <p id="craft-status" class="panel-status" aria-live="polite"></p>
-            <p class="panel-hint">Esc to close · MOVE only while open · costs from bag</p>
-          </div>
+        <div id="player-ui-mount" class="player-ui-mount" aria-hidden="false"></div>
+        <div class="play-debug-tray">
+          <button type="button" id="btn-cheat" class="btn btn-ghost" title="Open cheat panel">Cheat</button>
         </div>
-
-        <!-- Gen / Base receive panel -->
-        <div id="panel-receive" class="game-panel" hidden aria-label="Receive">
-          <div class="game-panel-card">
-            <header class="game-panel-head">
-              <h2 id="receive-title">Receive</h2>
-              <button type="button" id="receive-close" class="btn btn-ghost panel-x" aria-label="Close">×</button>
-            </header>
-            <div id="receive-body" class="panel-body"></div>
-            <p id="receive-status" class="panel-status" aria-live="polite"></p>
-            <p class="panel-hint">Esc to close · E near Gen/Base to open</p>
-          </div>
-        </div>
-
-        <!-- Cheat panel (Win / Lose / FreeCraft / Zoom) -->
         <div id="panel-cheat" class="game-panel" hidden aria-label="Cheat">
           <div class="game-panel-card game-panel-card--cheat">
             <header class="game-panel-head">
@@ -142,17 +140,6 @@
               <p class="panel-hint">Scroll on slider · step 0.1 · range 0.25–2.0</p>
             </div>
           </div>
-        </div>
-      </section>
-
-      <!-- RESULT -->
-      <section id="screen-result" class="screen" hidden aria-label="Result">
-        <div class="result-panel">
-          <h2 id="result-title">Result</h2>
-          <p id="result-detail">Match over.</p>
-          <ul id="result-stats" class="result-stats"></ul>
-          <button type="button" id="btn-result-menu" class="btn">Back to Menu</button>
-          <p class="mode-note">Must click to return — no auto-skip.</p>
         </div>
       </section>
     </div>
@@ -219,6 +206,6 @@
         }, 1000);
       })();
     </script>
-    <script type="module" src="js/main.js?v=20261001o"></script>
+    <script type="module" src="js/main.js?v=20261019r"></script>
   </body>
 </html>

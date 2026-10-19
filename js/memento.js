@@ -225,6 +225,7 @@ export function serializeMatchSnapshot(match) {
     respawnTimer: match.respawnTimer,
     cameraZoom: match.cameraZoom,
     freeCraft: !!match.freeCraft,
+    equippedBackpackId: match.equippedBackpackId || null,
     stats: { ...match.stats },
     inventory,
     blocks,

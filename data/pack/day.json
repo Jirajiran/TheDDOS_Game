@@ -1,0 +1,14 @@
+{
+  "version": "1",
+  "dayLengthSec": 300,
+  "startHour": 6,
+  "dawnHour": 6,
+  "duskHour": 18,
+  "nightOverlayColor": "#55008C",
+  "nightOverlayMaxAlpha": 0.32,
+  "nightEnemyAiFireMul": 0.9,
+  "nightCameraZoomMul": 0.92,
+  "nightCameraTweenPerSec": 1.8,
+  "nightTurretAiFireMul": 0.9,
+  "applyNightTurretAiFire": false
+}

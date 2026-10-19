@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "description": "Armor type ids used as damage_matrix columns + equippable armor items (stats only).",
+  "armorTypes": ["DEFAULT", "BULLET", "EXPLOSION", "LAZER"],
+  "items": {
+    "ARMOR_VEST": {
+      "id": "ARMOR_VEST",
+      "label": "Armor Vest",
+      "armorType": "BULLET",
+      "damageReduction": 0.2
+    }
+  }
+}

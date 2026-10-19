@@ -1,15 +1,17 @@
 /**
  * AI Mediator — priority = baseWeight + eventBoost + factors → argmax Goal → Stage.
- * Stages never call each other; only the active Stage runs.
+ * Stages never call each other; only the active Stage runs (see stages/CONTRACT.md).
  * Phase 3: Goals filtered to unit.allowedGoals (archetype data).
  */
 
 import { ActionType } from '../actions.js';
 import {
   getPreferredStandoffPx,
+  getSenseRadiusPx,
   getWeaponDef,
   getWeaponMaxRangePx,
 } from '../config.js';
+import { getAiFireDecisionRangePx } from '../dayCycle.js';
 import {
   Goal,
   STAGE_TO_LEGACY,
@@ -79,7 +81,7 @@ const STAGE_RUNNERS = Object.freeze({
  * High catalog baseWeights only apply when Goal is "armed"; otherwise subtract
  * so REACH_PATH_GOAL remains the idle default (events can still force via boost).
  */
-function factorScores(unit, combat, pack, bb, base) {
+function factorScores(unit, combat, pack, bb, base, match) {
   const f = Object.create(null);
   const keys = Object.keys(Goal);
   for (let i = 0; i < keys.length; i++) f[Goal[keys[i]]] = 0;
@@ -99,9 +101,12 @@ function factorScores(unit, combat, pack, bb, base) {
   let baseArmed = false;
 
   if (combat) {
-    const engage = pack.enemyEngageRadius;
+    const engage = getSenseRadiusPx(unit) || pack.enemyEngageRadius;
     const weapon = unit.weaponId ? getWeaponDef(unit.weaponId) : null;
-    const fireR = getWeaponMaxRangePx(weapon) || pack.enemyFireRadius;
+    const fireR =
+      getAiFireDecisionRangePx(weapon, match, unit) ||
+      getWeaponMaxRangePx(weapon) ||
+      pack.enemyFireRadius;
     const inEngage = combat.dist <= engage;
     const nearFire = combat.dist <= fireR * 1.15;
 
@@ -167,13 +172,14 @@ function factorScores(unit, combat, pack, bb, base) {
   f[Goal.HOLD_SECTOR] -= base[Goal.HOLD_SECTOR] || 0;
   if (bb.allyCount > 1) {
     const ad = Math.hypot(bb.allyCentroidX - unit.x, bb.allyCentroidY - unit.y);
-    if (ad > pack.enemyEngageRadius * 1.8 && !combat) {
+    const sense = getSenseRadiusPx(unit) || pack.enemyEngageRadius;
+    if (ad > sense * 1.8 && !combat) {
       f[Goal.REGROUP_ALLIES] += 80;
     } else {
       f[Goal.REGROUP_ALLIES] -= base[Goal.REGROUP_ALLIES] || 0;
     }
     // Bodyguard: stay near centroid when protect goal allowed.
-    if (flags.bodyguardMode && ad > pack.enemyEngageRadius * 0.9) {
+    if (flags.bodyguardMode && ad > sense * 0.9) {
       f[Goal.PROTECT_ALLY] += 140;
     } else {
       f[Goal.PROTECT_ALLY] -= base[Goal.PROTECT_ALLY] || 0;
@@ -241,9 +247,9 @@ function factorScores(unit, combat, pack, bb, base) {
 /**
  * Score Goals and return argmax — only among allowedGoals when set.
  */
-export function selectGoal(unit, bb, combat, pack, weights) {
+export function selectGoal(unit, bb, combat, pack, weights, match) {
   const base = weights || DEFAULT_GOAL_BASE_WEIGHTS;
-  const factors = factorScores(unit, combat, pack, bb, base);
+  const factors = factorScores(unit, combat, pack, bb, base, match);
   const allowed = getAllowedGoalSet(unit);
   const keys = Object.keys(Goal);
   let bestGoal = Goal.REACH_PATH_GOAL;
@@ -398,7 +404,8 @@ export function decideUnitViaMediator(match, unit, ctx) {
     bb,
     combatTarget,
     pack,
-    ctx.goalBaseWeights || DEFAULT_GOAL_BASE_WEIGHTS
+    ctx.goalBaseWeights || DEFAULT_GOAL_BASE_WEIGHTS,
+    match
   );
   const activeStage = mapGoalToStage(
     activeGoal,

@@ -1,0 +1,421 @@
+{
+  "version": "1.0.0",
+  "categories": [
+    "Block",
+    "Gun",
+    "Turret",
+    "Ammo",
+    "Gen",
+    "Other"
+  ],
+  "recipes": [
+    {
+      "id": "craft_wall_wood",
+      "itemId": "WALL_WOOD",
+      "category": "Block",
+      "resultCount": 4,
+      "cost": {
+        "WOOD": 3
+      }
+    },
+    {
+      "id": "craft_wall_stone",
+      "itemId": "WALL_STONE",
+      "category": "Block",
+      "resultCount": 4,
+      "cost": {
+        "STONE": 3
+      }
+    },
+    {
+      "id": "craft_wall_iron",
+      "itemId": "WALL_IRON",
+      "category": "Block",
+      "resultCount": 2,
+      "cost": {
+        "IRON": 3
+      }
+    },
+    {
+      "id": "craft_door_wood",
+      "itemId": "DOOR_WOOD",
+      "category": "Block",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 4
+      }
+    },
+    {
+      "id": "craft_door_stone",
+      "itemId": "DOOR_STONE",
+      "category": "Block",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 4
+      }
+    },
+    {
+      "id": "craft_door_iron",
+      "itemId": "DOOR_IRON",
+      "category": "Block",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 4
+      }
+    },
+    {
+      "id": "craft_heal",
+      "itemId": "HEAL_BLOCK",
+      "category": "Block",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 8,
+        "STONE": 4
+      }
+    },
+    {
+      "id": "craft_trap_mine",
+      "itemId": "TRAP_MINE",
+      "category": "Block",
+      "resultCount": 2,
+      "cost": {
+        "IRON": 2,
+        "STONE": 2
+      }
+    },
+    {
+      "id": "craft_trap_spike",
+      "itemId": "TRAP_SPIKE",
+      "category": "Block",
+      "resultCount": 2,
+      "cost": {
+        "WOOD": 4,
+        "IRON": 1
+      }
+    },
+    {
+      "id": "craft_m1991",
+      "itemId": "M1991",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 4,
+        "WOOD": 2
+      }
+    },
+    {
+      "id": "craft_smg",
+      "itemId": "SMG",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 6,
+        "WOOD": 4
+      }
+    },
+    {
+      "id": "craft_ak47",
+      "itemId": "AK47",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 10,
+        "WOOD": 4
+      }
+    },
+    {
+      "id": "craft_shotgun",
+      "itemId": "SHOTGUN_SHELL",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 8,
+        "STONE": 4
+      }
+    },
+    {
+      "id": "craft_shotgun_buck",
+      "itemId": "SHOTGUN_BUCK",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 10,
+        "STONE": 6
+      }
+    },
+    {
+      "id": "craft_kar98",
+      "itemId": "KAR98",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 12,
+        "WOOD": 6
+      }
+    },
+    {
+      "id": "craft_medic",
+      "itemId": "MEDIC_GUN",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 8,
+        "STONE": 4,
+        "IRON": 2
+      }
+    },
+    {
+      "id": "craft_lazer",
+      "itemId": "LAZER",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 20,
+        "STONE": 15
+      }
+    },
+    {
+      "id": "craft_lazer_heal",
+      "itemId": "LAZER_HEAL",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 12,
+        "WOOD": 8,
+        "STONE": 6
+      }
+    },
+    {
+      "id": "craft_50cal",
+      "itemId": "WEAPON_50CAL",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 25,
+        "STONE": 20
+      }
+    },
+    {
+      "id": "craft_grenade_launcher",
+      "itemId": "GRENADE_LAUNCHER",
+      "category": "Gun",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 18,
+        "STONE": 10
+      }
+    },
+    {
+      "id": "craft_turret_pistol",
+      "itemId": "TURRET_PISTOL",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 10,
+        "IRON": 1
+      }
+    },
+    {
+      "id": "craft_turret_m1911",
+      "itemId": "TURRET_M1911",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 10,
+        "IRON": 2
+      }
+    },
+    {
+      "id": "craft_turret_50cal",
+      "itemId": "TURRET_50CAL",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 25,
+        "IRON": 10
+      }
+    },
+    {
+      "id": "craft_turret_smg",
+      "itemId": "TURRET_SMG",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 15,
+        "IRON": 4
+      }
+    },
+    {
+      "id": "craft_turret_ak47",
+      "itemId": "TURRET_AK47",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 20,
+        "IRON": 8
+      }
+    },
+    {
+      "id": "craft_turret_lazer",
+      "itemId": "TURRET_LAZER",
+      "category": "Turret",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 50,
+        "IRON": 30
+      }
+    },
+    {
+      "id": "craft_ammo_556",
+      "itemId": "AMMO_5_56",
+      "category": "Ammo",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 1
+      }
+    },
+    {
+      "id": "craft_ammo_762",
+      "itemId": "AMMO_7_62",
+      "category": "Ammo",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 2
+      }
+    },
+    {
+      "id": "craft_ammo_shell",
+      "itemId": "AMMO_SHELL",
+      "category": "Ammo",
+      "resultCount": 15,
+      "cost": {
+        "IRON": 1,
+        "STONE": 2
+      }
+    },
+    {
+      "id": "craft_ammo_medic",
+      "itemId": "AMMO_MEDIC",
+      "category": "Ammo",
+      "resultCount": 15,
+      "cost": {
+        "WOOD": 2,
+        "STONE": 2
+      }
+    },
+    {
+      "id": "craft_gen_wood",
+      "itemId": "GEN_WOOD",
+      "category": "Gen",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 20,
+        "STONE": 5
+      }
+    },
+    {
+      "id": "craft_gen_stone",
+      "itemId": "GEN_STONE",
+      "category": "Gen",
+      "resultCount": 1,
+      "cost": {
+        "STONE": 20,
+        "IRON": 5
+      }
+    },
+    {
+      "id": "craft_gen_iron",
+      "itemId": "GEN_IRON",
+      "category": "Gen",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 15,
+        "STONE": 10
+      }
+    },
+    {
+      "id": "craft_base_core",
+      "itemId": "BASE_CORE_3X3",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 30,
+        "STONE": 20,
+        "IRON": 10
+      }
+    },
+    {
+      "id": "craft_factory",
+      "itemId": "FACTORY_WEAPON",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 15,
+        "STONE": 10,
+        "WOOD": 8
+      }
+    },
+    {
+      "id": "craft_wire",
+      "itemId": "WIRE_BLOCK",
+      "category": "Other",
+      "resultCount": 8,
+      "cost": {
+        "WOOD": 2,
+        "IRON": 1
+      }
+    },
+    {
+      "id": "craft_axe",
+      "itemId": "TOOL_AXE",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 4,
+        "IRON": 1
+      }
+    },
+    {
+      "id": "craft_pick",
+      "itemId": "TOOL_PICK",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 2,
+        "IRON": 3,
+        "STONE": 2
+      }
+    },
+    {
+      "id": "craft_wrench",
+      "itemId": "TOOL_WRENCH",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 4,
+        "WOOD": 2
+      }
+    },
+    {
+      "id": "craft_armor_vest",
+      "itemId": "ARMOR_VEST",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 8,
+        "STONE": 4
+      }
+    },
+    {
+      "id": "craft_shield_basic",
+      "itemId": "SHIELD_BASIC",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 6,
+        "WOOD": 4,
+        "STONE": 2
+      }
+    }
+  ]
+}

@@ -73,7 +73,25 @@ function makeInactiveUnit(i) {
     _effectiveArchetype: null,
     _archetypePhaseKey: null,
     _burstTimer: 0,
+    /** Weapon sequential burst (SMG etc.) — remaining rounds after first shot. */
+    burstRemaining: 0,
+    burstIntervalT: 0,
+    /** Hotbar switch queue (AI units with inventory). */
+    pendingHotbar: -1,
+    hotbarSwitchT: 0,
+    hotbarFireLockT: 0,
     _flankTimer: 0,
+    /** Visual — Unit_Template skin group id (Default_skin_1 / Asset_skin_n). */
+    skinGroupId: null,
+    /** Visual action stage — idle | hold_Gun | Fist | PlaceBlock (no combat effect). */
+    visualAction: 'idle',
+    /** Previous action while Arm_1/Arm_2 matrices tween. */
+    visualActionPrev: 'idle',
+    /** One-shot visual timer (sec) for PlaceBlock etc. */
+    visualActionT: 0,
+    /** Arm pose tween elapsed / duration (sec). */
+    armTweenT: 0,
+    armTweenDur: 0,
   };
 }
 
@@ -195,12 +213,23 @@ export function resetPools(pools) {
     u._effectiveArchetype = null;
     u._archetypePhaseKey = null;
     u._burstTimer = 0;
+    u.burstRemaining = 0;
+    u.burstIntervalT = 0;
+    u.pendingHotbar = -1;
+    u.hotbarSwitchT = 0;
+    u.hotbarFireLockT = 0;
     u._flankTimer = 0;
     u.meleeSwing = null;
     u.activeArmorId = null;
     u.activeShieldId = null;
     u.skillIds = null;
     u.skills = null;
+    u.skinGroupId = null;
+    u.visualAction = 'idle';
+    u.visualActionPrev = 'idle';
+    u.visualActionT = 0;
+    u.armTweenT = 0;
+    u.armTweenDur = 0;
   }
   for (let i = 0; i < pools.projectiles.length; i++) {
     pools.projectiles[i].active = false;
@@ -242,4 +271,9 @@ export function deactivateUnit(u) {
   u.combatTargetId = -1;
   u.combatLockTimer = 0;
   u.aggroChase = false;
+  u.burstRemaining = 0;
+  u.burstIntervalT = 0;
+  u.pendingHotbar = -1;
+  u.hotbarSwitchT = 0;
+  u.hotbarFireLockT = 0;
 }

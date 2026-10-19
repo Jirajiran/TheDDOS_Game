@@ -4,6 +4,7 @@
  * Cosmetics mirror sim state only (active hotbar WEAPON/TOOL / armor / shield / swing).
  */
 
+import { GAME_PACK } from './config.js';
 import { getActiveSlot, isToolSlot, isWeaponSlot } from './inventory.js';
 
 /** @typedef {'pistol'|'smg'|'rifle'|'shotgun'|'sniper'|'laser'|'launcher'|'default'} WeaponShape */
@@ -360,36 +361,79 @@ export function resolveHeldVisual(unit, opts = {}) {
 export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
   if (!ctx || !unit || !unit.active) return;
   const cache = getEquipPathCache();
-  const aim =
-    typeof unit.aimRad === 'number'
-      ? unit.aimRad
-      : typeof unit.facingRad === 'number'
-        ? unit.facingRad
+  // Visual facing = facingRad (same slew as skin/arms/pivots). aimRad stays sim-only (fire).
+  const facing =
+    typeof unit.facingRad === 'number'
+      ? unit.facingRad
+      : typeof unit.aimRad === 'number'
+        ? unit.aimRad
         : 0;
   const r = unit.radius || 12;
   const lw = 1 / (zoom > 0 ? zoom : 1);
-  const cos = Math.cos(aim);
-  const sin = Math.sin(aim);
+  const cos = Math.cos(facing);
+  const sin = Math.sin(facing);
   // Front rim of unit body — all held/worn fronts start here, not body center.
   const rimX = unit.x + cos * r;
   const rimY = unit.y + sin * r;
 
-  if (unit.activeArmorId) {
-    drawArmorMarker(ctx, unit, aim, r, rimX, rimY, zoom, lw, cache);
-  }
+  // Armor visual deferred: future Asset_Armor on Pivot_Asset_Top (not Path2D plate).
+  // activeArmorId still drives sim mitigation — do not draw placeholder trapezoid.
 
   const held = resolveHeldVisual(unit, opts);
   if (held) {
     if (held.kind === 'weapon') {
-      drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, held.id, opts.isPlayer, cache);
+      // Guns stay on unit rim/muzzle (sim fire pivot unchanged).
+      drawHeldWeapon(
+        ctx,
+        unit,
+        facing,
+        r,
+        rimX,
+        rimY,
+        zoom,
+        lw,
+        held.id,
+        opts.isPlayer,
+        cache
+      );
     } else if (held.kind === 'tool' || held.kind === 'melee') {
-      drawHeldTool(ctx, unit, aim, r, rimX, rimY, zoom, lw, held.id, opts.isPlayer, cache);
+      // Snap grip to Pivot_Arm_1; orient with same facing as skin (visual only).
+      const pivot = opts.arm1Pivot;
+      const hx = pivot && Number.isFinite(pivot.x) ? pivot.x : rimX;
+      const hy = pivot && Number.isFinite(pivot.y) ? pivot.y : rimY;
+      drawHeldTool(
+        ctx,
+        unit,
+        facing,
+        r,
+        hx,
+        hy,
+        zoom,
+        lw,
+        held.id,
+        opts.isPlayer,
+        cache
+      );
     }
   }
 
   if (unit.shield && unit.shield.enabled && !unit.shield.broken && unit.shield.hp > 0) {
-    drawShieldMarker(ctx, unit, aim, r, zoom, lw, cache);
+    drawShieldMarker(ctx, unit, facing, r, zoom, lw, cache);
   }
+}
+
+/** Weapon-pivot recoil while visual Action_Shoting (arms unchanged). */
+function weaponRecoilKickPx(unit) {
+  if (!unit || unit.visualAction !== 'Shoting' || !(unit.visualActionT > 0)) {
+    return 0;
+  }
+  const pack = GAME_PACK;
+  const maxKick = pack.unitVisualRecoilPx != null ? pack.unitVisualRecoilPx : 7;
+  const dur =
+    pack.unitVisualShotingSec != null ? pack.unitVisualShotingSec : 0.12;
+  const progress = 1 - Math.min(1, unit.visualActionT / Math.max(1e-4, dur));
+  const fall = (1 - progress) * (1 - progress);
+  return maxKick * fall;
 }
 
 function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPlayer, cache) {
@@ -404,6 +448,9 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
   ctx.save();
   ctx.translate(rimX, rimY);
   ctx.rotate(aim);
+  // Recoil on weapon pivot only (not arms) — kick back along barrel (−local X).
+  const kick = weaponRecoilKickPx(unit);
+  if (kick > 0) ctx.translate(-kick, 0);
   ctx.scale(barrel / 20, thick / 3.2);
   ctx.fillStyle = art.color;
   ctx.strokeStyle = '#1a1a1a';

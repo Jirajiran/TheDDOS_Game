@@ -10,6 +10,7 @@ import {
   AI_GOAL_TO_STAGE,
   AI_LOCAL_PATH,
   GAME_PACK,
+  getBalancePack,
   L3_SIZE,
   PATH_SIZE,
   TEAM,
@@ -22,14 +23,19 @@ import {
   pickArchetypeIdForWaveSlot,
   getBlockDef,
   getBlockPierceCost,
-  getDamageMult,
   getEntityPierceCost,
+  getBackpackTier,
+  getInventoryCapacity,
   getItemDef,
   getPierceUnitBudget,
+  getSenseRadiusPx,
   getUpgradeRecipe,
   getWeaponDef,
+  isBackpackItemId,
   layerHitsMask,
 } from './config.js';
+import { resolveDamage } from './defs/damageResolver.js';
+import { pickEdgeSpawnPosition } from './defs/spawnPolicy.js';
 import {
   advanceUnitAlongChain,
   attachUnitToGroup,
@@ -55,12 +61,15 @@ import {
   createEmptyInventory,
   deductCost,
   emptySlot,
+  equipBackpack,
+  unequipBackpack,
   getActiveSlot,
   getWeaponFromSlot,
   equipArmorOnUnit,
   equipShieldOnUnit,
   getArmorDamageReduction,
   isArmorSlot,
+  isBackpackSlot,
   isShieldSlot,
   isPlaceableSlot,
   isToolSlot,
@@ -98,6 +107,13 @@ import {
 } from './occupancy.js';
 import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit, resetPools } from './pools.js';
 import {
+  cutUnitVisualAction,
+  enemySkinGroupId,
+  menuSkinToGroupId,
+  tickAllUnitVisuals,
+  UNIT_VISUAL_ACTIONS,
+} from './unitVisual.js';
+import {
   absorbDamageWithShield,
   segmentHitsShield,
   seedShieldFromArchetype,
@@ -129,11 +145,15 @@ import {
  * Match starts WITHOUT a base — player must PLACE via hotbar.
  */
 export function initMatchGameplay(match, options = {}) {
-  const pack = GAME_PACK;
+  const pack = getBalancePack();
   const { world } = match;
 
   match.gameMode = options.gameMode || match.gameMode || 'FLAT_SURVIVAL';
   match.host = options.host || match.host || null;
+  match.playerSkinGroupId =
+    options.playerSkinGroupId ||
+    menuSkinToGroupId(options.menuSkinId) ||
+    'Default_skin_1';
 
   if (!match.occupancy) {
     match.occupancy = createOccupancy(world);
@@ -156,7 +176,13 @@ export function initMatchGameplay(match, options = {}) {
   match.enemiesAlive = 0;
   match.outcome = null;
   match.activeHotbar = 0;
-  match.inventory = createEmptyInventory(pack.hotbarSlots);
+  match.pendingHotbar = -1;
+  match.hotbarSwitchT = 0;
+  match.hotbarFireLockT = 0;
+  match.equippedBackpackId = null;
+  match.inventory = createEmptyInventory(
+    pack.hotbarBaseSlots || pack.hotbarSlots
+  );
   applyStartingLoadout(match.inventory);
   match.hotbar = match.inventory;
   match.playerUnitId = -1;
@@ -186,6 +212,7 @@ export function initMatchGameplay(match, options = {}) {
   match.beams = [];
   match.pathPipeMask = { active: false, maskedKeys: new Set(), navPoints: [] };
   match.simTime = 0;
+  match.nightBlend = 0;
 
   generateWorldObjects(match);
   spawnPlayerNearWorldCenter(match);
@@ -202,7 +229,7 @@ function registerBlock(match, block) {
 }
 
 function spawnPlayerNearWorldCenter(match) {
-  const pack = GAME_PACK;
+  const pack = getBalancePack();
   const { world, pools } = match;
   let u = null;
   if (match.playerUnitId >= 0) {
@@ -215,6 +242,7 @@ function spawnPlayerNearWorldCenter(match) {
   }
 
   resetPlayerStats(u, pack);
+  u.skinGroupId = match.playerSkinGroupId || 'Default_skin_1';
   u.x = world.worldW * 0.5;
   u.y = world.worldH * 0.5;
   match.playerDead = false;
@@ -225,17 +253,18 @@ function spawnPlayerNearWorldCenter(match) {
 }
 
 function resetPlayerStats(u, pack) {
+  const bal = pack || getBalancePack();
   u.active = true;
   u.typeId = 1;
   u.team = TEAM.PLAYER;
   u.role = 'player';
   u.collisionLayer = deriveCollisionLayer({ team: TEAM.PLAYER, role: 'player' });
   u.pierceCost = 1;
-  u.maxHp = pack.playerMaxHp;
-  u.hp = pack.playerMaxHp;
-  u.speed = pack.playerSpeed;
-  u.radius = pack.playerRadius;
-  u.armorType = pack.playerArmorType;
+  u.maxHp = bal.playerMaxHp;
+  u.hp = bal.playerMaxHp;
+  u.speed = bal.playerSpeed;
+  u.radius = bal.playerRadius;
+  u.armorType = bal.playerArmorType;
   u.weaponId = 'M1991';
   u.vx = 0;
   u.vy = 0;
@@ -251,7 +280,9 @@ function resetPlayerStats(u, pack) {
   Object.assign(u, createAmmoState('M1991'));
   ensureUnitMorale(u);
   ensureBlackboardStub(u);
-  u.skillIds = u.skillIds || [];
+  u.skillIds = Array.isArray(bal.playerActiveSkills)
+    ? bal.playerActiveSkills.slice()
+    : ['FIST', 'SELF_HEAL'];
   ensureUnitSkills(u);
   ensureMeleeSwing(u);
   u.skillSpeedMult = 1;
@@ -268,6 +299,12 @@ function resetPlayerStats(u, pack) {
   } else {
     u.activeShieldId = null;
   }
+  u.skinGroupId = null; // filled by spawn after match.playerSkinGroupId exists
+  u.visualAction = UNIT_VISUAL_ACTIONS.idle;
+  u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
+  u.visualActionT = 0;
+  u.armTweenT = 0;
+  u.armTweenDur = 0;
 }
 
 export function spawnPlayer(match) {
@@ -288,6 +325,7 @@ export function spawnPlayer(match) {
   }
 
   resetPlayerStats(u, pack);
+  u.skinGroupId = match.playerSkinGroupId || 'Default_skin_1';
   const angle = (match.waveIndex * 1.7 + u.id) % (Math.PI * 2);
   const dist = base.w * 0.55 + L3_SIZE * 0.5;
   u.x = clamp(
@@ -367,9 +405,12 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   integrateUnitMotion(match, dt);
   separateUnits(match);
   updateCooldowns(match, dt);
+  tickWeaponBursts(match, dt);
+  tickHotbarSwitches(match, dt);
   updateWeaponReloads(match, dt);
   tickAllSkills(match, dt);
   tickAllMeleeSwings(match, dt);
+  tickAllUnitVisuals(match, dt);
   tickMeleeVfx(match, dt);
   tickExplosionVfx(match, dt);
   tickMoralePassives(match, dt);
@@ -404,26 +445,16 @@ function applyActions(match, actions, mouseWorld, dt) {
   const player = getPlayerUnit(match);
   const moveIntent = Object.create(null);
 
-  // Pass 1: SELECT before PLACE/FIRE (same-frame scroll/click uses new slot).
+  // Pass 1: queue SELECT (delay + lock while burst/beam). Commit in tickHotbarSwitches.
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i];
     if (a.type !== ActionType.SELECT_HOTBAR) continue;
     if (player && a.unitId === player.id) {
-      match.activeHotbar = a.slot | 0;
-      const slot = getActiveSlot(match.inventory, match.activeHotbar);
-      if (isArmorSlot(slot) && player) {
-        equipArmorOnUnit(player, slot.itemId);
-      }
-      if (isShieldSlot(slot) && player) {
-        equipShieldOnUnit(player, slot.itemId);
-      }
+      queueHotbarSelect(match, player, a.slot | 0, true);
     } else {
       const u = match.pools.units[a.unitId];
       if (u && u.active && u.inventory) {
-        u.activeHotbar = a.slot | 0;
-        const slot = getActiveSlot(u.inventory, u.activeHotbar);
-        if (isArmorSlot(slot)) equipArmorOnUnit(u, slot.itemId);
-        if (isShieldSlot(slot)) equipShieldOnUnit(u, slot.itemId);
+        queueHotbarSelect(match, u, a.slot | 0, false);
       }
     }
   }
@@ -509,6 +540,10 @@ function applyActions(match, actions, mouseWorld, dt) {
     // Slew aim / facing toward targets (no instant snap).
     if (typeof u.targetAimRad === 'number') {
       u.aimRad = slewAngle(u.aimRad, u.targetAimRad, pack.aimTurnRateRadPerSec, dt);
+      // Enemies often set aim only — keep body facing target for sprite tween.
+      if (u.role === 'enemy') {
+        u.targetFacingRad = u.targetAimRad;
+      }
     }
     if (typeof u.targetFacingRad === 'number') {
       u.facingRad = slewAngle(
@@ -624,7 +659,7 @@ function tryPlace(match, unit, gx, gy) {
     match.baseChunk = buildBaseChunk(match, block);
     applyBaseChunkPipeMask(match);
     match.phase = 'setup';
-    match.waveCountdown = GAME_PACK.setupPhaseDurationSec;
+    match.waveCountdown = getBalancePack().setupPhaseDurationSec;
     match.waveActive = false;
     match.waveIndex = 0;
     match.interactPrompt = 'Base placed — setup started';
@@ -642,6 +677,14 @@ function tryPlace(match, unit, gx, gy) {
     }
   }
 
+  // Visual one-shot — arm tween only; no effect on place rules.
+  cutUnitVisualAction(
+    unit,
+    UNIT_VISUAL_ACTIONS.PlaceBlock,
+    GAME_PACK.unitVisualPlaceBlockSec != null
+      ? GAME_PACK.unitVisualPlaceBlockSec
+      : 0.1
+  );
   return true;
 }
 
@@ -819,9 +862,143 @@ function tryReload(match, unit) {
   beginReload(ammo, weapon, opts);
 }
 
+/** Deterministic pellet aim offset in [-spread/2, spread/2]. */
+function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad) {
+  const tick = Math.floor((match.simTime || 0) * 60);
+  let h =
+    (((unit.id | 0) + 1) * 73856093) ^
+    (tick * 19349663) ^
+    ((pelletIndex | 0) * 83492791);
+  h = (h >>> 0) % 10000;
+  return (h / 10000 - 0.5) * spreadRad;
+}
+
+function playShotingVisual(unit) {
+  cutUnitVisualAction(
+    unit,
+    UNIT_VISUAL_ACTIONS.Shoting,
+    GAME_PACK.unitVisualShotingSec != null
+      ? GAME_PACK.unitVisualShotingSec
+      : 0.12
+  );
+}
+
+/** Spawn pellet volley for one shot action (does not consume ammo / cooldown). */
+function spawnShotVolley(match, unit, weapon, aimRad) {
+  const pellets = Math.max(1, weapon.pelletCount || 1);
+  const spread = ((weapon.spreadDeg || 0) * Math.PI) / 180;
+  for (let p = 0; p < pellets; p++) {
+    const offset =
+      pellets === 1
+        ? pelletAimOffsetRad(match, unit, p, spread * 0.35)
+        : pelletAimOffsetRad(match, unit, p, spread);
+    spawnProjectile(match, unit, weapon, aimRad + offset);
+  }
+}
+
+function clearUnitBurst(unit) {
+  if (!unit) return;
+  unit.burstRemaining = 0;
+  unit.burstIntervalT = 0;
+}
+
+function unitWeaponBusy(match, unit) {
+  if (!unit) return false;
+  if ((unit.burstRemaining | 0) > 0) return true;
+  return ownerHasActiveBeam(match, unit.id, -1);
+}
+
+function hotbarSwitchDelaySec() {
+  const d = GAME_PACK.hotbarSwitchDelaySec;
+  const v = typeof d === 'number' ? d : 0.1;
+  return Math.min(0.1, Math.max(0, v));
+}
+
+function commitHotbarSlot(match, unit, slotIndex, isPlayer) {
+  const slot = slotIndex | 0;
+  if (isPlayer) {
+    match.activeHotbar = slot;
+    match.pendingHotbar = -1;
+    match.hotbarSwitchT = 0;
+    const s = getActiveSlot(match.inventory, match.activeHotbar);
+    if (isArmorSlot(s) && unit) equipArmorOnUnit(unit, s.itemId);
+    if (isShieldSlot(s) && unit) equipShieldOnUnit(unit, s.itemId);
+  } else if (unit && unit.inventory) {
+    unit.activeHotbar = slot;
+    unit.pendingHotbar = -1;
+    unit.hotbarSwitchT = 0;
+    const s = getActiveSlot(unit.inventory, unit.activeHotbar);
+    if (isArmorSlot(s)) equipArmorOnUnit(unit, s.itemId);
+    if (isShieldSlot(s)) equipShieldOnUnit(unit, s.itemId);
+  }
+}
+
+function markHotbarFireLock(match, unit) {
+  const t = hotbarSwitchDelaySec();
+  if (t <= 0) return;
+  if (unit && unit.role === 'player') match.hotbarFireLockT = t;
+  else if (unit) unit.hotbarFireLockT = t;
+}
+
+function queueHotbarSelect(match, unit, slotIndex, isPlayer) {
+  if (unitWeaponBusy(match, unit)) return;
+  // 0.1s delay only after a shot (fire lock) — not merely for holding a weapon.
+  const lock = isPlayer
+    ? match.hotbarFireLockT || 0
+    : (unit && unit.hotbarFireLockT) || 0;
+  if (lock <= 0) {
+    commitHotbarSlot(match, unit, slotIndex, isPlayer);
+    return;
+  }
+  if (isPlayer) {
+    match.pendingHotbar = slotIndex | 0;
+    match.hotbarSwitchT = lock;
+  } else {
+    unit.pendingHotbar = slotIndex | 0;
+    unit.hotbarSwitchT = lock;
+  }
+}
+
+function tickHotbarSwitches(match, dt) {
+  match.hotbarFireLockT = Math.max(0, (match.hotbarFireLockT || 0) - dt);
+  const player = getPlayerUnit(match);
+  if (match.pendingHotbar >= 0) {
+    if (player && unitWeaponBusy(match, player)) {
+      // Hold timer while burst/beam locks switch.
+    } else {
+      match.hotbarSwitchT = Math.max(0, (match.hotbarSwitchT || 0) - dt);
+      if (match.hotbarSwitchT <= 0 && (match.hotbarFireLockT || 0) <= 0) {
+        commitHotbarSlot(match, player, match.pendingHotbar, true);
+      }
+    }
+  }
+  const units = match.pools.units;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u.active) continue;
+    u.hotbarFireLockT = Math.max(0, (u.hotbarFireLockT || 0) - dt);
+    if (!u.inventory || u.pendingHotbar < 0) continue;
+    if (unitWeaponBusy(match, u)) continue;
+    u.hotbarSwitchT = Math.max(0, (u.hotbarSwitchT || 0) - dt);
+    if (u.hotbarSwitchT <= 0 && (u.hotbarFireLockT || 0) <= 0) {
+      commitHotbarSlot(match, u, u.pendingHotbar, false);
+    }
+  }
+}
+
+function fireProjectileShot(match, unit, weapon, ammo) {
+  const consumed = consumeAmmoForShot(ammo, weapon);
+  if (!consumed && !weapon.infiniteAmmo) return false;
+  spawnShotVolley(match, unit, weapon, unit.aimRad);
+  match.stats.shotsFired += 1;
+  playShotingVisual(unit);
+  return true;
+}
+
 function tryFire(match, unit) {
   const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
   if (!weapon) return;
+  if ((unit.burstRemaining | 0) > 0) return;
   if (unit.fireCooldown > 0) return;
   if (!canFireAmmo(ammo, weapon)) {
     if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) {
@@ -842,24 +1019,72 @@ function tryFire(match, unit) {
     const duration = weapon.beamDurationSec || 0;
     unit.fireCooldown = duration + (weapon.cooldownSec || 0);
     match.stats.shotsFired += 1;
+    playShotingVisual(unit);
+    markHotbarFireLock(match, unit);
     return;
   }
 
-  const pellets = weapon.pelletCount || 1;
-  const consumed = consumeAmmoForShot(ammo, weapon);
-  if (!consumed && !weapon.infiniteAmmo) return;
+  if (!fireProjectileShot(match, unit, weapon, ammo)) return;
+  markHotbarFireLock(match, unit);
 
-  const baseAim = unit.aimRad;
-  const spread = ((weapon.spreadDeg || 0) * Math.PI) / 180;
-  for (let p = 0; p < pellets; p++) {
-    const offset =
-      pellets === 1
-        ? (Math.random() - 0.5) * spread * 0.35
-        : (p / (pellets - 1) - 0.5) * spread;
-    spawnProjectile(match, unit, weapon, baseAim + offset);
+  const burst = Math.max(1, weapon.burstCount || 1);
+  if (burst > 1) {
+    unit.burstRemaining = burst - 1;
+    unit.burstIntervalT =
+      typeof weapon.burstIntervalSec === 'number'
+        ? weapon.burstIntervalSec
+        : 0.06;
+    // Block new FIRE until sequential burst finishes.
+    unit.fireCooldown = 1e6;
+  } else {
+    clearUnitBurst(unit);
+    unit.fireCooldown = weapon.cooldownSec || 0;
   }
-  unit.fireCooldown = weapon.cooldownSec;
-  match.stats.shotsFired += 1;
+}
+
+function tickWeaponBursts(match, dt) {
+  const units = match.pools.units;
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    if (!unit.active || (unit.burstRemaining | 0) <= 0) continue;
+    const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
+    if (!weapon) {
+      clearUnitBurst(unit);
+      unit.fireCooldown = 0;
+      continue;
+    }
+    unit.burstIntervalT = Math.max(0, (unit.burstIntervalT || 0) - dt);
+    if (unit.burstIntervalT > 0) continue;
+
+    if (!canFireAmmo(ammo, weapon)) {
+      clearUnitBurst(unit);
+      unit.fireCooldown = weapon.cooldownSec || 0;
+      if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) {
+        const opts =
+          unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
+        beginReload(ammo, weapon, opts);
+      }
+      continue;
+    }
+
+    if (!fireProjectileShot(match, unit, weapon, ammo)) {
+      clearUnitBurst(unit);
+      unit.fireCooldown = weapon.cooldownSec || 0;
+      continue;
+    }
+
+    unit.burstRemaining -= 1;
+    if (unit.burstRemaining > 0) {
+      unit.burstIntervalT =
+        typeof weapon.burstIntervalSec === 'number'
+          ? weapon.burstIntervalSec
+          : 0.06;
+      unit.fireCooldown = 1e6;
+    } else {
+      clearUnitBurst(unit);
+      unit.fireCooldown = weapon.cooldownSec || 0;
+    }
+  }
 }
 
 function spawnProjectile(match, owner, weapon, aimRad) {
@@ -1754,8 +1979,11 @@ function updateProjectiles(match, dt) {
         const unit = hit.unit;
         const abs = absorbDamageWithShield(unit, p.damage);
         if (abs.leftover > 0) {
-          const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
-          const dmg = p.damage < 0 ? abs.leftover : abs.leftover * mult;
+          const dmg = scaledHitDamage(
+            abs.leftover,
+            p.damageType,
+            unit.armorType || 'DEFAULT'
+          );
           applyDamageToUnit(match, unit, dmg, {
             sourceTeam: p.team,
             fromTurret: !!p.fromTurret,
@@ -1778,8 +2006,11 @@ function updateProjectiles(match, dt) {
       }
       const unit = hit.unit;
       const cost = getEntityPierceCost(unit);
-      const mult = getDamageMult(p.damageType, unit.armorType || 'DEFAULT');
-      const dmg = p.damage < 0 ? p.damage : p.damage * mult;
+      const dmg = scaledHitDamage(
+        p.damage,
+        p.damageType,
+        unit.armorType || 'DEFAULT'
+      );
       applyDamageToUnit(match, unit, dmg, {
         sourceTeam: p.team,
         fromTurret: !!p.fromTurret,
@@ -1971,8 +2202,11 @@ function castBeamRay(match, b, units, applyDamage) {
     if (applyDamage) {
       if (hit.kind === 'unit') {
         const unit = hit.unit;
-        const mult = getDamageMult(b.damageType, unit.armorType || 'DEFAULT');
-        const dmg = b.damage < 0 ? b.damage : b.damage * mult;
+        const dmg = scaledHitDamage(
+          b.damage,
+          b.damageType,
+          unit.armorType || 'DEFAULT'
+        );
         applyDamageToUnit(match, unit, dmg, {
           sourceTeam: b.team,
           fromTurret: !!b.fromTurret,
@@ -2094,13 +2328,16 @@ function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {}) {
     if (damageKind !== 'TOOL') return;
   }
 
-  let mult = getDamageMult(damageType, block.armorType || 'DEFAULT');
-  if (block.isWire && damageType === 'DEFAULT') {
-    mult *= WIRE_MELEE_MULT;
-  }
   // Pierce vs resources: still pays pierce cost / HP, but heal-style negative ignored.
   if (baseDamage < 0) return;
-  const dmg = baseDamage * mult;
+  let dmg = scaledHitDamage(
+    baseDamage,
+    damageType,
+    block.armorType || 'DEFAULT'
+  );
+  if (block.isWire && damageType === 'DEFAULT') {
+    dmg *= WIRE_MELEE_MULT;
+  }
   block.hp -= dmg;
   match.stats.damageDealt += dmg;
   if (block.hp <= 0) {
@@ -2312,6 +2549,113 @@ export function throwHotbarSlot(match, slotIndex, _worldX, _worldY) {
   match.inventory[slotIndex] = emptySlot();
   match.interactPrompt = `Dropped ${itemId}`;
   return { ok: true };
+}
+
+function dropInteractRange(match, player) {
+  const pack = GAME_PACK;
+  const magnet =
+    pack.dropMagnetRange != null ? pack.dropMagnetRange : Math.round(L3_SIZE * 0.28);
+  const dropR = pack.dropRadius != null ? pack.dropRadius : Math.round(L3_SIZE * 0.16);
+  return (player.radius || 0) + magnet + dropR + L3_SIZE * 0.15;
+}
+
+/** Nearest active backpack drop in interact range, or null. */
+export function findNearbyBackpackDrop(match) {
+  const player = getPlayerUnit(match);
+  if (!player || !match.pools || !match.pools.drops) return null;
+  const maxDist = dropInteractRange(match, player);
+  let best = null;
+  let bestD = maxDist;
+  const drops = match.pools.drops;
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
+    if (!d.active || !isBackpackItemId(d.itemId)) continue;
+    const dist = Math.hypot(d.x - player.x, d.y - player.y);
+    if (dist <= bestD) {
+      bestD = dist;
+      best = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * F near backpack drop → equip (upgrade replaces weaker).
+ * Spills overflow as drops.
+ */
+export function tryEquipBackpackFromDrop(match, drop) {
+  if (!match || !drop || !drop.active || !isBackpackItemId(drop.itemId)) {
+    return { ok: false, reason: 'No backpack drop' };
+  }
+  const itemId = drop.itemId;
+  const res = equipBackpack(match, itemId);
+  if (!res.ok) return res;
+  drop.active = false;
+  spillOverflowAsDrops(match, res.overflow);
+  if (res.replacedId && res.replacedId !== itemId) {
+    const player = getPlayerUnit(match);
+    if (player) {
+      spawnDrop(match, player.x, player.y + 20, res.replacedId, 1, 0, 40);
+    }
+  }
+  match.interactPrompt = `Equipped ${itemId}`;
+  return { ok: true };
+}
+
+/** Equip backpack from hotbar slot (same rules as drop). */
+export function tryEquipBackpackFromSlot(match, slotIndex) {
+  if (!match || !match.inventory) return { ok: false, reason: 'No inventory' };
+  const slot = match.inventory[slotIndex];
+  if (!isBackpackSlot(slot)) return { ok: false, reason: 'Not a backpack' };
+  const itemId = slot.itemId;
+  const res = equipBackpack(match, itemId);
+  if (!res.ok) return res;
+  spillOverflowAsDrops(match, res.overflow);
+  if (res.replacedId && res.replacedId !== itemId) {
+    const player = getPlayerUnit(match);
+    if (player) {
+      spawnDrop(match, player.x, player.y + 20, res.replacedId, 1, 0, 40);
+    }
+  }
+  match.interactPrompt = `Equipped ${itemId}`;
+  return { ok: true };
+}
+
+/** Hold-F unequip → drop backpack + overflow. */
+export function tryUnequipBackpackToDrop(match) {
+  const res = unequipBackpack(match);
+  if (!res.ok || !res.itemId) return { ok: false, reason: 'No backpack' };
+  const player = getPlayerUnit(match);
+  if (player) {
+    spawnDrop(match, player.x, player.y + 24, res.itemId, 1, 0, 60);
+  }
+  spillOverflowAsDrops(match, res.overflow);
+  match.interactPrompt = `Unequipped ${res.itemId}`;
+  return { ok: true };
+}
+
+function spillOverflowAsDrops(match, overflow) {
+  if (!overflow || !overflow.length) return;
+  const player = getPlayerUnit(match);
+  if (!player) return;
+  for (let i = 0; i < overflow.length; i++) {
+    const s = overflow[i];
+    if (!s || !s.itemId) continue;
+    const ang = (i / Math.max(1, overflow.length)) * Math.PI * 2;
+    spawnDrop(
+      match,
+      player.x + Math.cos(ang) * 36,
+      player.y + Math.sin(ang) * 36,
+      s.itemId,
+      s.count || 1,
+      Math.cos(ang) * 80,
+      Math.sin(ang) * 80
+    );
+  }
+}
+
+export function getEquippedBackpackTier(match) {
+  return getBackpackTier(match && match.equippedBackpackId);
 }
 
 function updateDrops(match, dt) {
@@ -2540,8 +2884,11 @@ function decideEnemyActions(match, dt) {
 }
 
 /** Score candidate: higher = better. Invalid / too far → negative. */
-function scoreCombatCandidate(kind, dist, pack, isPathBlocker, aggroChase) {
-  const engage = pack.enemyEngageRadius;
+function scoreCombatCandidate(kind, dist, sensePx, isPathBlocker, aggroChase) {
+  const engage =
+    typeof sensePx === 'number' && sensePx > 0
+      ? sensePx
+      : GAME_PACK.enemyEngageRadius;
   // Aggro chase ignores normal engage radius (sticky pursuit of player).
   if (!aggroChase && dist > engage * 1.25) return -1;
   let bias = 0;
@@ -2608,6 +2955,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
   recountTurretAttackers(match);
   const candidates = [];
   const aggro = !!e.aggroChase;
+  const sense = getSenseRadiusPx(e) || pack.enemyEngageRadius;
 
   if (e.attackBlockId >= 0) {
     const blk = getBlock(match, e.attackBlockId);
@@ -2622,7 +2970,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         y,
         dist,
         block: blk,
-        score: scoreCombatCandidate('block', dist, pack, true, false),
+        score: scoreCombatCandidate('block', dist, sense, true, false),
       });
     } else {
       e.attackBlockId = -1;
@@ -2660,7 +3008,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
     const x = blk.x + blk.w / 2;
     const y = blk.y + blk.h / 2;
     const dist = Math.hypot(x - e.x, y - e.y);
-    if (dist > pack.enemyEngageRadius * 1.4 && !aggro) continue;
+    if (dist > sense * 1.4 && !aggro) continue;
     const dog = scoreTurretPriority(blk, dist, blk.currentAttackers || 0);
     candidates.push({
       kind: 'block',
@@ -2682,7 +3030,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
       y: player.y,
       dist,
       unit: player,
-      score: scoreCombatCandidate('unit', dist, pack, false, aggro),
+      score: scoreCombatCandidate('unit', dist, sense, false, aggro),
     });
   }
 
@@ -2693,7 +3041,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
     x: bx,
     y: by,
     dist: bd,
-    score: scoreCombatCandidate('base', bd, pack, false, false),
+    score: scoreCombatCandidate('base', bd, sense, false, false),
   });
 
   let sticky = null;
@@ -2706,7 +3054,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
       }
     }
     // Hysteresis: keep lock a bit past engage; aggro chase never drops for distance.
-    if (sticky && !aggro && sticky.dist > pack.enemyEngageRadius * 1.3) {
+    if (sticky && !aggro && sticky.dist > sense * 1.3) {
       sticky = null;
     }
     if (sticky && sticky.score < 0) sticky = null;
@@ -2723,7 +3071,7 @@ function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
     }
   }
 
-  const reselectGap = Math.max(50, pack.enemyEngageRadius * 0.14);
+  const reselectGap = Math.max(50, sense * 0.14);
   let chosen = sticky;
   if (sticky) {
     if (
@@ -2779,7 +3127,7 @@ function applyEnemyContactDamage(match, dt) {
 }
 
 function updateWaves(match, dt) {
-  const pack = GAME_PACK;
+  const pack = getBalancePack();
   if (!match.basePlaced || !match.base || !match.base.alive) return;
   if (match.outcome) return;
 
@@ -2816,7 +3164,7 @@ function updateWaves(match, dt) {
 }
 
 function spawnWave(match, waveIndex) {
-  const pack = GAME_PACK;
+  const pack = getBalancePack();
   const count =
     pack.enemiesPerWaveBase + Math.max(0, waveIndex - 1) * pack.enemiesPerWaveScale;
 
@@ -2868,6 +3216,12 @@ function spawnWave(match, waveIndex) {
       u.role = 'enemy';
       u.collisionLayer = deriveCollisionLayer({ team: TEAM.ENEMY, role: 'enemy' });
       u.pierceCost = 1;
+      u.skinGroupId = enemySkinGroupId();
+      u.visualAction = UNIT_VISUAL_ACTIONS.idle;
+      u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
+      u.visualActionT = 0;
+      u.armTweenT = 0;
+      u.armTweenDur = 0;
       u.archetypeId = archetype ? archetype.id : archId;
       u.isBoss = !!(archetype && archetype.isBoss);
       u.sizeScale = sizeScale || 1;
@@ -2963,68 +3317,18 @@ function partitionSpawnGroups(positions, groupCount, cx, cy) {
 }
 
 function pickSpawnOutsideBaseChunk(match, index, total) {
-  const { world, baseChunk, base } = match;
-  const pack = GAME_PACK;
-  const margin = 40;
-  const peri = 2 * (world.worldW + world.worldH);
-  let t = ((index + 0.5) / total) * peri;
-  let x;
-  let y;
-  if (t < world.worldW) {
-    x = t;
-    y = margin;
-  } else if (t < world.worldW + world.worldH) {
-    x = world.worldW - margin;
-    y = t - world.worldW;
-  } else if (t < 2 * world.worldW + world.worldH) {
-    x = world.worldW - (t - world.worldW - world.worldH);
-    y = world.worldH - margin;
-  } else {
-    x = margin;
-    y = world.worldH - (t - 2 * world.worldW - world.worldH);
-  }
+  // Edge-of-world only + baseChunk mask — SpawnPolicy (js/defs/spawnPolicy.js).
+  return pickEdgeSpawnPosition(match, index, total);
+}
 
-  const zone = baseChunk || {
-    x: base.x,
-    y: base.y,
-    w: base.w,
-    h: base.h,
-    cx: base.x + base.w / 2,
-    cy: base.y + base.h / 2,
-  };
-
-  // Spawn-only exclusion: BaseChunk size unchanged, push farther outside edges.
-  const excludePad =
-    ((pack.baseSpawnExclusionL3 != null
-      ? pack.baseSpawnExclusionL3
-      : 4) *
-      L3_SIZE) ||
-    0;
-  const exclude = {
-    x: zone.x - excludePad,
-    y: zone.y - excludePad,
-    w: zone.w + excludePad * 2,
-    h: zone.h + excludePad * 2,
-    cx: zone.cx != null ? zone.cx : zone.x + zone.w / 2,
-    cy: zone.cy != null ? zone.cy : zone.y + zone.h / 2,
-  };
-
-  if (pointInRectExpanded(x, y, exclude, 0)) {
-    const dx = x - exclude.cx;
-    const dy = y - exclude.cy;
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
-    if (absX > absY) {
-      x = dx >= 0 ? exclude.x + exclude.w + margin : exclude.x - margin;
-    } else {
-      y = dy >= 0 ? exclude.y + exclude.h + margin : exclude.y - margin;
-    }
-  }
-
-  return {
-    x: clamp(x, margin, world.worldW - margin),
-    y: clamp(y, margin, world.worldH - margin),
-  };
+/** Apply pack damage matrix (heal amounts stay raw). */
+function scaledHitDamage(amount, damageType, armorType) {
+  if (!(amount > 0)) return amount;
+  return resolveDamage({
+    amount,
+    damageType: damageType || 'DEFAULT',
+    armorType: armorType || 'DEFAULT',
+  }).hpDelta;
 }
 
 function updatePlayerRespawn(match, dt) {
@@ -3075,6 +3379,8 @@ export function restoreMatchFromSnapshot(match, snap) {
   match.playerDead = !!snap.playerDead;
   match.respawnTimer = snap.respawnTimer || 0;
   match.cameraZoom = snap.cameraZoom || GAME_PACK.cameraFollowZoom;
+  match.nightBlend =
+    typeof snap.nightBlend === 'number' ? snap.nightBlend : match.nightBlend || 0;
   match.freeCraft = !!snap.freeCraft;
   if (snap.stats) match.stats = { ...match.stats, ...snap.stats };
 
@@ -3102,7 +3408,9 @@ export function restoreMatchFromSnapshot(match, snap) {
   }
 
   if (Array.isArray(snap.inventory)) {
-    match.inventory = createEmptyInventory(GAME_PACK.hotbarSlots);
+    match.equippedBackpackId = snap.equippedBackpackId || null;
+    const cap = getInventoryCapacity(match.equippedBackpackId);
+    match.inventory = createEmptyInventory(cap);
     for (let i = 0; i < snap.inventory.length && i < match.inventory.length; i++) {
       const s = snap.inventory[i];
       if (!s || !s.itemId) {

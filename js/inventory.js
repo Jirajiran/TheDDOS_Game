@@ -1,9 +1,13 @@
 import {
   GAME_PACK,
   ItemKind,
+  getBackpackBonusSlots,
+  getBackpackTier,
+  getInventoryCapacity,
   getItemDef,
   getUnitArchetype,
   getWeaponDef,
+  isBackpackItemId,
 } from './config.js';
 import { createAmmoState } from './weapons.js';
 import {
@@ -15,13 +19,87 @@ import {
  * Real hotbar / inventory slots (not color stubs).
  * Weapon slots carry ammoInMag / mags / reloadTimer.
  */
-export function createEmptyInventory(slotCount = GAME_PACK.hotbarSlots) {
+export function createEmptyInventory(
+  slotCount = GAME_PACK.hotbarBaseSlots || GAME_PACK.hotbarSlots
+) {
   const slots = new Array(slotCount);
   for (let i = 0; i < slotCount; i++) {
     slots[i] = emptySlot();
   }
   return slots;
 }
+
+export function isBackpackSlot(slot) {
+  return slot && slot.kind === ItemKind.BACKPACK && slot.count > 0 && slot.itemId;
+}
+
+/**
+ * Grow/shrink inventory in place. Overflow slots returned (copies).
+ * @returns {ReturnType<typeof emptySlot>[]}
+ */
+export function resizeInventory(inventory, newSize) {
+  if (!inventory || newSize < 1) return [];
+  const overflow = [];
+  while (inventory.length > newSize) {
+    const slot = inventory.pop();
+    if (slot && slot.itemId && slot.count > 0) overflow.push(slot);
+  }
+  while (inventory.length < newSize) {
+    inventory.push(emptySlot());
+  }
+  return overflow;
+}
+
+/**
+ * Equip backpack itemId onto match (consumes one from inventory if present).
+ * Replaces lower/equal tier; rejects worse tier.
+ * @returns {{ ok: boolean, reason?: string, overflow?: object[] }}
+ */
+export function equipBackpack(match, itemId) {
+  if (!match || !match.inventory) return { ok: false, reason: 'No inventory' };
+  if (!isBackpackItemId(itemId)) return { ok: false, reason: 'Not a backpack' };
+  const newTier = getBackpackTier(itemId);
+  const curTier = getBackpackTier(match.equippedBackpackId);
+  if (curTier && newTier < curTier) {
+    return { ok: false, reason: 'Weaker backpack equipped' };
+  }
+  // Remove one backpack item from bag if present.
+  let removed = false;
+  for (let i = 0; i < match.inventory.length; i++) {
+    const s = match.inventory[i];
+    if (s.itemId === itemId && s.count > 0) {
+      s.count -= 1;
+      if (s.count <= 0) match.inventory[i] = emptySlot();
+      removed = true;
+      break;
+    }
+  }
+  // Allow equip from world drop without inventory copy.
+  const prevId = match.equippedBackpackId;
+  match.equippedBackpackId = itemId;
+  const cap = getInventoryCapacity(itemId);
+  const overflow = resizeInventory(match.inventory, cap);
+  match.hotbar = match.inventory;
+  return { ok: true, overflow, replacedId: prevId, removed };
+}
+
+/**
+ * Unequip backpack → shrink to base; overflow returned for world drops.
+ * @returns {{ ok: boolean, itemId?: string|null, overflow?: object[] }}
+ */
+export function unequipBackpack(match) {
+  if (!match || !match.equippedBackpackId) {
+    return { ok: false, itemId: null, overflow: [] };
+  }
+  const itemId = match.equippedBackpackId;
+  match.equippedBackpackId = null;
+  const cap = getInventoryCapacity(null);
+  const overflow = resizeInventory(match.inventory, cap);
+  match.hotbar = match.inventory;
+  return { ok: true, itemId, overflow };
+}
+
+export { getBackpackBonusSlots, getBackpackTier, getInventoryCapacity, isBackpackItemId };
 
 export function emptySlot() {
   return {

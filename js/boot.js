@@ -5,12 +5,30 @@
 
 import { runParallelStages, wait } from './loadPipeline.js';
 import { preloadEquipArtCache } from './cosmetics.js';
+import { initUnitVisualFromSvgText } from './unitVisual.js';
+import { loadDefinitionPack } from './defs/loadPack.js';
+import {
+  WEAPON_REGISTRY,
+  BLOCK_REGISTRY,
+  ITEM_REGISTRY,
+  SKILL_REGISTRY,
+  UNIT_ARCHETYPE_REGISTRY,
+  ARCHETYPE_ALIASES,
+  WAVE_ARCHETYPE_COMPOSITION,
+  WAVE_ARCHETYPE_TABLE,
+  WEAPON_UPGRADES,
+  CRAFT_CATEGORIES,
+  CRAFT_RECIPES,
+  ACTOR_REGISTRY,
+  DAMAGE_MULT_TABLE,
+} from './config.js';
 
 export const BOOT_ASSETS = Object.freeze([
   { id: 'css', url: 'css/main.css' },
   { id: 'favicon', url: 'favicon.svg' },
   { id: 'place_object', url: 'Asset/AssetSVG/PlaceHold/Object_01.svg' },
   { id: 'unit_template', url: 'Asset/AssetSVG/Unit/Unit_Template.svg' },
+  { id: 'main_menu', url: 'Asset/AssetSVG/Ui/MainMenu.svg' },
 ]);
 
 const ASSET_TIMEOUT_MS = 4000;
@@ -50,7 +68,7 @@ export async function runBootPreload(onProgress, options = {}) {
     'screen-menu',
     'screen-loading',
     'screen-playing',
-    'screen-result',
+    'player-ui-mount',
     'game-canvas',
     'btn-start',
     'progress-fill',
@@ -99,6 +117,44 @@ export async function runBootPreload(onProgress, options = {}) {
         error: (r && r.error) || 'failed',
       };
     }
+  }
+
+  report(88, 'Definition pack…');
+  try {
+    const packResult = await loadDefinitionPack({
+      seedWeapons: WEAPON_REGISTRY,
+      seedBlocks: BLOCK_REGISTRY,
+      seedItems: ITEM_REGISTRY,
+      seedSkills: SKILL_REGISTRY,
+      seedArchetypes: {
+        archetypes: UNIT_ARCHETYPE_REGISTRY,
+        aliases: ARCHETYPE_ALIASES,
+        waveComposition: WAVE_ARCHETYPE_COMPOSITION,
+        waveTable: WAVE_ARCHETYPE_TABLE,
+      },
+      seedWeaponUpgrades: WEAPON_UPGRADES,
+      seedCraft: { categories: CRAFT_CATEGORIES, recipes: CRAFT_RECIPES },
+      seedActors: ACTOR_REGISTRY,
+      seedDamageTable: DAMAGE_MULT_TABLE,
+      onWarn: (m) => warnings.push(String(m)),
+    });
+    if (!packResult.fromJson) {
+      warnings.push('defs: using in-memory pack seed');
+    }
+  } catch (err) {
+    warnings.push(`defs: ${err && err.message ? err.message : err}`);
+  }
+
+  report(92, 'Unit visuals…');
+  const unitAsset = assets.unit_template;
+  if (unitAsset && unitAsset.ok && unitAsset.text) {
+    try {
+      await initUnitVisualFromSvgText(unitAsset.text);
+    } catch (err) {
+      warnings.push(`unit_visual: ${err && err.message ? err.message : err}`);
+    }
+  } else {
+    warnings.push('unit_template missing — circle fallback');
   }
 
   report(95, 'Finalizing boot…');

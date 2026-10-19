@@ -3,7 +3,37 @@
  * Path 1024 → L1 512 → L2 256 → L3 64 (16×16 place cells per Path).
  * Place / snap / occupancy / block footprints use L3 only.
  * Keep PATH_SIZE ≤ ~1024 so one Path fits web viewport with follow zoom.
+ *
+ * Weapon / damage lookups go through js/defs (pack JSON). Registries below
+ * seed the DefinitionRegistry at module load; boot may overlay data/pack/*.json.
  */
+import {
+  getWeapon as defsGetWeapon,
+  getBlock as defsGetBlock,
+  getItem as defsGetItem,
+  getSkill as defsGetSkill,
+  getArchetype as defsGetArchetype,
+  getWeaponUpgrade as defsGetWeaponUpgrade,
+  getCraftRecipeById as defsGetCraftRecipe,
+  getCraftRecipesByCategory as defsGetCraftByCategory,
+  getWaveArchetypeTable as defsGetWaveTable,
+  getWaveArchetypeComposition as defsGetWaveComposition,
+  getActor as defsGetActor,
+  seedWeaponsFromRegistry,
+  seedBlocksFromRegistry,
+  seedItemsFromRegistry,
+  seedSkillsFromRegistry,
+  seedArchetypesFromRegistries,
+  seedWeaponUpgradesFromRegistry,
+  seedCraftFromData,
+  seedActorsFromRegistry,
+  getRulesConfig,
+} from './defs/registry.js';
+import {
+  getDamageMult as defsGetDamageMult,
+  seedDamageMatrixFromTable,
+} from './defs/damageResolver.js';
+
 export const PATH_SIZE = 1024;
 export const L1_SIZE = 512;
 export const L2_SIZE = 256;
@@ -43,6 +73,36 @@ export const AppState = Object.freeze({
 export const GameMode = Object.freeze({
   FLAT_SURVIVAL: 'FLAT_SURVIVAL',
   WORLD_TYPE: 'WORLD_TYPE',
+});
+
+/**
+ * HTML loading labels (art ref: Loading_main / Loading_GamePlay SVG).
+ * worldPick keys match mainMenuUi: flat | resource | loadFile
+ */
+export const LOADING_SCREEN = Object.freeze({
+  maps: Object.freeze({
+    flat: Object.freeze({
+      nameMap: 'FLATLAND',
+      modeLabel: 'MODE: FLAT SURVIVAL',
+    }),
+    resource: Object.freeze({
+      nameMap: 'RESOURCE WORLD',
+      modeLabel: 'MODE: WORLD TYPE',
+    }),
+    loadFile: Object.freeze({
+      nameMap: 'SAVED MAP',
+      modeLabel: 'MODE: LOADED',
+    }),
+  }),
+  /** PvE bots only (not player vs player). */
+  enemyNames: Object.freeze([
+    'Bot Grunt',
+    'Bot Runner',
+    'Bot Heavy',
+    'Bot Sniper',
+    'Bot Siege',
+  ]),
+  maxPlayerRows: 7,
 });
 
 /** Team ids — player/ally vs enemies. */
@@ -158,11 +218,13 @@ export const ItemKind = Object.freeze({
    * hasPassiveShield (item wins while equipped; unequip restores passive).
    */
   SHIELD: 'SHIELD',
+  /** Wearable bag — extends hotbar capacity; one equipped at a time. */
+  BACKPACK: 'BACKPACK',
 });
 
 /**
- * Archetype preferredRange → standoff as fraction of weapon maxDistancePath.
- * Never invent a separate short L3 band; always scale from weapon range.
+ * Archetype preferredRange → standoff as fraction of AI fire band
+ * (aiFireRangePath), falling back to maxDistancePath.
  */
 export const PREFERRED_RANGE_MULT = Object.freeze({
   MELEE: 0.12,
@@ -181,9 +243,23 @@ export function getWeaponMaxRangePx(weapon) {
   return (weapon.maxDistancePath || 1) * PATH_SIZE;
 }
 
-/** Standoff hold distance from weapon range × preferredRange mult. */
-export function getPreferredStandoffPx(weapon, preferredRangeKey) {
-  const max = getWeaponMaxRangePx(weapon);
+/**
+ * AI / unit fire-decision band (when bot chooses FIRE).
+ * Separate from bullet maxDistancePath — pack field `aiFireRangePath`.
+ * Fallback: maxDistancePath when omitted.
+ */
+export function getWeaponAiFireRangePx(weapon) {
+  if (!weapon) return 0;
+  if (typeof weapon.aiFireRangePath === 'number' && weapon.aiFireRangePath > 0) {
+    return weapon.aiFireRangePath * PATH_SIZE;
+  }
+  return getWeaponMaxRangePx(weapon);
+}
+
+/** Standoff hold distance from a reach band × preferredRange mult. */
+export function getPreferredStandoffPx(weapon, preferredRangeKey, reachPx) {
+  const max =
+    reachPx > 0 ? reachPx : getWeaponAiFireRangePx(weapon) || getWeaponMaxRangePx(weapon);
   if (max <= 0) return 0;
   const key = preferredRangeKey || 'MEDIUM';
   const mult =
@@ -207,7 +283,7 @@ export const DAMAGE_MULT_TABLE = Object.freeze({
     LAZER: 0.75,
   }),
   BULLET: Object.freeze({
-    DEFAULT: 1.25,
+    DEFAULT: 0.5,
     BULLET: 0.75,
     EXPLOSION: 0.85,
     LAZER: 0.5,
@@ -246,6 +322,8 @@ function weaponBase(partial) {
     pierceUnits: 0,
     pierceConfig: null,
     burstCount: 1,
+    /** Delay between sequential burst rounds (sec). Unused when burstCount ≤ 1. */
+    burstIntervalSec: 0.06,
     pelletCount: 1,
     reloadSec: 1.4,
     /** Never on shared defs for turrets — infiniteAmmo is block/fire-path flag. */
@@ -274,7 +352,8 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_5_56',
     maxDistancePath: 1.0,
-    /** Projectile speed ×2 (real bullets only; beams stay 9999). */
+    aiFireRangePath: 0.75,
+    /** Projectile speed ×2 (real bullets only; beams omit speed). */
     bulletSpeedPxSec: PATH_SIZE * 2,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
@@ -291,10 +370,12 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_5_56',
     maxDistancePath: 1.0,
+    aiFireRangePath: 0.75,
     bulletSpeedPxSec: PATH_SIZE * 2,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     burstCount: 3,
+    burstIntervalSec: 0.06,
   }),
   AK47: weaponBase({
     id: 'AK47',
@@ -308,6 +389,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 4,
     ammoTypeId: 'AMMO_7_62',
     maxDistancePath: 1.5,
+    aiFireRangePath: 0.9,
     bulletSpeedPxSec: PATH_SIZE * 1.56,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
@@ -318,7 +400,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     color: '#bf8a5a',
     baseDamage: 12,
     cooldownSec: 1.2,
-    spreadDeg: 75,
+    spreadDeg: 42,
     magCapacity: 7,
     maxMags: 30,
     ammoTypeId: 'AMMO_SHELL',
@@ -406,8 +488,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 0,
     ammoTypeId: null,
     maxDistancePath: 0.35,
-    /** Beam/hitscan — not projectile speed; leave unchanged. */
-    bulletSpeedPxSec: 9999,
+    bulletSpeedPxSec: null,
     damageType: DamageType.LAZER,
     reloadType: ReloadType.MAGAZINE,
     targetFaction: 'FRIENDLY',
@@ -426,8 +507,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 0,
     ammoTypeId: null,
     maxDistancePath: 2.5,
-    /** Beam/hitscan — not projectile speed; leave unchanged. */
-    bulletSpeedPxSec: 9999,
+    bulletSpeedPxSec: null,
     damageType: DamageType.LAZER,
     reloadType: ReloadType.MAGAZINE,
     targetFaction: 'ENEMY',
@@ -446,6 +526,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     maxMags: 1,
     ammoTypeId: null,
     maxDistancePath: 2.5,
+    aiFireRangePath: 1.15,
     bulletSpeedPxSec: PATH_SIZE * 3.9,
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
@@ -465,6 +546,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     damageType: DamageType.BULLET,
     reloadType: ReloadType.MAGAZINE,
     burstCount: 4,
+    burstIntervalSec: 0.055,
   }),
   AK47_MODIFIED: weaponBase({
     id: 'AK47_MODIFIED',
@@ -487,7 +569,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     color: '#cfa070',
     baseDamage: 20,
     cooldownSec: 0.9,
-    spreadDeg: 75,
+    spreadDeg: 42,
     magCapacity: 12,
     maxMags: 42,
     ammoTypeId: 'AMMO_SHELL',
@@ -1208,6 +1290,33 @@ export const ITEM_REGISTRY = Object.freeze({
     weaponId: 'GRENADE_LAUNCHER',
     maxStack: 1,
   }),
+  BACKPACK_T1: Object.freeze({
+    id: 'BACKPACK_T1',
+    label: 'Backpack T1',
+    color: '#8a6b4a',
+    kind: ItemKind.BACKPACK,
+    maxStack: 1,
+    backpackTier: 1,
+    backpackBonusSlots: 2,
+  }),
+  BACKPACK_T2: Object.freeze({
+    id: 'BACKPACK_T2',
+    label: 'Backpack T2',
+    color: '#6b8a4a',
+    kind: ItemKind.BACKPACK,
+    maxStack: 1,
+    backpackTier: 2,
+    backpackBonusSlots: 4,
+  }),
+  BACKPACK_T3: Object.freeze({
+    id: 'BACKPACK_T3',
+    label: 'Backpack T3',
+    color: '#4a6b8a',
+    kind: ItemKind.BACKPACK,
+    maxStack: 1,
+    backpackTier: 3,
+    backpackBonusSlots: 6,
+  }),
 });
 
 /** Craft panel category tabs (UI order). */
@@ -1519,6 +1628,27 @@ export const CRAFT_RECIPES = Object.freeze([
     resultCount: 1,
     cost: Object.freeze({ IRON: 6, WOOD: 4, STONE: 2 }),
   }),
+  Object.freeze({
+    id: 'craft_backpack_t1',
+    itemId: 'BACKPACK_T1',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 6, STONE: 2 }),
+  }),
+  Object.freeze({
+    id: 'craft_backpack_t2',
+    itemId: 'BACKPACK_T2',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 8, STONE: 4, IRON: 2 }),
+  }),
+  Object.freeze({
+    id: 'craft_backpack_t3',
+    itemId: 'BACKPACK_T3',
+    category: 'Other',
+    resultCount: 1,
+    cost: Object.freeze({ WOOD: 10, IRON: 6, STONE: 4 }),
+  }),
 ]);
 
 /**
@@ -1575,6 +1705,17 @@ export const SKILL_REGISTRY = Object.freeze({
     effect: Object.freeze({
       type: 'SHIELD_OVERCHARGE',
       shieldBonus: 60,
+    }),
+  }),
+  SELF_HEAL: Object.freeze({
+    id: 'SELF_HEAL',
+    label: 'Self Heal',
+    castTimeSec: 0,
+    activeDurationSec: 0,
+    cooldownSec: 1,
+    effect: Object.freeze({
+      type: 'HEAL_SELF',
+      amount: 5,
     }),
   }),
 });
@@ -1974,15 +2115,35 @@ export const MEMENTO_STORAGE_KEY_LEGACY = 'wanttoplay_local_host_snapshot_v1';
 export const FEATURE_SNAPSHOT = true;
 
 export function getCraftRecipesByCategory(category) {
+  const fromDefs = defsGetCraftByCategory(category);
+  if (fromDefs && fromDefs.length) return fromDefs;
   return CRAFT_RECIPES.filter((r) => r.category === category);
 }
 
 export function getCraftRecipe(recipeId) {
-  for (let i = 0; i < CRAFT_RECIPES.length; i++) {
-    if (CRAFT_RECIPES[i].id === recipeId) return CRAFT_RECIPES[i];
-  }
-  return null;
+  return (
+    defsGetCraftRecipe(recipeId) ||
+    CRAFT_RECIPES.find((r) => r.id === recipeId) ||
+    null
+  );
 }
+
+/**
+ * Actor defs (player + default enemy) — sense radius in Path units.
+ * Overlaid by data/pack/actors.json at boot.
+ */
+export const ACTOR_REGISTRY = Object.freeze({
+  PLAYER: Object.freeze({
+    id: 'PLAYER',
+    role: 'player',
+    senseRadiusPath: 1.0,
+  }),
+  ENEMY_DEFAULT: Object.freeze({
+    id: 'ENEMY_DEFAULT',
+    role: 'enemy',
+    senseRadiusPath: 0.7,
+  }),
+});
 
 /**
  * Flat / World Survival V1 pack rules.
@@ -1990,8 +2151,8 @@ export function getCraftRecipe(recipeId) {
  */
 export const GAME_PACK = Object.freeze({
   targetWaveToWin: 7,
-  setupPhaseDurationSec: 30,
-  waveCountdownSec: 12,
+  setupPhaseDurationSec: 60,
+  waveCountdownSec: 20,
   enemiesPerWaveBase: 3,
   enemiesPerWaveScale: 1,
   baseFootprintL3: 3,
@@ -2004,7 +2165,7 @@ export const GAME_PACK = Object.freeze({
    */
   baseSpawnExclusionL3: 4,
   baseArmorType: ArmorType.DEFAULT,
-  playerMaxHp: 100,
+  playerMaxHp: 850,
   playerSpeed: 200,
   /** Radii as fractions of L3 64 — unit ≈ ~0.45 place cell. */
   playerRadius: Math.round(L3_SIZE * 0.44),
@@ -2023,6 +2184,8 @@ export const GAME_PACK = Object.freeze({
   enemyStrafeSpeed: 70,
   /** General prepares this many spawn groups per wave (sequential paths). */
   waveGroupCount: 3,
+  /** Seed — overridden by data/pack/rules.json via getBalancePack(). */
+  playerActiveSkills: Object.freeze(['FIST', 'SELF_HEAL']),
   /**
    * Reach past block AABB edge (not center). Gen 2×2 / Base 3×3 stay usable when touching.
    */
@@ -2034,7 +2197,31 @@ export const GAME_PACK = Object.freeze({
   aimTurnRateRadPerSec: Math.PI * 3.2,
   facingTurnRateRadPerSec: Math.PI * 4,
   turretTurnRateRadPerSec: Math.PI * 2.4,
-  hotbarSlots: 10,
+  /**
+   * Unit_Template art forward → world aim.
+   * Art faces local −Y (top of sprite); world aim 0 = +X.
+   * −π/2 maps art-forward onto +X (was +π/2 = กลับด้าน).
+   */
+  unitVisualFacingOffsetRad: -Math.PI / 2,
+  /** Arm_1 / Arm_2 / Pivot_Arm_1 pose tween duration (Action→Action visual only). */
+  unitVisualArmTweenSec: 0.1,
+  /** PlaceBlock one-shot visual hold (sec). */
+  unitVisualPlaceBlockSec: 0.1,
+  /** Shoting one-shot visual hold (sec). */
+  unitVisualShotingSec: 0.12,
+  /** Recoil kick distance (local px along arm back) during Shoting. */
+  unitVisualRecoilPx: 7,
+  /** Hotbar SELECT commit delay (sec), capped at 0.1. */
+  hotbarSwitchDelaySec: 0.1,
+  /** Enemy body always Default_skin_2 (independent of player menu skin). */
+  enemyDefaultSkinGroupId: 'Default_skin_2',
+  /** Hotbar without backpack (UI Panel_item_1…6). */
+  hotbarBaseSlots: 6,
+  /**
+   * Default inventory length (= base). Grows with equipped backpack.
+   * Prefer getInventoryCapacity(match) / inventory.length at runtime.
+   */
+  hotbarSlots: 6,
   unitPushSeparation: 0.85,
   /**
    * Default follow zoom (overridable in Cheat panel).
@@ -2078,14 +2265,6 @@ export const GAME_PACK = Object.freeze({
   startingLoadout: Object.freeze([
     Object.freeze({ itemId: 'BASE_CORE_3X3', count: 1 }),
     Object.freeze({ itemId: 'M1991', count: 1 }),
-    Object.freeze({ itemId: 'WALL_WOOD', count: 20 }),
-    Object.freeze({ itemId: 'DOOR_WOOD', count: 2 }),
-    Object.freeze({ itemId: 'TURRET_PISTOL', count: 1 }),
-    Object.freeze({ itemId: 'TURRET_50CAL', count: 1 }),
-    Object.freeze({ itemId: 'GEN_WOOD', count: 1 }),
-    Object.freeze({ itemId: 'AMMO_5_56', count: 4 }),
-    Object.freeze({ itemId: 'TOOL_AXE', count: 1 }),
-    Object.freeze({ itemId: 'WIRE_BLOCK', count: 12 }),
   ]),
   /** Player starts with this armor active (single slot; craft adds more to bag). */
   startingArmorId: 'ARMOR_VEST',
@@ -2192,30 +2371,141 @@ export const AI_LOCAL_PATH = Object.freeze({
 /** @deprecated use GAME_PACK.waveCountdownSec */
 export const WAVE_COUNTDOWN_STUB_SEC = GAME_PACK.waveCountdownSec;
 
-export function getDamageMult(damageType, armorType) {
-  const row = DAMAGE_MULT_TABLE[damageType] || DAMAGE_MULT_TABLE.DEFAULT;
-  const mult = row[armorType];
-  return typeof mult === 'number' ? mult : 1;
+/**
+ * GAME_PACK seed overlaid with data/pack/rules.json (getRulesConfig).
+ * Use for wave timing, player HP/skills — not every GAME_PACK field.
+ */
+export function getBalancePack() {
+  const g = GAME_PACK;
+  let r;
+  try {
+    r = getRulesConfig();
+  } catch (_) {
+    r = null;
+  }
+  if (!r) return g;
+  const skills = Array.isArray(r.playerActiveSkills)
+    ? r.playerActiveSkills
+    : g.playerActiveSkills;
+  return {
+    ...g,
+    targetWaveToWin:
+      r.targetWaveToWin != null ? r.targetWaveToWin : g.targetWaveToWin,
+    setupPhaseDurationSec:
+      r.setupPhaseDurationSec != null
+        ? r.setupPhaseDurationSec
+        : g.setupPhaseDurationSec,
+    waveCountdownSec:
+      r.waveCountdownSec != null ? r.waveCountdownSec : g.waveCountdownSec,
+    enemiesPerWaveBase:
+      r.enemiesPerWaveBase != null
+        ? r.enemiesPerWaveBase
+        : g.enemiesPerWaveBase,
+    enemiesPerWaveScale:
+      r.enemiesPerWaveScale != null
+        ? r.enemiesPerWaveScale
+        : g.enemiesPerWaveScale,
+    waveGroupCount:
+      r.waveGroupCount != null ? r.waveGroupCount : g.waveGroupCount,
+    playerMaxHp: r.playerMaxHp != null ? r.playerMaxHp : g.playerMaxHp,
+    playerSpeed: r.playerSpeed != null ? r.playerSpeed : g.playerSpeed,
+    playerActiveSkills: skills,
+  };
 }
 
+/** Thin adapter → DamageResolver (pack matrix). */
+export function getDamageMult(damageType, armorType) {
+  return defsGetDamageMult(damageType, armorType);
+}
+
+/** Thin adapter → DefinitionRegistry (pack weapons). Fallback to in-module seed. */
 export function getWeaponDef(weaponId) {
-  return WEAPON_REGISTRY[weaponId] || null;
+  return defsGetWeapon(weaponId) || WEAPON_REGISTRY[weaponId] || null;
+}
+
+// Seed defs so lookups work before / without JSON boot.
+seedWeaponsFromRegistry(WEAPON_REGISTRY);
+seedBlocksFromRegistry(BLOCK_REGISTRY);
+seedItemsFromRegistry(ITEM_REGISTRY);
+seedSkillsFromRegistry(SKILL_REGISTRY);
+seedArchetypesFromRegistries({
+  archetypes: UNIT_ARCHETYPE_REGISTRY,
+  aliases: ARCHETYPE_ALIASES,
+  waveComposition: WAVE_ARCHETYPE_COMPOSITION,
+  waveTable: WAVE_ARCHETYPE_TABLE,
+});
+seedWeaponUpgradesFromRegistry(WEAPON_UPGRADES);
+seedCraftFromData(CRAFT_CATEGORIES, CRAFT_RECIPES);
+seedActorsFromRegistry(ACTOR_REGISTRY);
+seedDamageMatrixFromTable(DAMAGE_MULT_TABLE);
+
+export function getActorDef(actorId) {
+  return defsGetActor(actorId) || ACTOR_REGISTRY[actorId] || null;
+}
+
+/**
+ * Awareness / engage sense in world px.
+ * Player → PLAYER actor; enemy → archetype.senseRadiusPath or ENEMY_DEFAULT.
+ */
+export function getSenseRadiusPx(unit) {
+  if (!unit) {
+    const d = getActorDef('ENEMY_DEFAULT');
+    return ((d && d.senseRadiusPath) || 0.7) * PATH_SIZE;
+  }
+  if (unit.role === 'player') {
+    const p = getActorDef('PLAYER');
+    return ((p && p.senseRadiusPath) || 1) * PATH_SIZE;
+  }
+  const arch =
+    unit._effectiveArchetype ||
+    (unit.archetypeId ? getUnitArchetype(unit.archetypeId) : null);
+  if (arch && typeof arch.senseRadiusPath === 'number') {
+    return arch.senseRadiusPath * PATH_SIZE;
+  }
+  const d = getActorDef('ENEMY_DEFAULT');
+  return ((d && d.senseRadiusPath) || 0.7) * PATH_SIZE;
 }
 
 export function getBlockDef(blockId) {
-  return BLOCK_REGISTRY[blockId] || null;
+  return defsGetBlock(blockId) || BLOCK_REGISTRY[blockId] || null;
 }
 
 export function getItemDef(itemId) {
-  return ITEM_REGISTRY[itemId] || null;
+  return defsGetItem(itemId) || ITEM_REGISTRY[itemId] || null;
+}
+
+/** Extra inventory slots from a backpack item id (0 if none). */
+export function getBackpackBonusSlots(itemId) {
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== ItemKind.BACKPACK) return 0;
+  return def.backpackBonusSlots || 0;
+}
+
+/** UI tyle 1|2|3 or 0. */
+export function getBackpackTier(itemId) {
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== ItemKind.BACKPACK) return 0;
+  return def.backpackTier || 0;
+}
+
+export function isBackpackItemId(itemId) {
+  return getBackpackTier(itemId) > 0;
+}
+
+/** Capacity = base + equipped backpack bonus. */
+export function getInventoryCapacity(equippedBackpackId) {
+  const base = GAME_PACK.hotbarBaseSlots || GAME_PACK.hotbarSlots || 6;
+  return base + getBackpackBonusSlots(equippedBackpackId);
 }
 
 export function getSkillDef(skillId) {
-  return SKILL_REGISTRY[skillId] || null;
+  return defsGetSkill(skillId) || SKILL_REGISTRY[skillId] || null;
 }
 
 export function getUnitArchetype(archetypeId) {
   if (!archetypeId) return null;
+  const fromDefs = defsGetArchetype(archetypeId);
+  if (fromDefs) return fromDefs;
   const resolved = ARCHETYPE_ALIASES[archetypeId] || archetypeId;
   return (
     UNIT_ARCHETYPE_REGISTRY[resolved] ||
@@ -2225,10 +2515,11 @@ export function getUnitArchetype(archetypeId) {
 }
 
 export function getArchetypeForWave(waveIndex) {
+  const table = defsGetWaveTable();
+  const src =
+    table && table.length ? table : WAVE_ARCHETYPE_TABLE;
   const id =
-    WAVE_ARCHETYPE_TABLE[
-      Math.min(waveIndex, WAVE_ARCHETYPE_TABLE.length - 1)
-    ] || 'GRUNT_BASIC';
+    src[Math.min(waveIndex, src.length - 1)] || 'GRUNT_BASIC';
   return getUnitArchetype(id);
 }
 
@@ -2237,7 +2528,9 @@ export function getArchetypeForWave(waveIndex) {
  * Boss slots: at most one DYNAMIC_PHASE_BOSS per wave (first matching index).
  */
 export function pickArchetypeIdForWaveSlot(waveIndex, unitIndex) {
-  const table = WAVE_ARCHETYPE_COMPOSITION;
+  const fromDefs = defsGetWaveComposition();
+  const table =
+    fromDefs && fromDefs.length ? fromDefs : WAVE_ARCHETYPE_COMPOSITION;
   const row =
     table[Math.min(Math.max(0, waveIndex), table.length - 1)] ||
     table[1] ||
@@ -2287,7 +2580,7 @@ export function getToolHarvestMult(toolTier, harvestKind) {
 }
 
 export function getUpgradeRecipe(weaponId) {
-  return WEAPON_UPGRADES[weaponId] || null;
+  return defsGetWeaponUpgrade(weaponId) || WEAPON_UPGRADES[weaponId] || null;
 }
 
 /**

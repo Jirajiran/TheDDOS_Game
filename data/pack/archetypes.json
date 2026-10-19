@@ -1,0 +1,526 @@
+{
+  "version": "1.0.0",
+  "archetypes": {
+    "GRUNT_BASIC": {
+      "id": "GRUNT_BASIC",
+      "description": "1. Basic grunt — full decision cycle",
+      "hpRange": [
+        100,
+        450
+      ],
+      "defaultWeapon": "SMG",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "allowedGoals": [
+        "DESTROY_BASE",
+        "ELIMINATE_PLAYER",
+        "SURVIVE_RETREAT",
+        "SEEK_HEAL_POINT",
+        "REGROUP_ALLIES"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "BLOCK_TURRET",
+        "BLOCK_BASE"
+      ],
+      "behaviorFlags": {
+        "retreatHpRatio": 0.25,
+        "canRegroup": true,
+        "preferredRange": "MEDIUM"
+      }
+    },
+    "SUICIDE_BERSERKER": {
+      "id": "SUICIDE_BERSERKER",
+      "description": "2. Berserker — no retreat/heal; fight to death",
+      "hpRange": [
+        450,
+        650
+      ],
+      "defaultWeapon": "SHOTGUN_SHELL",
+      "armorType": "BULLET",
+      "sizeScale": 1,
+      "meleeMultiplier": 1.2,
+      "allowedGoals": [
+        "DESTROY_BASE",
+        "ELIMINATE_PLAYER",
+        "ELIMINATE_TARGET"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "BLOCK_TURRET",
+        "BLOCK_BASE"
+      ],
+      "behaviorFlags": {
+        "retreatHpRatio": 0,
+        "canRegroup": false,
+        "relentless": true,
+        "preferredRange": "EXTREME_CLOSE"
+      }
+    },
+    "STEALTH_SNIPER": {
+      "id": "STEALTH_SNIPER",
+      "description": "3.1 Stealth sniper — player only, long range",
+      "hpRange": [
+        250,
+        400
+      ],
+      "defaultWeapon": "KAR98",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "allowedGoals": [
+        "ELIMINATE_PLAYER",
+        "SURVIVE_RETREAT"
+      ],
+      "targetPriorityList": [
+        "PLAYER"
+      ],
+      "behaviorFlags": {
+        "retreatHpRatio": 0.5,
+        "fleeOnApproach": true,
+        "preferredRange": "LONG_RANGE"
+      }
+    },
+    "STEALTH_SHADOW_MELEE": {
+      "id": "STEALTH_SHADOW_MELEE",
+      "description": "3.2 Shadow melee — player focus, path blockers only",
+      "hpRange": [
+        300,
+        480
+      ],
+      "defaultWeapon": "SHOTGUN_SHELL",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1.4,
+      "allowedGoals": [
+        "ELIMINATE_PLAYER",
+        "ELIMINATE_TARGET"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "BLOCK_OTHER"
+      ],
+      "behaviorFlags": {
+        "canRegroup": false,
+        "ignoreNonPathObstacles": true,
+        "preferredRange": "MELEE",
+        "retreatHpRatio": 0,
+        "relentless": true
+      }
+    },
+    "STEALTH_ASSAULT_HEAVY": {
+      "id": "STEALTH_ASSAULT_HEAVY",
+      "description": "3.3 Heavy assault — turrets first (registry; light wave use)",
+      "hpRange": [
+        500,
+        700
+      ],
+      "defaultWeapon": "AK47",
+      "armorType": "BULLET",
+      "sizeScale": 1.1,
+      "meleeMultiplier": 1.3,
+      "allowedGoals": [
+        "ELIMINATE_TARGET",
+        "DESTROY_BASE"
+      ],
+      "targetPriorityList": [
+        "BLOCK_TURRET",
+        "BLOCK_OTHER",
+        "PLAYER",
+        "ENEMY_UNIT"
+      ],
+      "behaviorFlags": {
+        "canRegroup": false,
+        "preferredRange": "CLOSE",
+        "retreatHpRatio": 0.1
+      }
+    },
+    "STEALTH_DEMOLITION_SIEGE": {
+      "id": "STEALTH_DEMOLITION_SIEGE",
+      "description": "3.4 Siege demolition — long-range structures (registry stub wave)",
+      "hpRange": [
+        400,
+        600
+      ],
+      "defaultWeapon": "LAZER",
+      "armorType": "EXPLOSION",
+      "sizeScale": 1.1,
+      "meleeMultiplier": 1,
+      "allowedGoals": [
+        "ELIMINATE_TARGET",
+        "DESTROY_BASE"
+      ],
+      "targetPriorityList": [
+        "BLOCK_TURRET",
+        "BLOCK_OTHER",
+        "PLAYER",
+        "ENEMY_UNIT"
+      ],
+      "behaviorFlags": {
+        "canRegroup": false,
+        "preferredRange": "LONG_RANGE",
+        "retreatHpRatio": 0.15
+      }
+    },
+    "SUPPORT_MEDIC": {
+      "id": "SUPPORT_MEDIC",
+      "description": "4.1 Support medic — allies / heal / regroup",
+      "hpRange": [
+        300,
+        450
+      ],
+      "defaultWeapon": "MEDIC_GUN",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "allowedGoals": [
+        "SEEK_HEAL_POINT",
+        "REGROUP_ALLIES",
+        "SURVIVE_RETREAT"
+      ],
+      "targetPriorityList": [
+        "ALLY_UNIT"
+      ],
+      "behaviorFlags": {
+        "targetSelectionRule": "LOWEST_HP_FRIENDLY_IN_GROUP",
+        "stayInBackline": true,
+        "allowCrossGroupHelp": false,
+        "preferredRange": "LONG_SUPPORT",
+        "retreatHpRatio": 0.4,
+        "canRegroup": true
+      }
+    },
+    "COWARD_UNIT": {
+      "id": "COWARD_UNIT",
+      "description": "5. Coward — morale drops on hit; flee then regroup",
+      "hpRange": [
+        200,
+        380
+      ],
+      "defaultWeapon": "SMG",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "allowedGoals": [
+        "ELIMINATE_TARGET",
+        "SURVIVE_RETREAT",
+        "REGROUP_ALLIES"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "ENEMY_UNIT"
+      ],
+      "behaviorFlags": {
+        "useMoraleSystem": true,
+        "initialMorale": 100,
+        "moraleDropOnHit": 40,
+        "moraleRecoverRate": 15,
+        "fleeMoraleThreshold": 30,
+        "preferredRange": "MAX_WEAPON_RANGE",
+        "retreatHpRatio": 0.35,
+        "canRegroup": true
+      }
+    },
+    "COMMANDER_LEADER": {
+      "id": "COMMANDER_LEADER",
+      "description": "6. Local General — morale aura + regroup centroid",
+      "hpRange": [
+        550,
+        750
+      ],
+      "defaultWeapon": "AK47",
+      "armorType": "BULLET",
+      "sizeScale": 1.15,
+      "meleeMultiplier": 1.2,
+      "isLocalGeneral": true,
+      "moraleAuraRadius": 300,
+      "allowedGoals": [
+        "HOLD_SECTOR",
+        "REGROUP_ALLIES",
+        "ELIMINATE_PLAYER"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "BLOCK_TURRET"
+      ],
+      "behaviorFlags": {
+        "isGroupLeader": true,
+        "preferredRange": "MEDIUM",
+        "retreatHpRatio": 0.2,
+        "canRegroup": true
+      }
+    },
+    "COMBAT_ENGINEER": {
+      "id": "COMBAT_ENGINEER",
+      "description": "7. Engineer — PLACE / REPAIR when blackboard primed",
+      "hpRange": [
+        350,
+        520
+      ],
+      "defaultWeapon": "SMG",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "hasPlacementSkill": true,
+      "placeableBlockTypes": [
+        "TURRET_PISTOL",
+        "WALL_WOOD"
+      ],
+      "allowedGoals": [
+        "REPAIR_STRUCTURE",
+        "PLACE_TRAP",
+        "ELIMINATE_TARGET"
+      ],
+      "targetPriorityList": [
+        "BLOCK_TURRET",
+        "BLOCK_OTHER"
+      ],
+      "behaviorFlags": {
+        "interactTargetType": "FRIENDLY_BUILDINGS_FIRST",
+        "preferredRange": "CLOSE",
+        "retreatHpRatio": 0.3,
+        "canRegroup": true
+      }
+    },
+    "SHIELD_VANGUARD": {
+      "id": "SHIELD_VANGUARD",
+      "description": "8. Shield tank — passive shield + TAUNT_ROAR",
+      "hpRange": [
+        650,
+        900
+      ],
+      "defaultWeapon": "SHOTGUN_SHELL",
+      "armorType": "BULLET",
+      "sizeScale": 1.2,
+      "meleeMultiplier": 1.5,
+      "hasPassiveShield": true,
+      "shieldColliderRadius": 60,
+      "shieldMaxHp": 180,
+      "activeSkills": [
+        "TAUNT_ROAR"
+      ],
+      "allowedGoals": [
+        "PROTECT_ALLY",
+        "ELIMINATE_PLAYER",
+        "HOLD_SECTOR"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "ENEMY_UNIT"
+      ],
+      "behaviorFlags": {
+        "armorType": "BULLET",
+        "bodyguardMode": true,
+        "retreatHpRatio": 0.05,
+        "preferredRange": "EXTREME_CLOSE",
+        "canRegroup": true
+      }
+    },
+    "FLANK_SKIRMISHER": {
+      "id": "FLANK_SKIRMISHER",
+      "description": "9. Skirmisher — burst then FLANK_POSITION relocate",
+      "hpRange": [
+        280,
+        420
+      ],
+      "defaultWeapon": "SMG",
+      "armorType": "DEFAULT",
+      "sizeScale": 1,
+      "meleeMultiplier": 1,
+      "useLocalFlankPathing": true,
+      "burstDurationSec": 2,
+      "allowedGoals": [
+        "ELIMINATE_PLAYER",
+        "FLANK_POSITION",
+        "SURVIVE_RETREAT"
+      ],
+      "targetPriorityList": [
+        "PLAYER"
+      ],
+      "behaviorFlags": {
+        "relocateAfterBurst": true,
+        "preferredRange": "MEDIUM_CLOSE",
+        "retreatHpRatio": 0.3,
+        "canRegroup": true,
+        "lowHpSpeedBuff": 1.25,
+        "lowHpSpeedThreshold": 0.5
+      }
+    },
+    "DYNAMIC_PHASE_BOSS": {
+      "id": "DYNAMIC_PHASE_BOSS",
+      "description": "10. Phase boss — weapon/goals swap by hpRatio",
+      "hpRange": [
+        850,
+        1200
+      ],
+      "defaultWeapon": "LAZER",
+      "armorType": "LAZER",
+      "sizeScale": 1.5,
+      "isBoss": true,
+      "isDynamicDriver": true,
+      "meleeMultiplier": 5,
+      "activeSkills": [
+        "SPEED_BOOST"
+      ],
+      "allowedGoals": [
+        "ELIMINATE_PLAYER",
+        "HOLD_SECTOR"
+      ],
+      "targetPriorityList": [
+        "PLAYER",
+        "BLOCK_TURRET"
+      ],
+      "behaviorFlags": {
+        "preferredRange": "LONG_RANGE",
+        "retreatHpRatio": 0,
+        "relentless": true,
+        "canRegroup": false
+      },
+      "phases": [
+        {
+          "hpRatio": 0.5,
+          "weaponId": "LAZER",
+          "activeSkills": [
+            "SPEED_BOOST"
+          ],
+          "allowedGoals": [
+            "ELIMINATE_PLAYER",
+            "HOLD_SECTOR"
+          ],
+          "behaviorFlags": {
+            "preferredRange": "LONG_RANGE",
+            "retreatHpRatio": 0,
+            "relentless": true,
+            "canRegroup": false
+          }
+        },
+        {
+          "hpRatio": 0,
+          "weaponId": "SHOTGUN_SHELL",
+          "activeSkills": [
+            "SPEED_BOOST"
+          ],
+          "allowedGoals": [
+            "SUICIDE_ATTACK",
+            "ELIMINATE_TARGET"
+          ],
+          "behaviorFlags": {
+            "preferredRange": "EXTREME_CLOSE",
+            "relentless": true,
+            "retreatHpRatio": 0,
+            "canRegroup": false
+          }
+        }
+      ]
+    }
+  },
+  "aliases": {
+    "CLASS_BRIGADIER": "GRUNT_BASIC",
+    "CLASS_ASSAULT": "GRUNT_BASIC",
+    "CLASS_QUARTER": "SUICIDE_BERSERKER",
+    "CLASS_SNIPER_CAMP": "STEALTH_SNIPER",
+    "CLASS_SUPPORT_MEDIC": "SUPPORT_MEDIC",
+    "CLASS_HIGH_RANK": "COMMANDER_LEADER",
+    "CLASS_BOSS": "DYNAMIC_PHASE_BOSS"
+  },
+  "waveComposition": [
+    null,
+    [
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 1
+      }
+    ],
+    [
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 1
+      }
+    ],
+    [
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 2
+      },
+      {
+        "id": "STEALTH_SNIPER",
+        "weight": 1
+      }
+    ],
+    [
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 2
+      },
+      {
+        "id": "SUPPORT_MEDIC",
+        "weight": 1
+      },
+      {
+        "id": "COWARD_UNIT",
+        "weight": 2
+      }
+    ],
+    [
+      {
+        "id": "COMMANDER_LEADER",
+        "weight": 1
+      },
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 2
+      },
+      {
+        "id": "SHIELD_VANGUARD",
+        "weight": 1
+      },
+      {
+        "id": "COWARD_UNIT",
+        "weight": 1
+      }
+    ],
+    [
+      {
+        "id": "COMBAT_ENGINEER",
+        "weight": 1
+      },
+      {
+        "id": "FLANK_SKIRMISHER",
+        "weight": 2
+      },
+      {
+        "id": "SHIELD_VANGUARD",
+        "weight": 1
+      },
+      {
+        "id": "STEALTH_ASSAULT_HEAVY",
+        "weight": 1
+      }
+    ],
+    [
+      {
+        "id": "DYNAMIC_PHASE_BOSS",
+        "weight": 1
+      },
+      {
+        "id": "GRUNT_BASIC",
+        "weight": 2
+      },
+      {
+        "id": "FLANK_SKIRMISHER",
+        "weight": 1
+      }
+    ]
+  ],
+  "waveTable": [
+    null,
+    "GRUNT_BASIC",
+    "GRUNT_BASIC",
+    "GRUNT_BASIC",
+    "SUPPORT_MEDIC",
+    "COMMANDER_LEADER",
+    "FLANK_SKIRMISHER",
+    "DYNAMIC_PHASE_BOSS"
+  ]
+}

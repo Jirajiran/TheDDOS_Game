@@ -1,9 +1,7 @@
 import {
   makeAimAction,
-  makeCastSkillAction,
   makeFireAction,
   makeHarvestAction,
-  makeInteractAction,
   makeMoveAction,
   makePlaceAction,
   makeReloadAction,
@@ -23,8 +21,11 @@ import {
  * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · Q Fist · E interact · F craft · 1-0 hotbar
  * When uiBlocked (panel open), suppress gameplay actions but still allow F/E/Esc toggle.
  * Hotbar drag sets actionBusy — suppress fire/place/harvest while held.
+ * Chat mode: keys type into input; canvas mousedown dismisses chat then fires (enemy interrupt).
+ * @param {HTMLCanvasElement} canvas
+ * @param {{ onChatPointerDismiss?: () => void }} [hooks]
  */
-export function createInput(canvas) {
+export function createInput(canvas, hooks = {}) {
   const keys = Object.create(null);
   let mouseScreenX = 0;
   let mouseScreenY = 0;
@@ -34,12 +35,16 @@ export function createInput(canvas) {
   let craftTogglePressed = false;
   let reloadPressed = false;
   let fistPressed = false;
+  /** Skill slot 2 (SELF_HEAL) — KeyC (E is interact). */
+  let healSkillPressed = false;
   let meleeVolumeTogglePressed = false;
+  let chatTogglePressed = false;
   let wheelDelta = 0;
   const digitPress = [];
   let uiBlocked = false;
   let actionBusy = false;
   let escapePressed = false;
+  let chatMode = false;
 
   function setUiBlocked(blocked) {
     uiBlocked = !!blocked;
@@ -48,9 +53,23 @@ export function createInput(canvas) {
       firePressed = false;
       reloadPressed = false;
       fistPressed = false;
+      healSkillPressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
       // Keep interactPressed / craftTogglePressed so E/F can close panels.
+    }
+  }
+
+  function setChatMode(on) {
+    chatMode = !!on;
+    if (chatMode) {
+      fireHeld = false;
+      firePressed = false;
+      reloadPressed = false;
+      fistPressed = false;
+      healSkillPressed = false;
+      wheelDelta = 0;
+      digitPress.length = 0;
     }
   }
 
@@ -65,20 +84,29 @@ export function createInput(canvas) {
   function onKeyDown(e) {
     if (e.code === 'Escape') {
       escapePressed = true;
-      if (uiBlocked) e.preventDefault();
+      if (uiBlocked || chatMode) e.preventDefault();
+      return;
+    }
+    // Enter: chat open/send (app handles); ignore gameplay while chatMode
+    if (e.code === 'Enter') {
+      if (!chatMode) {
+        chatTogglePressed = true;
+        e.preventDefault();
+      }
+      return;
+    }
+    if (chatMode) {
+      // Typing — do not bind WASD/fire; let input element receive keys.
       return;
     }
     // Panel toggles work even while UI blocks gameplay.
     if (e.code === 'KeyF') {
       craftTogglePressed = true;
+      keys[e.code] = true;
       e.preventDefault();
       return;
     }
-    if (e.code === 'KeyV') {
-      meleeVolumeTogglePressed = true;
-      e.preventDefault();
-      return;
-    }
+    // KeyV MeleeVol debug removed from normal play.
     if (e.code === 'KeyE') {
       interactPressed = true;
       if (uiBlocked) return;
@@ -98,6 +126,10 @@ export function createInput(canvas) {
       fistPressed = true;
       e.preventDefault();
     }
+    if (e.code === 'KeyC') {
+      healSkillPressed = true;
+      e.preventDefault();
+    }
     const digit = digitFromCode(e.code);
     if (digit !== -1) digitPress.push(digit);
   }
@@ -114,11 +146,19 @@ export function createInput(canvas) {
   }
 
   function onMouseDown(e) {
-    if (uiBlocked || actionBusy) return;
-    if (e.button === 0) {
+    if (e.button !== 0) return;
+    // Typing in chat + enemy: click world cancels chat and uses this click to fire.
+    if (chatMode) {
+      if (typeof hooks.onChatPointerDismiss === 'function') {
+        hooks.onChatPointerDismiss();
+      }
       firePressed = true;
       fireHeld = true;
+      return;
     }
+    if (uiBlocked || actionBusy) return;
+    firePressed = true;
+    fireHeld = true;
   }
 
   function onMouseUp(e) {
@@ -166,19 +206,57 @@ export function createInput(canvas) {
     craftTogglePressed = false;
     const meleeVolToggle = meleeVolumeTogglePressed;
     meleeVolumeTogglePressed = false;
+    const chatToggle = chatTogglePressed;
+    chatTogglePressed = false;
+
+    if (chatMode) {
+      interactPressed = false;
+      firePressed = false;
+      reloadPressed = false;
+      fistPressed = false;
+      healSkillPressed = false;
+      wheelDelta = 0;
+      digitPress.length = 0;
+      const zoom = camera.zoom > 0 ? camera.zoom : 1;
+      return {
+        actions: [],
+        mouseWorld: {
+          x: camera.x + mouseScreenX / zoom,
+          y: camera.y + mouseScreenY / zoom,
+        },
+        mouseScreenX,
+        mouseScreenY,
+        escapePressed: escaped,
+        craftTogglePressed: false,
+        chatTogglePressed: chatToggle,
+        interactTogglePressed: false,
+        fistTogglePressed: false,
+        healSkillTogglePressed: false,
+        meleeVolumeTogglePressed: false,
+        moveDx: 0,
+        moveDy: 0,
+        uiBlocked: true,
+        actionBusy,
+        craftingState: false,
+        chatMode: true,
+      };
+    }
 
     if (uiBlocked) {
-      // Crafting state: MOVE only — no fire, hotbar swap, interact, place.
+      // Panel open: MOVE + AIM (mouse facing). No fire / hotbar / place.
+      // Gen must keep mouse aim — AIM after MOVE so facing is not WASD-only.
       const { dx, dy } = moveAxis();
       const actions = [];
       if (dx !== 0 || dy !== 0) {
         actions.push(makeMoveAction(playerUnitId, dx, dy));
       }
+      actions.push(makeAimAction(playerUnitId, 0));
       const interactToggle = interactPressed;
       interactPressed = false;
       firePressed = false;
       reloadPressed = false;
       fistPressed = false;
+      healSkillPressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
       const zoom = camera.zoom > 0 ? camera.zoom : 1;
@@ -192,7 +270,10 @@ export function createInput(canvas) {
         mouseScreenY,
         escapePressed: escaped,
         craftTogglePressed: craftToggle,
+        chatTogglePressed: chatToggle,
         interactTogglePressed: interactToggle,
+        fistTogglePressed: false,
+        healSkillTogglePressed: false,
         meleeVolumeTogglePressed: meleeVolToggle,
         moveDx: dx,
         moveDy: dy,
@@ -213,14 +294,21 @@ export function createInput(canvas) {
   }
   while (digitPress.length) {
     const digit = digitPress.shift();
-    if (digit >= 0 && digit < GAME_PACK.hotbarSlots) {
+    const slotCount =
+      (inventory && inventory.length) ||
+      GAME_PACK.hotbarBaseSlots ||
+      GAME_PACK.hotbarSlots ||
+      6;
+    if (digit >= 0 && digit < slotCount) {
       actions.push(makeSelectHotbarAction(playerUnitId, digit));
     }
   }
   let effectiveHotbar = activeHotbar;
-  if (hotbarDelta !== 0) {
-    const slots = GAME_PACK.hotbarSlots;
-    effectiveHotbar = (activeHotbar + hotbarDelta + slots * 8) % slots;
+  if (hotbarDelta !== 0 && inventory && inventory.length) {
+    // Wheel: step ±1 across all hotbar slots (delay while holding weapon is sim-side)
+    const n = inventory.length;
+    const next = (activeHotbar + hotbarDelta + n * 8) % n;
+    effectiveHotbar = next;
     actions.push(makeSelectHotbarAction(playerUnitId, effectiveHotbar));
   }
   // Also honor digit selects in effectiveHotbar for this frame's place/fire.
@@ -263,18 +351,17 @@ export function createInput(canvas) {
   }
   firePressed = false;
 
-  if (fistPressed) {
-    actions.push(makeCastSkillAction(playerUnitId, 'FIST'));
-    fistPressed = false;
-  }
+  // Fist / Heal / Interact: UI intent flags only — app dispatchUi (same pipe as SVG buttons).
+  const fistToggle = fistPressed;
+  fistPressed = false;
+  const healToggle = healSkillPressed;
+  healSkillPressed = false;
+  const interactToggle = interactPressed;
+  interactPressed = false;
 
   if (reloadPressed) {
     actions.push(makeReloadAction(playerUnitId));
     reloadPressed = false;
-  }
-  if (interactPressed) {
-    actions.push(makeInteractAction(playerUnitId));
-    interactPressed = false;
   }
 
   return {
@@ -284,12 +371,16 @@ export function createInput(canvas) {
     mouseScreenY,
     escapePressed: escaped,
     craftTogglePressed: craftToggle,
-    interactTogglePressed: false,
+    chatTogglePressed: chatToggle,
+    interactTogglePressed: interactToggle,
+    fistTogglePressed: fistToggle,
+    healSkillTogglePressed: healToggle,
     meleeVolumeTogglePressed: meleeVolToggle,
     moveDx: dx,
     moveDy: dy,
     uiBlocked: false,
     actionBusy,
+    chatMode: false,
   };
 }
 
@@ -303,7 +394,7 @@ export function createInput(canvas) {
     canvas.removeEventListener('wheel', onWheel);
   }
 
-  return { poll, destroy, keys, setUiBlocked, setActionBusy };
+  return { poll, destroy, keys, setUiBlocked, setActionBusy, setChatMode };
 }
 
 function digitFromCode(code) {

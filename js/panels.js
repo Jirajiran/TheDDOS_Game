@@ -1,396 +1,212 @@
 /**
- * Craft + Gen/Base receive panels (plain HTML overlay).
- * Opens during PLAYING; Esc / close button dismisses.
+ * Craft + Gen/Base receive — SVG PlayerUI only (no HTML panel markup).
  */
 import {
   CRAFT_CATEGORIES,
   CRAFT_RECIPES,
   getCraftRecipe,
   getItemDef,
+  isBackpackItemId,
 } from './config.js';
 import { countItem, tryCraftBuy } from './inventory.js';
 import {
   getBaseReceiveState,
   getGenReceiveState,
+  tryEquipBackpackFromSlot,
 } from './sim.js';
 
-export function createPanels(dom, hooks) {
-  const {
-    craftPanel,
-    craftTabs,
-    craftList,
-    craftStatus,
-    craftClose,
-    receivePanel,
-    receiveTitle,
-    receiveBody,
-    receiveStatus,
-    receiveClose,
-    btnCraftHud,
-  } = dom;
-
+export function createPanels(_dom, hooks) {
   let openKind = null; // 'craft' | 'receive-gen' | 'receive-base' | null
-  let craftCategory = CRAFT_CATEGORIES[0];
+  let craftCategory = 'Gun';
+  /** -1 = no slot selected yet */
+  let craftSelectedIndex = -1;
   let receiveCtx = null; // { type, blockId }
+  let lastStatus = '';
   let statusTimer = 0;
-  /** Avoid rebuild-every-frame (destroys buttons before click lands). */
-  let receiveMountedKey = '';
-  let receiveEls = null; // gen: { hp, stock, timer, takeBtn } | base: { hp, rows: Map }
+
+  function uiReady() {
+    return !!(hooks.playerUi && hooks.playerUi.isReady && hooks.playerUi.isReady());
+  }
+
+  function syncSvgCraft() {
+    if (!uiReady()) return;
+    const match = hooks.getMatch();
+    const inv = match && match.inventory;
+    const recipes = CRAFT_RECIPES.filter((r) => r.category === craftCategory).map(
+      (r) => {
+        const def = getItemDef(r.itemId);
+        const costBits = [];
+        if (r.cost) {
+          for (const id of Object.keys(r.cost)) {
+            const have = inv ? countItem(inv, id) : 0;
+            costBits.push(`${have}/${r.cost[id]} ${id}`);
+          }
+        }
+        return {
+          ...r,
+          _label: def ? def.label : r.itemId,
+          _costText: costBits.join(' · ') || '—',
+          _status: lastStatus,
+        };
+      }
+    );
+    if (craftSelectedIndex >= recipes.length) craftSelectedIndex = -1;
+    hooks.playerUi.syncCraftSlots(recipes, craftSelectedIndex);
+    if (hooks.playerUi.syncCatalogVisual) {
+      hooks.playerUi.syncCatalogVisual(craftCategory);
+    }
+  }
 
   function isOpen() {
     return openKind != null;
   }
 
-  function setStatus(el, msg, ok) {
-    if (!el) return;
-    el.textContent = msg || '';
-    el.classList.toggle('is-ok', !!ok);
-    el.classList.toggle('is-err', !!msg && !ok);
-    statusTimer = 2.5;
-  }
-
-  function clearReceiveMount() {
-    receiveMountedKey = '';
-    receiveEls = null;
-    if (receiveBody) receiveBody.innerHTML = '';
+  function setStatus(msg, ok) {
+    lastStatus = msg || '';
+    statusTimer = msg ? 2.5 : 0;
+    void ok;
+    syncSvgCraft();
   }
 
   function close() {
     openKind = null;
     receiveCtx = null;
-    clearReceiveMount();
-    if (craftPanel) {
-      craftPanel.hidden = true;
-      craftPanel.classList.remove('is-open');
-    }
-    if (receivePanel) {
-      receivePanel.hidden = true;
-      receivePanel.classList.remove('is-open');
+    lastStatus = '';
+    if (uiReady()) {
+      hooks.playerUi.setCraftOpen(false);
+      if (hooks.playerUi.setGenOpen) hooks.playerUi.setGenOpen(false);
     }
     if (hooks.onClose) hooks.onClose();
   }
 
   function openCraft() {
+    if (!uiReady()) return;
     openKind = 'craft';
     receiveCtx = null;
-    clearReceiveMount();
-    if (receivePanel) {
-      receivePanel.hidden = true;
-      receivePanel.classList.remove('is-open');
-    }
-    if (craftPanel) {
-      craftPanel.hidden = false;
-      craftPanel.classList.add('is-open');
-    }
-    renderCraftTabs();
-    renderCraftList();
+    if (hooks.playerUi.setGenOpen) hooks.playerUi.setGenOpen(false);
+    hooks.playerUi.setCraftOpen(true);
+    syncSvgCraft();
     if (hooks.onOpen) hooks.onOpen('craft');
   }
 
+  function setCraftCategory(cat) {
+    if (!CRAFT_CATEGORIES.includes(cat)) return;
+    craftCategory = cat;
+    craftSelectedIndex = -1;
+    lastStatus = '';
+    syncSvgCraft();
+  }
+
+  function selectCraftSlot(index) {
+    craftSelectedIndex = Math.max(0, index | 0);
+    syncSvgCraft();
+  }
+
+  function confirmSelectedCraft() {
+    if (craftSelectedIndex < 0) {
+      setStatus('Select a recipe', false);
+      return;
+    }
+    const recipes = CRAFT_RECIPES.filter((r) => r.category === craftCategory);
+    const recipe = recipes[craftSelectedIndex];
+    if (!recipe) {
+      setStatus('Select a recipe', false);
+      return;
+    }
+    buyRecipe(recipe);
+  }
+
+  function buyRecipe(recipe) {
+    const m = hooks.getMatch();
+    if (!m || !m.inventory) return;
+    const def = getItemDef(recipe.itemId);
+    const full = getCraftRecipe(recipe.id) || recipe;
+    const mFree = !!m.freeCraft;
+    const res = tryCraftBuy(m.inventory, full, { freeCraft: mFree });
+    if (res.ok) {
+      if (isBackpackItemId(recipe.itemId)) {
+        for (let i = 0; i < m.inventory.length; i++) {
+          if (m.inventory[i] && m.inventory[i].itemId === recipe.itemId) {
+            tryEquipBackpackFromSlot(m, i);
+            break;
+          }
+        }
+      }
+      setStatus(
+        mFree
+          ? `Bought ${def ? def.label : recipe.itemId} (free)`
+          : `Bought ${def ? def.label : recipe.itemId}`,
+        true
+      );
+      if (hooks.onInventoryChanged) hooks.onInventoryChanged();
+      syncSvgCraft();
+    } else {
+      setStatus(res.reason || 'Cannot buy', false);
+    }
+  }
+
+  function buildSvgGenInfo(match, pending) {
+    if (!match || !pending) return null;
+    const counts = { WOOD: 0, STONE: 0, IRON: 0 };
+    if (pending.type === 'receive-gen') {
+      const st = getGenReceiveState(match, pending.blockId);
+      if (!st) return null;
+      if (st.itemId && counts[st.itemId] != null) counts[st.itemId] = st.stock || 0;
+      else if (st.itemId) counts[st.itemId] = st.stock || 0;
+      return {
+        label: st.label,
+        hp: st.hp,
+        maxHp: st.maxHp,
+        counts,
+        kind: 'gen',
+        blockId: pending.blockId,
+      };
+    }
+    const st = getBaseReceiveState(match);
+    if (!st) return null;
+    const bags = st.bags || [];
+    for (let i = 0; i < bags.length; i++) {
+      const id = bags[i].itemId;
+      if (counts[id] != null) counts[id] = bags[i].count || 0;
+    }
+    return {
+      label: st.label || 'Base',
+      hp: st.hp,
+      maxHp: st.maxHp,
+      counts,
+      kind: 'base',
+      blockId: pending.blockId,
+    };
+  }
+
   function openReceive(pending) {
-    if (!pending) return;
+    if (!pending || !uiReady()) return;
     openKind = pending.type;
     receiveCtx = { type: pending.type, blockId: pending.blockId };
-    clearReceiveMount();
-    if (craftPanel) {
-      craftPanel.hidden = true;
-      craftPanel.classList.remove('is-open');
-    }
-    if (receivePanel) {
-      receivePanel.hidden = false;
-      receivePanel.classList.add('is-open');
-    }
-    renderReceive();
+    hooks.playerUi.setCraftOpen(false);
+    const match = hooks.getMatch();
+    const info = buildSvgGenInfo(match, pending);
+    hooks.playerUi.setGenOpen(true, pending);
+    if (hooks.playerUi.syncGenPanel) hooks.playerUi.syncGenPanel(info);
     if (hooks.onOpen) hooks.onOpen(pending.type);
   }
 
-  function formatCost(cost) {
-    if (!cost) return '—';
-    const parts = [];
-    for (const id of Object.keys(cost)) {
-      const def = getItemDef(id);
-      parts.push(`${cost[id]} ${def ? def.label : id}`);
+  function refreshSvgGenIfOpen() {
+    if (!uiReady() || !hooks.playerUi.isGenOpen || !hooks.playerUi.isGenOpen()) {
+      return;
     }
-    return parts.join(' + ');
-  }
-
-  function renderCraftTabs() {
-    if (!craftTabs) return;
-    craftTabs.innerHTML = '';
-    for (let i = 0; i < CRAFT_CATEGORIES.length; i++) {
-      const cat = CRAFT_CATEGORIES[i];
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className =
-        'panel-tab' + (cat === craftCategory ? ' is-active' : '');
-      btn.textContent = cat;
-      btn.dataset.category = cat;
-      btn.addEventListener('click', () => {
-        craftCategory = cat;
-        renderCraftTabs();
-        renderCraftList();
-      });
-      craftTabs.appendChild(btn);
-    }
-  }
-
-  function renderCraftList() {
-    if (!craftList) return;
+    if (!receiveCtx) return;
     const match = hooks.getMatch();
-    const inv = match && match.inventory;
-    craftList.innerHTML = '';
-    const recipes = CRAFT_RECIPES.filter((r) => r.category === craftCategory);
-    if (!recipes.length) {
-      const empty = document.createElement('p');
-      empty.className = 'panel-empty';
-      empty.textContent = 'No recipes in this category.';
-      craftList.appendChild(empty);
-      return;
-    }
-    for (let i = 0; i < recipes.length; i++) {
-      const recipe = recipes[i];
-      const def = getItemDef(recipe.itemId);
-      const row = document.createElement('div');
-      row.className = 'panel-row';
-      const title = document.createElement('div');
-      title.className = 'panel-row-main';
-      const name = document.createElement('strong');
-      name.textContent = def ? def.label : recipe.itemId;
-      const meta = document.createElement('span');
-      meta.className = 'panel-row-meta';
-      meta.textContent = `×${recipe.resultCount || 1} · ${formatCost(recipe.cost)}`;
-      title.appendChild(name);
-      title.appendChild(meta);
-
-      const bagHint = document.createElement('span');
-      bagHint.className = 'panel-row-bag';
-      if (inv && recipe.cost) {
-        const bits = [];
-        for (const id of Object.keys(recipe.cost)) {
-          bits.push(`${countItem(inv, id)}/${recipe.cost[id]}`);
-        }
-        bagHint.textContent = bits.join(' · ');
-      }
-
-      const buy = document.createElement('button');
-      buy.type = 'button';
-      buy.className = 'btn btn-ghost panel-buy';
-      buy.textContent = 'Buy';
-      buy.addEventListener('click', () => {
-        const m = hooks.getMatch();
-        if (!m || !m.inventory) return;
-        const full = getCraftRecipe(recipe.id) || recipe;
-        const mFree = !!(m.freeCraft);
-        const res = tryCraftBuy(m.inventory, full, { freeCraft: mFree });
-        if (res.ok) {
-          setStatus(
-            craftStatus,
-            mFree
-              ? `Bought ${def ? def.label : recipe.itemId} (free)`
-              : `Bought ${def ? def.label : recipe.itemId}`,
-            true
-          );
-          if (hooks.onInventoryChanged) hooks.onInventoryChanged();
-          renderCraftList();
-        } else {
-          setStatus(craftStatus, res.reason || 'Cannot buy', false);
-        }
-      });
-
-      row.appendChild(title);
-      row.appendChild(bagHint);
-      row.appendChild(buy);
-      craftList.appendChild(row);
-    }
+    const info = buildSvgGenInfo(match, receiveCtx);
+    if (hooks.playerUi.syncGenPanel) hooks.playerUi.syncGenPanel(info);
   }
 
-  function mountKeyForGen(st) {
-    return `gen:${receiveCtx.blockId}:${st ? 'ok' : 'gone'}`;
-  }
-
-  function mountKeyForBase(st) {
-    if (!st) return 'base:gone';
-    if (!st.hasStorageApi) return 'base:nostorage';
-    const ids = (st.bags || []).map((b) => b.itemId).join(',');
-    return `base:bags:${ids || 'empty'}`;
-  }
-
-  function buildReceiveGen(st) {
-    clearReceiveMount();
-    if (!st) {
-      receiveTitle.textContent = 'Generator';
-      receiveBody.textContent = 'Generator gone.';
-      receiveMountedKey = mountKeyForGen(null);
-      return;
-    }
-    receiveTitle.textContent = st.label;
-    const hp = document.createElement('p');
-    hp.className = 'panel-stat';
-    const stock = document.createElement('p');
-    stock.className = 'panel-stat';
-    const timer = document.createElement('p');
-    timer.className = 'panel-muted';
-    const takeBtn = document.createElement('button');
-    takeBtn.type = 'button';
-    takeBtn.className = 'btn';
-    takeBtn.addEventListener('click', () => {
-      if (!receiveCtx || receiveCtx.type !== 'receive-gen') return;
-      if (!hooks.onTakeGen) {
-        setStatus(receiveStatus, 'Take not wired', false);
-        return;
-      }
-      hooks.onTakeGen(receiveCtx.blockId);
-      setStatus(receiveStatus, 'Taking…', true);
-    });
-    receiveBody.appendChild(hp);
-    receiveBody.appendChild(stock);
-    receiveBody.appendChild(timer);
-    receiveBody.appendChild(takeBtn);
-    receiveEls = { kind: 'gen', hp, stock, timer, takeBtn };
-    receiveMountedKey = mountKeyForGen(st);
-    updateReceiveGen(st);
-  }
-
-  function updateReceiveGen(st) {
-    if (!receiveEls || receiveEls.kind !== 'gen' || !st) return;
-    receiveTitle.textContent = st.label;
-    receiveEls.hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-    receiveEls.stock.textContent = `Stock: ${st.stock}/${st.stockMax} ${st.itemId || ''}`;
-    receiveEls.timer.textContent =
-      st.stock >= st.stockMax
-        ? 'Storage full'
-        : `Next +${st.amountPerTick} in ${Math.ceil(st.timerSec)}s`;
-    receiveEls.takeBtn.textContent =
-      st.stock > 0 ? `Take all (${st.stock})` : 'Empty';
-    receiveEls.takeBtn.disabled = st.stock <= 0;
-  }
-
-  function buildReceiveBase(st) {
-    clearReceiveMount();
-    if (!st) {
-      receiveTitle.textContent = 'Base';
-      receiveBody.textContent = 'Base not available.';
-      receiveMountedKey = mountKeyForBase(null);
-      return;
-    }
-    receiveTitle.textContent = st.label;
-    const hp = document.createElement('p');
-    hp.className = 'panel-stat';
-    receiveBody.appendChild(hp);
-
-    if (!st.hasStorageApi) {
-      const todo = document.createElement('p');
-      todo.className = 'panel-muted';
-      todo.textContent =
-        st.note ||
-        'TODO: base inherent storage/gen — panel hooks takeBaseResources when sim adds base.storage';
-      const placeholder = document.createElement('div');
-      placeholder.className = 'panel-row';
-      placeholder.innerHTML =
-        '<div class="panel-row-main"><strong>Storage</strong><span class="panel-row-meta">— empty (waiting on sim)</span></div>';
-      receiveBody.appendChild(todo);
-      receiveBody.appendChild(placeholder);
-      receiveEls = { kind: 'base', hp, rows: new Map() };
-      receiveMountedKey = mountKeyForBase(st);
-      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-      return;
-    }
-
-    if (!st.bags.length) {
-      const empty = document.createElement('p');
-      empty.className = 'panel-empty';
-      empty.textContent = 'Base storage empty.';
-      receiveBody.appendChild(empty);
-      receiveEls = { kind: 'base', hp, rows: new Map() };
-      receiveMountedKey = mountKeyForBase(st);
-      hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-      return;
-    }
-
-    const rows = new Map();
-    for (let i = 0; i < st.bags.length; i++) {
-      const bag = st.bags[i];
-      const def = getItemDef(bag.itemId);
-      const row = document.createElement('div');
-      row.className = 'panel-row';
-      const main = document.createElement('div');
-      main.className = 'panel-row-main';
-      const label = document.createElement('strong');
-      label.textContent = def ? def.label : bag.itemId;
-      const meta = document.createElement('span');
-      meta.className = 'panel-row-meta';
-      main.appendChild(label);
-      main.appendChild(meta);
-      const takeBtn = document.createElement('button');
-      takeBtn.type = 'button';
-      takeBtn.className = 'btn btn-ghost panel-buy';
-      const itemId = bag.itemId;
-      takeBtn.addEventListener('click', () => {
-        if (!hooks.onTakeBase) {
-          setStatus(receiveStatus, 'Take not wired', false);
-          return;
-        }
-        hooks.onTakeBase(itemId);
-        setStatus(receiveStatus, 'Taking…', true);
-      });
-      row.appendChild(main);
-      row.appendChild(takeBtn);
-      receiveBody.appendChild(row);
-      rows.set(itemId, { meta, takeBtn });
-    }
-    receiveEls = { kind: 'base', hp, rows };
-    receiveMountedKey = mountKeyForBase(st);
-    updateReceiveBase(st);
-  }
-
-  function updateReceiveBase(st) {
-    if (!receiveEls || receiveEls.kind !== 'base' || !st) return;
-    receiveTitle.textContent = st.label;
-    receiveEls.hp.textContent = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
-    if (!st.hasStorageApi || !st.bags.length) return;
-    for (let i = 0; i < st.bags.length; i++) {
-      const bag = st.bags[i];
-      const row = receiveEls.rows.get(bag.itemId);
-      if (!row) continue;
-      row.meta.textContent = `×${bag.count}`;
-      row.takeBtn.textContent = bag.count > 0 ? 'Take' : 'Empty';
-      row.takeBtn.disabled = bag.count <= 0;
-    }
-  }
-
-  function renderReceive() {
-    if (!receiveBody || !receiveCtx) return;
-    const match = hooks.getMatch();
-    if (!match) {
-      clearReceiveMount();
-      receiveBody.textContent = 'No match.';
-      receiveMountedKey = 'nomatch';
-      return;
-    }
-
-    if (receiveCtx.type === 'receive-gen') {
-      const st = getGenReceiveState(match, receiveCtx.blockId);
-      const key = mountKeyForGen(st);
-      if (key !== receiveMountedKey) buildReceiveGen(st);
-      else if (st) updateReceiveGen(st);
-      return;
-    }
-
-    if (receiveCtx.type === 'receive-base') {
-      const st = getBaseReceiveState(match);
-      const key = mountKeyForBase(st);
-      if (key !== receiveMountedKey) buildReceiveBase(st);
-      else if (st) updateReceiveBase(st);
-    }
-  }
-
-  /** Call each frame while PLAYING when a panel may be open. */
   function tick(dt) {
     if (statusTimer > 0) {
       statusTimer -= dt;
       if (statusTimer <= 0) {
-        if (craftStatus) craftStatus.textContent = '';
-        if (receiveStatus) receiveStatus.textContent = '';
+        lastStatus = '';
+        if (openKind === 'craft') syncSvgCraft();
       }
     }
     const match = hooks.getMatch && hooks.getMatch();
@@ -398,22 +214,15 @@ export function createPanels(dom, hooks) {
       const r = match.lastTakeResult;
       match.lastTakeResult = null;
       if (r.taken > 0) {
-        const msg =
-          r.mode === 'world_drop'
-            ? `Ejected ${r.taken} ${r.itemId} — walk to pick up`
-            : `Took ${r.taken} ${r.itemId}`;
-        setStatus(receiveStatus, msg, true);
         if (hooks.onInventoryChanged) hooks.onInventoryChanged();
-      } else {
-        setStatus(receiveStatus, r.reason || 'Nothing to take', false);
       }
+      refreshSvgGenIfOpen();
     }
     if (openKind === 'receive-gen' || openKind === 'receive-base') {
-      renderReceive();
+      refreshSvgGenIfOpen();
     }
   }
 
-  /** Consume match.pendingUi from sim interact. */
   function consumePendingUi(match) {
     if (!match || !match.pendingUi) return;
     const pending = match.pendingUi;
@@ -422,11 +231,9 @@ export function createPanels(dom, hooks) {
   }
 
   function refreshCraftIfOpen() {
-    if (openKind === 'craft') renderCraftList();
+    if (openKind === 'craft') syncSvgCraft();
   }
 
-  if (craftClose) craftClose.addEventListener('click', () => close());
-  if (receiveClose) receiveClose.addEventListener('click', () => close());
   function toggleCraft() {
     if (!hooks.canOpen || !hooks.canOpen()) return;
     if (openKind === 'craft') close();
@@ -441,11 +248,6 @@ export function createPanels(dom, hooks) {
     return openKind;
   }
 
-  if (btnCraftHud) {
-    btnCraftHud.addEventListener('click', () => toggleCraft());
-  }
-
-  // Start hidden
   close();
 
   return {
@@ -459,5 +261,11 @@ export function createPanels(dom, hooks) {
     tick,
     consumePendingUi,
     refreshCraftIfOpen,
+    setCraftCategory,
+    selectCraftSlot,
+    confirmSelectedCraft,
+    refreshSvgGenIfOpen,
+    buildSvgGenInfo,
+    getReceiveCtx: () => receiveCtx,
   };
 }

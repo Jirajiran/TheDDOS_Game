@@ -1,0 +1,56 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="none" x="0px" y="0px" width="1280px" height="720px" viewBox="0 0 1280 720">
+<defs>
+<linearGradient id="Gradient_1" gradientUnits="userSpaceOnUse" x1="640" y1="519.8" x2="640" y2="200.3" spreadMethod="pad">
+<stop  offset="0%" stop-color="#000000"/>
+
+<stop  offset="100%" stop-color="#000000" stop-opacity="0"/>
+</linearGradient>
+
+<g id="Ui_ColorBg_0_Layer1_0_FILL">
+<path fill="#101820" stroke="none" d="
+M 1280 720.05
+L 1280 0 0 0 0 720.05 1280 720.05 Z"/>
+</g>
+
+<g id="Ui_ColorBg_0_Layer0_0_FILL">
+<path fill="url(#Gradient_1)" stroke="none" d="
+M 1280 720.05
+L 1280 0 0 0 0 720.05 1280 720.05 Z"/>
+</g>
+
+<g id="UiLoad_0_Layer0_0_FILL">
+<path fill="#3B9EFF" stroke="none" d="
+M -309.9 -20.5
+L -309.9 20.45 309.95 20.45 309.95 -20.5 -309.9 -20.5 Z"/>
+</g>
+</defs>
+
+<g id="Loading_Main" transform="matrix( 1, 0, 0, 1, 640,360) ">
+<g id="Color" transform="matrix( 1, 0, 0, 1, 0,0) ">
+<g transform="matrix( 1, 0, 0, 1, -640,-360) ">
+<use xlink:href="#Ui_ColorBg_0_Layer1_0_FILL"/>
+</g>
+
+<g transform="matrix( 1, 0, 0, 1, -640,-360) ">
+<use xlink:href="#Ui_ColorBg_0_Layer0_0_FILL"/>
+</g>
+</g>
+
+<g id="Anchor_Center" transform="matrix( 1, 0, 0, 1, 0,0) ">
+<g id="Fill_LoadingBar" transform="matrix( 1, 0, 0, 1, 0,93.95) ">
+<g transform="matrix( 1, 0, 0, 1, 0,0) ">
+<use xlink:href="#UiLoad_0_Layer0_0_FILL"/>
+</g>
+</g>
+
+<g id="NameMap" transform="matrix( 1, 0, 0, 1, -284.35,-107.05) ">
+<clipPath id="Mask_Mask_1">
+<rect x="-353.5" y="-2" width="1272.35" height="129.2" fill="#FFFFFF" stroke="none"/>
+</clipPath>
+
+<text clip-path="url(#Mask_Mask_1)" writing-mode="lr"><tspan x="120.75" y="83.7" baseline-shift="0%" font-family="Browallia New" font-weight="bold" font-size="96" fill="#FFFFFF" xml:space="preserve">THE DDOS</tspan></text>
+</g>
+</g>
+</g>
+</svg>

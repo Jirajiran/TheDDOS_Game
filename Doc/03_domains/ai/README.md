@@ -21,3 +21,6 @@
 อ่านคู่กับ AskKeep §4 General vs Unit stage
 
 โฟกัสงาน AI: `@Doc/03_domains/ai` อย่างเดียวพอ — ไม่ต้องดึงทั้ง Doc
+
+รีวิวโครงสร้าง OOP (ก่อน optimize): ใช้ project skills ใน `.cursor/skills/`  
+(เช่น `class-responsibility-checker`, `method-cohesion-checker`, `inheritance-vs-composition-advisor`)

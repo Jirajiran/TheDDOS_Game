@@ -82,15 +82,14 @@ export function finishReload(ammo, weaponDef, opts = null) {
   }
 }
 
-/** Returns rounds consumed (0 if cannot fire). */
+/** Returns rounds consumed (0 if cannot fire). One shot action = 1 round (burst is sequential). */
 export function consumeAmmoForShot(ammo, weaponDef) {
   if (!ammo || !weaponDef) return 0;
-  if (weaponDef.infiniteAmmo) return weaponDef.burstCount || 1;
+  if (weaponDef.infiniteAmmo) return 1;
   if (ammo.reloadTimer > 0) return 0;
-  const need = weaponDef.burstCount || 1;
-  if (ammo.ammoInMag < need) return 0;
-  ammo.ammoInMag -= need;
-  return need;
+  if (ammo.ammoInMag < 1) return 0;
+  ammo.ammoInMag -= 1;
+  return 1;
 }
 
 export function canFireAmmo(ammo, weaponDef) {
@@ -98,7 +97,7 @@ export function canFireAmmo(ammo, weaponDef) {
   if (weaponDef.infiniteAmmo) return true;
   if (!ammo) return false;
   if (ammo.reloadTimer > 0) return false;
-  return ammo.ammoInMag >= (weaponDef.burstCount || 1);
+  return ammo.ammoInMag >= 1;
 }
 
 /**

@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "upgrades": {
+    "SMG": {
+      "resultWeaponId": "SMG_MODIFIED",
+      "upgradeTimeSec": 15
+    },
+    "AK47": {
+      "resultWeaponId": "AK47_MODIFIED",
+      "upgradeTimeSec": 20
+    },
+    "SHOTGUN_SHELL": {
+      "resultWeaponId": "SHOTGUN_SHELL_MODIFIED",
+      "upgradeTimeSec": 18
+    },
+    "SHOTGUN_BUCK": {
+      "resultWeaponId": "SHOTGUN_BUCK_MODIFIED",
+      "upgradeTimeSec": 18
+    },
+    "KAR98": {
+      "resultWeaponId": "KAR98_MODIFIED",
+      "upgradeTimeSec": 25
+    }
+  }
+}

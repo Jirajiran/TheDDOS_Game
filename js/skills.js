@@ -164,6 +164,11 @@ function applySkillOnActivate(unit, rt, def) {
       color: effect.color || '#e8dcc0',
     });
   }
+  if (effect.type === 'HEAL_SELF') {
+    const amount = effect.amount != null ? effect.amount : 5;
+    const max = unit.maxHp > 0 ? unit.maxHp : 1;
+    unit.hp = Math.min(max, (unit.hp || 0) + amount);
+  }
 }
 
 function clearSkillEffects(unit, rt, def) {

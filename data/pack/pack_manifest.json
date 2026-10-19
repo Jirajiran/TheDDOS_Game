@@ -1,0 +1,19 @@
+{
+  "version": "1.2.0",
+  "name": "nozone-core-pack",
+  "description": "Data-driven definitions — engine loads via js/defs API; balance in JSON.",
+  "files": {
+    "weapons": "weapons.json",
+    "armor": "armor.json",
+    "damageMatrix": "damage_matrix.json",
+    "blocks": "blocks.json",
+    "items": "items.json",
+    "skills": "skills.json",
+    "archetypes": "archetypes.json",
+    "weaponUpgrades": "weapon_upgrades.json",
+    "craft": "craft.json",
+    "actors": "actors.json",
+    "day": "day.json",
+    "rules": "rules.json"
+  }
+}

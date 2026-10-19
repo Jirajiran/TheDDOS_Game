@@ -1,21 +1,39 @@
 /**
- * Entry — no static imports so this file can paint UI + catch module-graph errors.
- * Heavy graph (app → sim/…) loads via dynamic import().
+ * Entry — HTML loading-main is already in the page (no SVG fetch).
+ * Heavy graph loads via dynamic import().
  */
 
-const CACHE_BUST = '20261001o';
+const CACHE_BUST = '20261019r';
 
-function setBootUi(pct, label) {
-  const fill = document.getElementById('progress-fill');
+function setBootUi(pct, _label) {
+  const fill = document.getElementById('loading-main-fill');
+  if (fill) {
+    fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  }
+  // Keep legacy stubs in sync for fail path
+  const legacy = document.getElementById('progress-fill');
+  if (legacy) legacy.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   const text = document.getElementById('progress-label');
-  const title = document.getElementById('loading-title');
-  if (fill) fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  if (text) text.textContent = label;
-  if (title && !title.dataset.locked) title.textContent = 'Booting TheDDOS';
+  if (text && _label) text.textContent = _label;
+}
+
+function showMainLoading() {
+  const main = document.getElementById('loading-main');
+  const gp = document.getElementById('loading-gameplay');
+  const fail = document.getElementById('loading-boot-panel');
+  if (main) main.hidden = false;
+  if (gp) gp.hidden = true;
+  if (fail) fail.hidden = true;
 }
 
 function failBootUi(err) {
   window.__theDdosPhase = 'failed';
+  const main = document.getElementById('loading-main');
+  const gp = document.getElementById('loading-gameplay');
+  if (main) main.hidden = true;
+  if (gp) gp.hidden = true;
+  const fail = document.getElementById('loading-boot-panel');
+  if (fail) fail.hidden = false;
   const title = document.getElementById('loading-title');
   const text = document.getElementById('progress-label');
   if (title) {
@@ -33,21 +51,26 @@ function collectDom() {
       menu: document.getElementById('screen-menu'),
       loading: document.getElementById('screen-loading'),
       playing: document.getElementById('screen-playing'),
-      result: document.getElementById('screen-result'),
     },
     progressFill: document.getElementById('progress-fill'),
     progressLabel: document.getElementById('progress-label'),
     loadingTitle: document.getElementById('loading-title'),
+    loadingBootPanel: document.getElementById('loading-boot-panel'),
+    loadingMain: document.getElementById('loading-main'),
+    loadingGameplay: document.getElementById('loading-gameplay'),
+    loadingMainFill: document.getElementById('loading-main-fill'),
+    loadingGpFill: document.getElementById('loading-gp-fill'),
+    loadingGpMap: document.getElementById('loading-gp-map'),
+    loadingGpMode: document.getElementById('loading-gp-mode'),
+    loadingGpPlayers: document.getElementById('loading-gp-players'),
+    loadingGpEnemies: document.getElementById('loading-gp-enemies'),
+    loadingGpReady: document.getElementById('loading-gp-ready'),
     canvas: document.getElementById('game-canvas'),
-    waveHud: document.getElementById('wave-hud'),
-    hpHud: document.getElementById('hp-hud'),
-    baseHud: document.getElementById('base-hud'),
-    ammoHud: document.getElementById('ammo-hud'),
-    promptHud: document.getElementById('prompt-hud'),
-    hotbarEl: document.getElementById('hotbar'),
-    resultTitle: document.getElementById('result-title'),
-    resultDetail: document.getElementById('result-detail'),
-    resultStats: document.getElementById('result-stats'),
+    playerUiMount: document.getElementById('player-ui-mount'),
+    mainMenuMount: document.getElementById('main-menu-mount'),
+    menuNameInput: document.getElementById('menu-name-input'),
+    menuRoomInput: document.getElementById('menu-room-input'),
+    menuJoinInput: document.getElementById('menu-join-input'),
     btnStart: document.getElementById('btn-start'),
     btnRestore: document.getElementById('btn-restore'),
     btnClearSnap: document.getElementById('btn-clear-snap'),
@@ -55,13 +78,10 @@ function collectDom() {
     saveDropZone: document.getElementById('save-drop-zone'),
     saveFileInput: document.getElementById('save-file-input'),
     saveFileStatus: document.getElementById('save-file-status'),
-    btnResultMenu: document.getElementById('btn-result-menu'),
     btnForceWin: document.getElementById('btn-force-win'),
     btnForceLose: document.getElementById('btn-force-lose'),
     btnFreeCraft: document.getElementById('btn-free-craft'),
     btnManualSave: document.getElementById('btn-manual-save'),
-    btnMeleeVol: document.getElementById('btn-melee-vol'),
-    btnFist: document.getElementById('btn-fist'),
     btnCheat: document.getElementById('btn-cheat'),
     cheatPanel: document.getElementById('panel-cheat'),
     cheatClose: document.getElementById('cheat-close'),
@@ -73,21 +93,11 @@ function collectDom() {
     selMode: document.getElementById('sel-mode'),
     roomCodeEl: document.getElementById('room-code'),
     joinStubEl: document.getElementById('join-stub'),
-    btnCraft: document.getElementById('btn-craft'),
-    craftPanel: document.getElementById('panel-craft'),
-    craftTabs: document.getElementById('craft-tabs'),
-    craftList: document.getElementById('craft-list'),
-    craftStatus: document.getElementById('craft-status'),
-    craftClose: document.getElementById('craft-close'),
-    receivePanel: document.getElementById('panel-receive'),
-    receiveTitle: document.getElementById('receive-title'),
-    receiveBody: document.getElementById('receive-body'),
-    receiveStatus: document.getElementById('receive-status'),
-    receiveClose: document.getElementById('receive-close'),
   };
 }
 
 window.__theDdosPhase = 'main-ready';
+showMainLoading();
 setBootUi(2, '2% — Importing app modules…');
 
 (async function startTheDdos() {
@@ -105,13 +115,12 @@ setBootUi(2, '2% — Importing app modules…');
     const app = mod.createApp(collectDom());
 
     window.__theDdos = app;
-    window.__wantToPlay = app; // legacy alias
+    window.__wantToPlay = app;
     window.__theDdosPhase = 'boot';
 
     setBootUi(18, '18% — Boot preload…');
     const ok = await app.boot();
     if (!ok) {
-      // boot() already painted failure UI when false
       window.__theDdosPhase = 'failed';
       return;
     }
