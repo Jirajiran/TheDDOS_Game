@@ -108,6 +108,7 @@ import {
 import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit, resetPools } from './pools.js';
 import {
   cutUnitVisualAction,
+  shotVisualAction,
   enemySkinGroupId,
   menuSkinToGroupId,
   tickAllUnitVisuals,
@@ -873,10 +874,10 @@ function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad) {
   return (h / 10000 - 0.5) * spreadRad;
 }
 
-function playShotingVisual(unit) {
+function playShotingVisual(unit, match) {
   cutUnitVisualAction(
     unit,
-    UNIT_VISUAL_ACTIONS.Shoting,
+    shotVisualAction(unit, match),
     GAME_PACK.unitVisualShotingSec != null
       ? GAME_PACK.unitVisualShotingSec
       : 0.12
@@ -991,7 +992,7 @@ function fireProjectileShot(match, unit, weapon, ammo) {
   if (!consumed && !weapon.infiniteAmmo) return false;
   spawnShotVolley(match, unit, weapon, unit.aimRad);
   match.stats.shotsFired += 1;
-  playShotingVisual(unit);
+  playShotingVisual(unit, match);
   return true;
 }
 
@@ -1019,7 +1020,7 @@ function tryFire(match, unit) {
     const duration = weapon.beamDurationSec || 0;
     unit.fireCooldown = duration + (weapon.cooldownSec || 0);
     match.stats.shotsFired += 1;
-    playShotingVisual(unit);
+    playShotingVisual(unit, match);
     markHotbarFireLock(match, unit);
     return;
   }

@@ -6,20 +6,31 @@
  * Enemy default = Default_skin_2. Playable menu skins = Default 1–2 only.
  */
 
-import { GAME_PACK, L3_SIZE } from './config.js';
-import { resolveHeldVisual } from './cosmetics.js';
+import { GAME_PACK, L3_SIZE, ReloadType, getWeaponDef } from './config.js';
+import {
+  resolveHeldVisual,
+  WEAPON_POSE_FAMILY,
+  weaponPoseFamily,
+} from './cosmetics.js';
+import { getActiveSlot, isWeaponSlot } from './inventory.js';
 import { isMeleeSwingOpen } from './meleeTools.js';
+import { getBtnActionArmPoses } from './weaponBtnArt.js';
 
 export const UNIT_TEMPLATE_URL = 'Asset/AssetSVG/Unit/Unit_Template.svg';
 
-/** @typedef {'idle'|'hold_Gun'|'Fist'|'PlaceBlock'|'Shoting'} UnitVisualAction */
+/** @typedef {'idle'|'hold_Gun'|'hold_Gun_2'|'Fist'|'PlaceBlock'|'Shoting'|'Shoting_2'|'Reload_Mag'|'Reload_Mag_2'|'Reload_Shotgun'} UnitVisualAction */
 
 export const UNIT_VISUAL_ACTIONS = Object.freeze({
   idle: 'idle',
   hold_Gun: 'hold_Gun',
+  hold_Gun_2: 'hold_Gun_2',
   Fist: 'Fist',
   PlaceBlock: 'PlaceBlock',
   Shoting: 'Shoting',
+  Shoting_2: 'Shoting_2',
+  Reload_Mag: 'Reload_Mag',
+  Reload_Mag_2: 'Reload_Mag_2',
+  Reload_Shotgun: 'Reload_Shotgun',
 });
 
 /** Playable MainMenu skin slots (Asset/Custom deferred). */
@@ -48,6 +59,27 @@ const ACTION_ARM_IDS = Object.freeze({
     arm1: 'Arm_1_FL_FL_FL_FL_FL_FL',
     arm2: 'Arm_2_FL_FL_FL_FL_FL_FL',
   }),
+  // Heavy guns share the same arm keyframes; Action_*_2 is the pose name.
+  hold_Gun_2: Object.freeze({
+    arm1: 'Arm_1_FL_FL',
+    arm2: 'Arm_2_FL_FL',
+  }),
+  Shoting_2: Object.freeze({
+    arm1: 'Arm_1_FL_FL_FL_FL_FL_FL',
+    arm2: 'Arm_2_FL_FL_FL_FL_FL_FL',
+  }),
+  Reload_Mag: Object.freeze({
+    arm1: 'Arm_1_FL_FL',
+    arm2: 'Arm_2_FL_FL',
+  }),
+  Reload_Mag_2: Object.freeze({
+    arm1: 'Arm_1_FL_FL',
+    arm2: 'Arm_2_FL_FL',
+  }),
+  Reload_Shotgun: Object.freeze({
+    arm1: 'Arm_1_FL_FL',
+    arm2: 'Arm_2_FL_FL',
+  }),
 });
 
 /** Action → Pivot_Arm_1 ids (grip snap for tool/melee visual). */
@@ -57,6 +89,11 @@ const ACTION_PIVOT_ARM1_IDS = Object.freeze({
   Fist: 'Pivot_Arm_1_FL_FL_FL',
   PlaceBlock: 'Pivot_Arm_1_FL_FL_FL_FL',
   Shoting: 'Pivot_Arm_1_FL_FL_FL_FL_FL_FL',
+  hold_Gun_2: 'Pivot_Arm_1_FL_FL',
+  Shoting_2: 'Pivot_Arm_1_FL_FL_FL_FL_FL_FL',
+  Reload_Mag: 'Pivot_Arm_1_FL_FL',
+  Reload_Mag_2: 'Pivot_Arm_1_FL_FL',
+  Reload_Shotgun: 'Pivot_Arm_1_FL_FL',
 });
 
 const IDLE_ARM_FALLBACK = Object.freeze({
@@ -165,6 +202,26 @@ function loadArmPoses(doc) {
         ? parseMatrixAttr(a2)
         : { a: -0.37, b: 0, c: 0, d: 0.37, e: 0, f: 0 },
       pivot1: piv ? parseMatrixAttr(piv) : idlePivotFallback,
+    });
+  }
+  applyBtnActionArmPoses();
+}
+
+/** Btn.svg Action_* arm matrices replace the Unit_Template alias once loaded. */
+function applyBtnActionArmPoses() {
+  const poses = getBtnActionArmPoses();
+  if (!poses) return;
+  const actions = Object.keys(poses);
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
+    const src = poses[action];
+    const cur = _armPoses.get(action);
+    _armPoses.set(action, {
+      arm1: src.arm1,
+      arm2: src.arm2,
+      pivot1: cur && cur.pivot1
+        ? cur.pivot1
+        : { a: 1, b: 0, c: 0, d: 1, e: -19.85, f: 16.15 },
     });
   }
 }
@@ -433,24 +490,77 @@ function shotingVisualSec() {
   return pack.unitVisualShotingSec != null ? pack.unitVisualShotingSec : 0.12;
 }
 
-function resolveHeldDesired(unit, match) {
-  if (isMeleeSwingOpen(unit)) return UNIT_VISUAL_ACTIONS.Fist;
+function heldWeaponId(unit, match) {
   const inv =
     unit.role === 'player' && match ? match.inventory : unit.inventory;
   const hotbar =
-    unit.role === 'player' && match
-      ? match.activeHotbar
-      : unit.activeHotbar;
+    unit.role === 'player' && match ? match.activeHotbar : unit.activeHotbar;
   const held = resolveHeldVisual(unit, {
     inventory: inv,
     activeHotbar: hotbar,
   });
-  if (held && held.kind === 'weapon') return UNIT_VISUAL_ACTIONS.hold_Gun;
-  return UNIT_VISUAL_ACTIONS.idle;
+  if (!held || held.kind !== 'weapon') return null;
+  return held.id;
+}
+
+function heldAmmoState(unit, match) {
+  if (unit.role === 'player' && match) {
+    const slot = getActiveSlot(match.inventory, match.activeHotbar);
+    if (isWeaponSlot(slot)) return slot;
+    return null;
+  }
+  return unit;
+}
+
+/**
+ * Reload pose while reloadTimer > 0.
+ * Magazine on standard guns loops (once: false).
+ * Shotgun shows once per shell. Heavy Mag_2 shows once per reload.
+ */
+function reloadVisualSpec(unit, match) {
+  const weaponId = heldWeaponId(unit, match);
+  if (!weaponId) return null;
+  const family = weaponPoseFamily(weaponId) || WEAPON_POSE_FAMILY.standard;
+  const ammo = heldAmmoState(unit, match);
+  if (!ammo || !(ammo.reloadTimer > 0)) return null;
+  const def = getWeaponDef(weaponId);
+  const shell = def && def.reloadType === ReloadType.INDIVIDUAL_SHELL;
+  if (family.reloadOnce) {
+    return { action: family.reloadMag, once: true };
+  }
+  if (shell) return { action: family.reloadShell, once: true };
+  return { action: family.reloadMag, once: false };
+}
+
+function resolveHeldDesired(unit, match) {
+  if (isMeleeSwingOpen(unit)) return UNIT_VISUAL_ACTIONS.Fist;
+  const weaponId = heldWeaponId(unit, match);
+  if (!weaponId) return UNIT_VISUAL_ACTIONS.idle;
+  const family = weaponPoseFamily(weaponId);
+  if (family) return family.hold;
+  return UNIT_VISUAL_ACTIONS.hold_Gun;
+}
+
+/** Shot pose: Action_Shoting_2 for RPG and Barrett, else Action_Shoting. */
+export function shotVisualAction(unit, match) {
+  const family = weaponPoseFamily(heldWeaponId(unit, match));
+  if (family) return family.shot;
+  return UNIT_VISUAL_ACTIONS.Shoting;
 }
 
 export function tickUnitVisualAction(unit, match, dt) {
   if (!unit || !unit.active) return;
+  applyBtnActionArmPoses();
+
+  const reload = reloadVisualSpec(unit, match);
+  if (reload && reload.once) {
+    if (!unit._reloadOnceLatched) {
+      unit._reloadOnceLatched = true;
+      cutUnitVisualAction(unit, reload.action, 0.35);
+    }
+  } else {
+    unit._reloadOnceLatched = false;
+  }
 
   let desired = UNIT_VISUAL_ACTIONS.idle;
 
@@ -460,10 +570,16 @@ export function tickUnitVisualAction(unit, match, dt) {
       desired = unit.visualAction || UNIT_VISUAL_ACTIONS.PlaceBlock;
     } else {
       unit.visualActionT = 0;
-      desired = resolveHeldDesired(unit, match);
+      desired =
+        reload && !reload.once
+          ? reload.action
+          : resolveHeldDesired(unit, match);
     }
   } else {
-    desired = resolveHeldDesired(unit, match);
+    desired =
+      reload && !reload.once
+        ? reload.action
+        : resolveHeldDesired(unit, match);
   }
 
   const cur = unit.visualAction || UNIT_VISUAL_ACTIONS.idle;
@@ -485,7 +601,11 @@ export function cutUnitVisualAction(unit, action, durationSec) {
   let dur = durationSec;
   if (dur == null) {
     if (next === UNIT_VISUAL_ACTIONS.PlaceBlock) dur = placeBlockVisualSec();
-    else if (next === UNIT_VISUAL_ACTIONS.Shoting) dur = shotingVisualSec();
+    else if (
+      next === UNIT_VISUAL_ACTIONS.Shoting ||
+      next === UNIT_VISUAL_ACTIONS.Shoting_2
+    )
+      dur = shotingVisualSec();
     else dur = armTweenSec();
   }
   if (next !== unit.visualAction) {

@@ -4,8 +4,70 @@
  * Cosmetics mirror sim state only (active hotbar WEAPON/TOOL / armor / shield / swing).
  */
 
-import { GAME_PACK } from './config.js';
+import { GAME_PACK, getWeaponDef } from './config.js';
 import { getActiveSlot, isToolSlot, isWeaponSlot } from './inventory.js';
+import { getWeaponBtnImage, preloadWeaponBtnArt } from './weaponBtnArt.js';
+
+/**
+ * Visual map only — gameplay ids stay MEDIC_GUN / LAZER / LAZER_HEAL /
+ * GRENADE_LAUNCHER / WEAPON_50CAL.
+ * pose heavy = Action_hold_Gun_2, Action_Shoting_2, Action_Reload_Mag_2 (once).
+ * pose standard = Action_hold_Gun, Action_Shoting, mag loop or shotgun once.
+ */
+export const WEAPON_BTN_ART = Object.freeze({
+  MEDIC_GUN: Object.freeze({
+    group: 'Weapon_Meso_Gun',
+    icon: 'Icon_Meso_Gun',
+    pose: 'standard',
+  }),
+  LAZER: Object.freeze({
+    group: 'Weapon_Pyrotechnic_Projector',
+    icon: 'Icon_Pyrotechnic_Projector',
+    pose: 'standard',
+    core: 'red',
+  }),
+  LAZER_HEAL: Object.freeze({
+    group: 'Weapon_Pyrotechnic_Collagen',
+    icon: 'Icon_Pyrotechnic_Collagen',
+    pose: 'standard',
+    core: 'green',
+  }),
+  GRENADE_LAUNCHER: Object.freeze({
+    group: 'Weapon_Rpg',
+    icon: 'Icon_Rpg',
+    pose: 'heavy',
+    rpg: true,
+  }),
+  WEAPON_50CAL: Object.freeze({
+    group: 'Weapon_barret_50_cal',
+    icon: 'Icon_barret_50_cal',
+    pose: 'heavy',
+  }),
+});
+
+/** Action group family for hold / shot / reload playback. */
+export const WEAPON_POSE_FAMILY = Object.freeze({
+  standard: Object.freeze({
+    hold: 'hold_Gun',
+    shot: 'Shoting',
+    reloadMag: 'Reload_Mag',
+    reloadShell: 'Reload_Shotgun',
+    reloadOnce: false,
+  }),
+  heavy: Object.freeze({
+    hold: 'hold_Gun_2',
+    shot: 'Shoting_2',
+    reloadMag: 'Reload_Mag_2',
+    reloadShell: 'Reload_Mag_2',
+    reloadOnce: true,
+  }),
+});
+
+export function weaponPoseFamily(weaponId) {
+  const art = WEAPON_BTN_ART[weaponId];
+  if (!art) return null;
+  return WEAPON_POSE_FAMILY[art.pose] || WEAPON_POSE_FAMILY.standard;
+}
 
 /** @typedef {'pistol'|'smg'|'rifle'|'shotgun'|'sniper'|'laser'|'launcher'|'default'} WeaponShape */
 /** @typedef {'axe'|'pick'|'wrench'|'fist'|'default'} ToolShape */
@@ -305,6 +367,7 @@ export function preloadEquipArtCache() {
     _imageCache.set(src, img);
   }
 
+  preloadWeaponBtnArt(WEAPON_BTN_ART);
   return { pathCount: _pathCache.size, imageCount: _imageCache.size };
 }
 
@@ -394,7 +457,8 @@ export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
         lw,
         held.id,
         opts.isPlayer,
-        cache
+        cache,
+        opts
       );
     } else if (held.kind === 'tool' || held.kind === 'melee') {
       // Snap grip to Pivot_Arm_1; orient with same facing as skin (visual only).
@@ -436,21 +500,64 @@ function weaponRecoilKickPx(unit) {
   return maxKick * fall;
 }
 
-function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPlayer, cache) {
+function heldAmmo(unit, opts) {
+  const match = opts && opts.match;
+  if (unit && unit.role === 'player' && match) {
+    const slot = getActiveSlot(match.inventory, match.activeHotbar);
+    if (isWeaponSlot(slot)) return slot;
+  }
+  return unit || null;
+}
+
+/** Pyrotechnic core + RPG round variant. Other mapped guns use "base". */
+function weaponBtnVariant(weaponId, unit, opts) {
+  const spec = WEAPON_BTN_ART[weaponId];
+  if (!spec) return null;
+  if (spec.rpg) {
+    const ammo = heldAmmo(unit, opts);
+    const loaded = ammo && ammo.ammoInMag > 0;
+    return loaded ? 'rpg-loaded' : 'rpg-empty';
+  }
+  if (spec.core) {
+    const def = getWeaponDef(weaponId);
+    const beam = def && def.beamDurationSec ? def.beamDurationSec : 0;
+    const cd = unit && unit.fireCooldown > 0 ? unit.fireCooldown : 0;
+    if (beam > 0 && cd > 0 && cd > (def.cooldownSec || 0)) return 'pyro-beam';
+    if (cd > 0) return 'pyro-empty';
+    return 'pyro-ready';
+  }
+  return 'base';
+}
+
+function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPlayer, cache, opts) {
   const art = getWeaponArt(weaponId);
   if (!art) return;
+  const btn = WEAPON_BTN_ART[weaponId];
+  const variant = btn ? weaponBtnVariant(weaponId, unit, opts) : null;
+  const img = variant ? getWeaponBtnImage(weaponId, variant) : null;
+
+  ctx.save();
+  ctx.translate(rimX, rimY);
+  ctx.rotate(aim);
+  const kick = weaponRecoilKickPx(unit);
+  if (kick > 0) ctx.translate(-kick, 0);
+
+  if (img) {
+    const lenMult = art.length != null ? art.length : 1;
+    const h = r * (1.15 + 0.35 * lenMult) * (isPlayer ? 1.1 : 1);
+    const aspect = img.naturalWidth > 0 ? img.naturalWidth / img.naturalHeight : 1.6;
+    const w = h * aspect;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, 0, -h * 0.5, w, h);
+    ctx.restore();
+    return;
+  }
+
   const lenMult = art.length != null ? art.length : 1;
   const thick = (art.thickness != null ? art.thickness : 3.2) / (zoom > 0 ? Math.min(zoom, 2) : 1);
   const barrel = r * (0.55 + 0.55 * lenMult) * (isPlayer ? 1.15 : 1);
   const shape = art.shape || 'default';
   const path = cache.get(`weapon:${shape}`) || cache.get('weapon:default');
-
-  ctx.save();
-  ctx.translate(rimX, rimY);
-  ctx.rotate(aim);
-  // Recoil on weapon pivot only (not arms) — kick back along barrel (−local X).
-  const kick = weaponRecoilKickPx(unit);
-  if (kick > 0) ctx.translate(-kick, 0);
   ctx.scale(barrel / 20, thick / 3.2);
   ctx.fillStyle = art.color;
   ctx.strokeStyle = '#1a1a1a';

@@ -270,7 +270,7 @@ function drawUnits(ctx, units, zoom, match) {
     }
 
     // Weapon/item between arms and body (tools snap Pivot_Arm_1).
-    const cosOpts = { isPlayer, arm1Pivot: getUnitArm1PivotWorld(u) };
+    const cosOpts = { isPlayer, arm1Pivot: getUnitArm1PivotWorld(u), match };
     if (isPlayer && match) {
       cosOpts.inventory = match.inventory || match.hotbar;
       cosOpts.activeHotbar = match.activeHotbar;
