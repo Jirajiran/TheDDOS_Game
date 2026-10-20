@@ -154,12 +154,12 @@ function parseMatrixAttr(el) {
   if (!m) return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
   const p = m[1].split(/[\s,]+/).map(Number);
   return {
-    a: p[0] || 1,
-    b: p[1] || 0,
-    c: p[2] || 0,
-    d: p[3] || 1,
-    e: p[4] || 0,
-    f: p[5] || 0,
+    a: Number.isFinite(p[0]) ? p[0] : 1,
+    b: Number.isFinite(p[1]) ? p[1] : 0,
+    c: Number.isFinite(p[2]) ? p[2] : 0,
+    d: Number.isFinite(p[3]) ? p[3] : 1,
+    e: Number.isFinite(p[4]) ? p[4] : 0,
+    f: Number.isFinite(p[5]) ? p[5] : 0,
   };
 }
 

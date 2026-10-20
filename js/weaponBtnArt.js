@@ -3,7 +3,7 @@
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020d';
+const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261021b';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -29,12 +29,12 @@ function parseMatrixAttr(el) {
   if (!m) return null;
   const p = m[1].split(/[\s,]+/).map(Number);
   return {
-    a: p[0] || 1,
-    b: p[1] || 0,
-    c: p[2] || 0,
-    d: p[3] || 1,
-    e: p[4] || 0,
-    f: p[5] || 0,
+    a: Number.isFinite(p[0]) ? p[0] : 1,
+    b: Number.isFinite(p[1]) ? p[1] : 0,
+    c: Number.isFinite(p[2]) ? p[2] : 0,
+    d: Number.isFinite(p[3]) ? p[3] : 1,
+    e: Number.isFinite(p[4]) ? p[4] : 0,
+    f: Number.isFinite(p[5]) ? p[5] : 0,
   };
 }
 
@@ -126,7 +126,7 @@ function mountHost(defsClone) {
 function applyCoreState(weaponClone, sourceDoc, state, kind) {
   const slots =
     kind === 'green'
-      ? ['Core_Green']
+      ? ['Core_Green_1']
       : ['Core_Red_1', 'Core_Red_2'];
   if (state === 'ready') return;
   const srcId = state === 'beam' ? 'Core_white' : 'Core_Black';
@@ -158,7 +158,7 @@ function prepareClone(sourceDoc, groupId, variant) {
   if (variant === 'pyro-body') {
     hideId(clone, 'Core_Red_1');
     hideId(clone, 'Core_Red_2');
-    hideId(clone, 'Core_Green');
+    hideId(clone, 'Core_Green_1');
   }
   if (variant === 'pyro-empty' || variant === 'pyro-beam') {
     const kind = groupId.indexOf('Collagen') >= 0 ? 'green' : 'red';
@@ -210,14 +210,14 @@ function sizeViewBox(root) {
  * The viewBox is the union, so gun art past SizeView is kept.
  * @returns {Promise<HTMLImageElement|null>}
  */
-async function rasterLocal(defs, clone, box) {
+async function rasterLocal(defs, clone, box, pad) {
   if (!box || !(box.w > 1) || !(box.h > 1)) return null;
-  const pad = 1;
+  const edge = pad == null ? 1 : pad;
   const vb = {
-    x: box.x - pad,
-    y: box.y - pad,
-    w: box.w + pad * 2,
-    h: box.h + pad * 2,
+    x: box.x - edge,
+    y: box.y - edge,
+    w: box.w + edge * 2,
+    h: box.h + edge * 2,
   };
   const ppm = 4;
   const pw = Math.max(32, Math.min(640, Math.ceil(vb.w * ppm)));
@@ -282,17 +282,17 @@ async function rasterCoreLayer(sourceDoc, defs, groupId, state, kind, frame) {
   return rasterFixed(defs, painted, frame);
 }
 
-/** Visible plate. Group getBBox includes art the mask already clips, and mask has no getBBox. */
+/** Placed mask window, including the shift inside the icon. mask itself has no getBBox. */
 function iconPlateBox(clone) {
   const mask = clone.querySelector('mask');
   if (!mask) return null;
-  const use = mask.querySelector('use');
-  const href = use
-    ? use.getAttribute('href') || use.getAttribute('xlink:href') || ''
-    : '';
-  const refId = href.replace(/^#/, '');
-  const ref = refId ? clone.ownerDocument.getElementById(refId) : null;
-  return measureBox(ref) || measureBox(use);
+  const probe = document.createElementNS(SVG_NS, 'g');
+  const kids = mask.childNodes;
+  for (let i = 0; i < kids.length; i++) probe.appendChild(kids[i].cloneNode(true));
+  clone.appendChild(probe);
+  const box = measureBox(probe);
+  clone.removeChild(probe);
+  return box;
 }
 
 /** Flying rocket only. SizeView is the body reference and stays out of the shot. */
@@ -323,7 +323,7 @@ async function rasterIcon(sourceDoc, defs, groupId) {
   const plate = iconPlateBox(clone);
   const box = plate || measureBox(clone);
   host.remove();
-  return rasterLocal(defs, clone, box);
+  return rasterLocal(defs, clone, box, 0);
 }
 
 /**
@@ -362,7 +362,7 @@ export function preloadWeaponBtnArt(table) {
         if (img && img._layout) frame = img._layout;
       }
       if (spec.core && frame) {
-        const states = ['black', 'ready', 'white'];
+        const states = ['ready', 'white'];
         for (let s = 0; s < states.length; s++) {
           const core = await rasterCoreLayer(
             doc,

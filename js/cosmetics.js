@@ -575,15 +575,15 @@ function weaponBtnVariant(weaponId) {
   return 'base';
 }
 
-/** 1 = that core fully visible. Eased in tickWeaponCoreVisual. */
+/** 1 = that core plate fully visible. The gun's painted socket stays underneath. */
 function coreTarget(unit, weaponId) {
   const def = getWeaponDef(weaponId);
   const beam = def && def.beamDurationSec ? def.beamDurationSec : 0;
   const cool = def && def.cooldownSec ? def.cooldownSec : 0;
   const cd = unit && unit.fireCooldown > 0 ? unit.fireCooldown : 0;
-  if (beam > 0 && cd > cool) return { black: 0, ready: 0, white: 1 };
-  if (cd > 0) return { black: 1, ready: 0, white: 0 };
-  return { black: 0, ready: 1, white: 0 };
+  if (beam > 0 && cd > cool) return { ready: 0, white: 1 };
+  if (cd > 0) return { ready: 0, white: 0 };
+  return { ready: 1, white: 0 };
 }
 
 const CORE_BLEND_SEC = 0.12;
@@ -591,20 +591,17 @@ const CORE_BLEND_SEC = 0.12;
 export function tickWeaponCoreVisual(unit, weaponId, dt) {
   if (!unit) return;
   if (!weaponCoreKind(weaponId)) {
-    unit._coreBlack = 0;
     unit._coreReady = 0;
     unit._coreWhite = 0;
     return;
   }
   const target = coreTarget(unit, weaponId);
   const k = 1 - Math.exp(-Math.max(0, dt) / CORE_BLEND_SEC);
-  if (unit._coreBlack == null) {
-    unit._coreBlack = target.black;
+  if (unit._coreReady == null) {
     unit._coreReady = target.ready;
     unit._coreWhite = target.white;
     return;
   }
-  unit._coreBlack += (target.black - unit._coreBlack) * k;
   unit._coreReady += (target.ready - unit._coreReady) * k;
   unit._coreWhite += (target.white - unit._coreWhite) * k;
 }
@@ -624,7 +621,6 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
   if (img && layout) {
     // SizeView in the weapon group shares the unit's local space.
     // 1 SVG unit = body scale, so art past SizeView sticks out as the held gun.
-    // Heavy poses (hold_Gun_2) put that gun on Pivot_Arm_1 so it stays in the hand.
     const scale = (L3_SIZE * (unit.sizeScale || 1)) / UNIT_LOCAL_W;
     const facing =
       typeof unit.facingRad === 'number'
@@ -636,22 +632,9 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
       GAME_PACK.unitVisualFacingOffsetRad != null
         ? GAME_PACK.unitVisualFacingOffsetRad
         : -Math.PI / 2;
-    const family = weaponPoseFamily(weaponId);
-    const pivot = opts && opts.arm1Pivot;
-    const onHand =
-      family &&
-      family.hold === 'hold_Gun_2' &&
-      pivot &&
-      Number.isFinite(pivot.x) &&
-      Number.isFinite(pivot.y);
     ctx.save();
-    if (onHand) {
-      ctx.translate(pivot.x, pivot.y);
-      ctx.rotate(pivot.ang);
-    } else {
-      ctx.translate(unit.x, unit.y);
-      ctx.rotate(facing + packOff);
-    }
+    ctx.translate(unit.x, unit.y);
+    ctx.rotate(facing + packOff);
     if (kick > 0) ctx.translate(0, -kick);
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(
@@ -689,7 +672,6 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
 
 function drawWeaponCores(ctx, weaponId, unit, layout, scale) {
   const layers = [
-    ['black', unit._coreBlack || 0],
     ['ready', unit._coreReady == null ? 1 : unit._coreReady],
     ['white', unit._coreWhite || 0],
   ];

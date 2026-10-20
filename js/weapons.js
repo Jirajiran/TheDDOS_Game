@@ -39,8 +39,8 @@ export function beginReload(ammo, weaponDef, opts = null) {
   const reserveCount =
     opts && typeof opts.reserveCount === 'number' ? opts.reserveCount : null;
   if (reserveCount != null) {
-    if (ammo.mags <= 0 && reserveCount > 0) ammo.mags = 1;
-    if (ammo.mags <= 0 && reserveCount <= 0) return false;
+    if (reserveCount <= 0) return false;
+    if (ammo.mags <= 0) ammo.mags = 1;
   } else if (ammo.mags <= 0) {
     return false;
   }

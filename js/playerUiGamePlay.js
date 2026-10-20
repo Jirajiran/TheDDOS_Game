@@ -203,12 +203,12 @@ export function createPlayerUiGamePlay(opts) {
     if (!m) return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
     const p = m[1].split(/[\s,]+/).map(Number);
     return {
-      a: p[0] || 1,
-      b: p[1] || 0,
-      c: p[2] || 0,
-      d: p[3] || 1,
-      e: p[4] || 0,
-      f: p[5] || 0,
+      a: Number.isFinite(p[0]) ? p[0] : 1,
+      b: Number.isFinite(p[1]) ? p[1] : 0,
+      c: Number.isFinite(p[2]) ? p[2] : 0,
+      d: Number.isFinite(p[3]) ? p[3] : 1,
+      e: Number.isFinite(p[4]) ? p[4] : 0,
+      f: Number.isFinite(p[5]) ? p[5] : 0,
     };
   }
 
@@ -439,7 +439,7 @@ export function createPlayerUiGamePlay(opts) {
     if (state._btnArtReady || !state.svgRoot) return;
     state._btnArtReady = true;
     try {
-      const res = await fetch(`${BTN_SVG_URL}?v=20261020d`);
+      const res = await fetch(`${BTN_SVG_URL}?v=20261021b`);
       if (!res.ok) return;
       const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
       const defs = ensureDefs();
@@ -1657,7 +1657,7 @@ export function createPlayerUiGamePlay(opts) {
 
   async function mountSvg() {
     if (!mount) return false;
-    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020d`);
+    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261021b`);
     if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
     mount.innerHTML = await res.text();
     state.svgRoot =
