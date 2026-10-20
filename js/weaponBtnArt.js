@@ -3,7 +3,7 @@
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020a';
+const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020b';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -154,37 +154,92 @@ function prepareClone(sourceDoc, groupId, variant) {
   return clone;
 }
 
-async function rasterGroup(sourceDoc, defs, groupId, variant) {
-  const clone = prepareClone(sourceDoc, groupId, variant);
-  if (!clone) return null;
-  const host = mountHost(defs.cloneNode(true));
-  host.appendChild(clone);
-  let bb;
+function measureBox(el) {
+  if (!el) return null;
   try {
-    bb = clone.getBBox();
+    const bb = el.getBBox();
+    if (!bb || !(bb.width > 0) || !(bb.height > 0)) return null;
+    return { x: bb.x, y: bb.y, w: bb.width, h: bb.height };
   } catch (e) {
-    bb = null;
+    return null;
   }
-  host.remove();
-  if (!bb || !(bb.width > 1) || !(bb.height > 1)) return null;
-  const pad = 2;
-  const vb =
-    bb.x -
-    pad +
-    ' ' +
-    (bb.y - pad) +
-    ' ' +
-    (bb.width + pad * 2) +
-    ' ' +
-    (bb.height + pad * 2);
-  const px = 160;
+}
+
+function unionBox(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const r = Math.max(a.x + a.w, b.x + b.w);
+  const btm = Math.max(a.y + a.h, b.y + b.h);
+  return { x: x, y: y, w: r - x, h: btm - y };
+}
+
+function sizeViewBox(root) {
+  const nodes = root.querySelectorAll('[id]');
+  let box = null;
+  for (let i = 0; i < nodes.length; i++) {
+    const id = nodes[i].getAttribute('id') || '';
+    if (id.indexOf('SizeView') !== 0) continue;
+    box = unionBox(box, measureBox(nodes[i]));
+  }
+  return box;
+}
+
+/**
+ * Raster in the group's local SVG units.
+ * SizeView stays in the coordinate frame (hidden, so it does not paint).
+ * The viewBox is the union, so gun art past SizeView is kept.
+ * @returns {Promise<HTMLImageElement|null>}
+ */
+async function rasterLocal(defs, clone, box) {
+  if (!box || !(box.w > 1) || !(box.h > 1)) return null;
+  const pad = 1;
+  const vb = {
+    x: box.x - pad,
+    y: box.y - pad,
+    w: box.w + pad * 2,
+    h: box.h + pad * 2,
+  };
+  const ppm = 4;
+  const pw = Math.max(32, Math.min(640, Math.ceil(vb.w * ppm)));
+  const ph = Math.max(32, Math.min(640, Math.ceil(vb.h * ppm)));
   const markup =
     `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
-    `width="${px}" height="${px}" viewBox="${vb}">` +
+    `width="${pw}" height="${ph}" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}">` +
     new XMLSerializer().serializeToString(defs) +
     new XMLSerializer().serializeToString(clone) +
     `</svg>`;
-  return svgToImage(markup);
+  const img = await svgToImage(markup);
+  if (img) img._layout = vb;
+  return img;
+}
+
+async function rasterGroup(sourceDoc, defs, groupId, variant) {
+  const src = sourceDoc.getElementById(groupId);
+  if (!src) return null;
+  const clone = src.cloneNode(true);
+  clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+  const host = mountHost(defs.cloneNode(true));
+  host.appendChild(clone);
+  const frame = measureBox(clone);
+  const sizeView = sizeViewBox(clone);
+  host.remove();
+  const painted = prepareClone(sourceDoc, groupId, variant);
+  if (!painted) return null;
+  return rasterLocal(defs, painted, unionBox(frame, sizeView));
+}
+
+async function rasterIcon(sourceDoc, defs, groupId) {
+  const src = sourceDoc.getElementById(groupId);
+  if (!src) return null;
+  const clone = src.cloneNode(true);
+  clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+  const host = mountHost(defs.cloneNode(true));
+  host.appendChild(clone);
+  const box = measureBox(clone);
+  host.remove();
+  return rasterLocal(defs, clone, box);
 }
 
 /**
@@ -220,6 +275,10 @@ export function preloadWeaponBtnArt(table) {
         const img = await rasterGroup(doc, defs, spec.group, variants[v]);
         _images.set(key, img);
       }
+      if (spec.icon) {
+        const icon = await rasterIcon(doc, defs, spec.icon);
+        _images.set('icon:' + id, icon);
+      }
     }
   })();
   return _load;
@@ -227,4 +286,16 @@ export function preloadWeaponBtnArt(table) {
 
 export function getWeaponBtnImage(weaponId, variant) {
   return _images.get(weaponId + ':' + variant) || null;
+}
+
+/** Local SVG viewBox the weapon raster uses. SizeView sits inside this frame. */
+export function getWeaponBtnLayout(weaponId, variant) {
+  const img = getWeaponBtnImage(weaponId, variant);
+  return (img && img._layout) || null;
+}
+
+/** Data URL for a mapped Icon_* group, or null. */
+export function getWeaponIconHref(weaponOrItemId) {
+  const img = _images.get('icon:' + weaponOrItemId);
+  return img && img.src ? img.src : null;
 }

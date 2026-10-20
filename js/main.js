@@ -3,7 +3,7 @@
  * Heavy graph loads via dynamic import().
  */
 
-const CACHE_BUST = '20261020a';
+const CACHE_BUST = '20261020b';
 
 function setBootUi(pct, _label) {
   const fill = document.getElementById('loading-main-fill');

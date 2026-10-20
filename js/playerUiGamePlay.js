@@ -5,6 +5,7 @@
 
 import { getItemDef } from './config.js';
 import { formatClockFromSim, getDayBarPhase } from './dayCycle.js';
+import { getWeaponIconHref } from './weaponBtnArt.js';
 
 const ART_W = 1280;
 const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg';
@@ -326,7 +327,7 @@ export function createPlayerUiGamePlay(opts) {
    * Icon snapped to slot-body center (0,0), not NumberItem / text.
    * @param {boolean} [hitPad] when true, pad captures clicks (empty slots).
    */
-  function ensureIconOverlay(panel, color, show, iconSize, hitPad) {
+  function ensureIconOverlay(panel, color, show, iconSize, hitPad, imageHref) {
     if (!panel) return;
     const size = iconSize > 0 ? iconSize : SLOT_ICON;
     const half = size / 2;
@@ -340,6 +341,10 @@ export function createPlayerUiGamePlay(opts) {
       rect.setAttribute('stroke', '#101820');
       rect.setAttribute('stroke-width', '1.5');
       g.appendChild(rect);
+      const image = document.createElementNS(SVG_NS, 'image');
+      image.setAttribute('data-icon-image', '1');
+      image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      g.appendChild(image);
       // Under number/mask layers so digits stay readable
       const numHost = findNumberHost(panel);
       const numAnc =
@@ -356,12 +361,35 @@ export function createPlayerUiGamePlay(opts) {
       }
     }
     const rect = g.querySelector('rect');
+    let image = g.querySelector('[data-icon-image]');
+    if (!image) {
+      image = document.createElementNS(SVG_NS, 'image');
+      image.setAttribute('data-icon-image', '1');
+      image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      g.appendChild(image);
+    }
     if (rect) {
       rect.setAttribute('x', String(-half));
       rect.setAttribute('y', String(-half));
       rect.setAttribute('width', String(size));
       rect.setAttribute('height', String(size));
-      rect.setAttribute('fill', color || '#4a5a6a');
+      rect.setAttribute('fill', imageHref ? 'none' : color || '#4a5a6a');
+      rect.setAttribute('stroke', imageHref ? 'none' : '#101820');
+    }
+    if (image) {
+      image.setAttribute('x', String(-half));
+      image.setAttribute('y', String(-half));
+      image.setAttribute('width', String(size));
+      image.setAttribute('height', String(size));
+      if (imageHref) {
+        image.setAttribute('href', imageHref);
+        image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
+        image.style.display = '';
+      } else {
+        image.removeAttribute('href');
+        image.style.display = 'none';
+      }
+      image.style.pointerEvents = 'none';
     }
     g.setAttribute('pointer-events', hitPad ? 'all' : 'none');
     setVisible(g, !!show);
@@ -405,7 +433,7 @@ export function createPlayerUiGamePlay(opts) {
     if (state._btnArtReady || !state.svgRoot) return;
     state._btnArtReady = true;
     try {
-      const res = await fetch(`${BTN_SVG_URL}?v=20261020a`);
+      const res = await fetch(`${BTN_SVG_URL}?v=20261020b`);
       if (!res.ok) return;
       const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
       const defs = ensureDefs();
@@ -1163,7 +1191,14 @@ export function createPlayerUiGamePlay(opts) {
       // Weapon single: hide NN; stacks show digits
       setCountOnHost(num, count, !isWeapon && count > 0);
       const def = getItemDef(recipe.itemId);
-      ensureIconOverlay(slot, (def && def.color) || '#6a7a8a', true);
+      ensureIconOverlay(
+        slot,
+        (def && def.color) || '#6a7a8a',
+        true,
+        SLOT_ICON,
+        false,
+        getWeaponIconHref(recipe.itemId)
+      );
     }
     syncCraftSelection();
     syncCraftDetail();
@@ -1200,7 +1235,9 @@ export function createPlayerUiGamePlay(opts) {
       el,
       (def && def.color) || '#6a7a8a',
       true,
-      CURRENT_SLOT_ICON
+      CURRENT_SLOT_ICON,
+      false,
+      getWeaponIconHref(recipe.itemId)
     );
     const num = findNumberHost(el);
     const count = recipe.resultCount || 1;
@@ -1493,7 +1530,14 @@ export function createPlayerUiGamePlay(opts) {
         const isWeapon = kind === 'WEAPON';
         const count = slot.count || 0;
         setCountOnHost(num, count, !isWeapon && count > 0);
-        ensureIconOverlay(el, slot.color || '#6a7a8a', true, SLOT_ICON, false);
+        ensureIconOverlay(
+          el,
+          slot.color || '#6a7a8a',
+          true,
+          SLOT_ICON,
+          false,
+          getWeaponIconHref(slot.weaponId || slot.itemId)
+        );
       }
     }
   }
@@ -1604,7 +1648,7 @@ export function createPlayerUiGamePlay(opts) {
 
   async function mountSvg() {
     if (!mount) return false;
-    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020a`);
+    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020b`);
     if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
     mount.innerHTML = await res.text();
     state.svgRoot =

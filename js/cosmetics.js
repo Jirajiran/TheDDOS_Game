@@ -4,9 +4,16 @@
  * Cosmetics mirror sim state only (active hotbar WEAPON/TOOL / armor / shield / swing).
  */
 
-import { GAME_PACK, getWeaponDef } from './config.js';
+import { GAME_PACK, L3_SIZE, getWeaponDef } from './config.js';
 import { getActiveSlot, isToolSlot, isWeaponSlot } from './inventory.js';
-import { getWeaponBtnImage, preloadWeaponBtnArt } from './weaponBtnArt.js';
+import {
+  getWeaponBtnImage,
+  getWeaponBtnLayout,
+  preloadWeaponBtnArt,
+} from './weaponBtnArt.js';
+
+/** Same local frame as Unit_Template draw (SizeView is 64 wide). */
+const UNIT_LOCAL_W = 64;
 
 /**
  * Visual map only — gameplay ids stay MEDIC_GUN / LAZER / LAZER_HEAL /
@@ -535,23 +542,43 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
   const btn = WEAPON_BTN_ART[weaponId];
   const variant = btn ? weaponBtnVariant(weaponId, unit, opts) : null;
   const img = variant ? getWeaponBtnImage(weaponId, variant) : null;
+  const layout = variant ? getWeaponBtnLayout(weaponId, variant) : null;
+  const kick = weaponRecoilKickPx(unit);
+
+  if (img && layout) {
+    // SizeView in the weapon group shares the unit's local space.
+    // 1 SVG unit = body scale, so art past SizeView sticks out as the held gun.
+    const scale = (L3_SIZE * (unit.sizeScale || 1)) / UNIT_LOCAL_W;
+    const facing =
+      typeof unit.facingRad === 'number'
+        ? unit.facingRad
+        : typeof unit.aimRad === 'number'
+          ? unit.aimRad
+          : aim;
+    const packOff =
+      GAME_PACK.unitVisualFacingOffsetRad != null
+        ? GAME_PACK.unitVisualFacingOffsetRad
+        : -Math.PI / 2;
+    ctx.save();
+    ctx.translate(unit.x, unit.y);
+    ctx.rotate(facing + packOff);
+    if (kick > 0) ctx.translate(0, -kick);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(
+      img,
+      layout.x * scale,
+      layout.y * scale,
+      layout.w * scale,
+      layout.h * scale
+    );
+    ctx.restore();
+    return;
+  }
 
   ctx.save();
   ctx.translate(rimX, rimY);
   ctx.rotate(aim);
-  const kick = weaponRecoilKickPx(unit);
   if (kick > 0) ctx.translate(-kick, 0);
-
-  if (img) {
-    const lenMult = art.length != null ? art.length : 1;
-    const h = r * (1.15 + 0.35 * lenMult) * (isPlayer ? 1.1 : 1);
-    const aspect = img.naturalWidth > 0 ? img.naturalWidth / img.naturalHeight : 1.6;
-    const w = h * aspect;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, 0, -h * 0.5, w, h);
-    ctx.restore();
-    return;
-  }
 
   const lenMult = art.length != null ? art.length : 1;
   const thick = (art.thickness != null ? art.thickness : 3.2) / (zoom > 0 ? Math.min(zoom, 2) : 1);

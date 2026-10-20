@@ -16,6 +16,7 @@ import {
   getWeaponDef,
 } from './config.js';
 import { createCamera, followPoint, panCamera, snapCameraTo, clampZoom } from './camera.js';
+import { getWeaponIconHref } from './weaponBtnArt.js';
 import {
   getNightCameraZoomMul,
   tickNightBlend,
@@ -303,7 +304,16 @@ export function createApp(dom) {
     }
     const g = document.createElement('div');
     g.className = 'player-ui-drag-ghost';
-    g.style.background = hotbarDrag.color || '#6a7a8a';
+    const dragSlot =
+      state.match &&
+      state.match.inventory &&
+      state.match.inventory[hotbarDrag.fromIndex];
+    const iconHref = getWeaponIconHref(
+      (dragSlot && (dragSlot.weaponId || dragSlot.itemId)) || ''
+    );
+    g.style.background = iconHref
+      ? 'center / contain no-repeat url("' + iconHref + '")'
+      : hotbarDrag.color || '#6a7a8a';
     g.setAttribute('aria-hidden', 'true');
     document.body.appendChild(g);
     hotbarDrag.ghostEl = g;
