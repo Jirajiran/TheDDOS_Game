@@ -530,18 +530,37 @@ function reloadVisualSpec(unit, match) {
   if (!ammo || !(ammo.reloadTimer > 0)) return null;
   const def = getWeaponDef(weaponId);
   const shell = def && def.reloadType === ReloadType.INDIVIDUAL_SHELL;
+  const serial = ammo.reloadSerial | 0;
   if (family.reloadOnce) {
-    return { from: family.reloadMag, to: family.hold, loop: false };
+    return {
+      from: family.reloadMag,
+      to: family.hold,
+      loop: false,
+      sec: RELOAD_TWEEN_SEC,
+      serial,
+    };
   }
-  if (shell) return { from: family.reloadShell, to: family.hold, loop: false };
-  return { from: family.reloadMag, to: family.hold, loop: true };
+  if (shell) {
+    const sec = def.reloadSec > 0 ? def.reloadSec : 1.4;
+    return { from: family.reloadShell, to: family.hold, loop: false, sec, serial };
+  }
+  return {
+    from: family.reloadMag,
+    to: family.hold,
+    loop: true,
+    sec: RELOAD_TWEEN_SEC,
+    serial,
+  };
 }
 
 function playReloadClip(unit, spec, restart) {
+  // First frame is the reload pose. The tween to hold keeps that pose as its start.
+  const came = unit.visualAction || spec.from;
+  unit._reloadCameFrom = came;
   unit.visualActionPrev = spec.from;
   unit.visualAction = spec.to;
   unit.visualActionT = 0;
-  unit.armTweenDur = RELOAD_TWEEN_SEC;
+  unit.armTweenDur = spec.sec > 0 ? spec.sec : RELOAD_TWEEN_SEC;
   if (restart) unit.armTweenT = 0;
 }
 
@@ -561,6 +580,21 @@ export function shotVisualAction(unit, match) {
   return UNIT_VISUAL_ACTIONS.Shoting;
 }
 
+/** Drop a reload clip immediately. Right-click and hotbar changes use this. */
+export function clearReloadVisual(unit) {
+  if (!unit) return;
+  unit._reloadClipKey = '';
+  const prev = unit.visualActionPrev || '';
+  const cur = unit.visualAction || '';
+  if (prev.indexOf('Reload') !== 0 && cur.indexOf('Reload') !== 0) return;
+  const hold = cur.indexOf('hold_Gun') === 0 ? cur : 'hold_Gun';
+  unit.visualAction = hold;
+  unit.visualActionPrev = hold;
+  unit.armTweenT = 0;
+  unit.armTweenDur = 0;
+  unit.visualActionT = 0;
+}
+
 export function tickUnitVisualAction(unit, match, dt) {
   if (!unit || !unit.active) return;
   applyBtnActionArmPoses();
@@ -568,15 +602,22 @@ export function tickUnitVisualAction(unit, match, dt) {
 
   const reload = reloadVisualSpec(unit, match);
   if (reload) {
-    const key = reload.from + '>' + reload.to + (reload.loop ? ':loop' : ':once');
+    const dur = reload.sec > 0 ? reload.sec : RELOAD_TWEEN_SEC;
+    const key =
+      reload.from +
+      '>' +
+      reload.to +
+      (reload.loop ? ':loop' : ':once') +
+      ':' +
+      (reload.serial || 0);
     if (unit._reloadClipKey !== key) {
       unit._reloadClipKey = key;
       playReloadClip(unit, reload, true);
     } else if (reload.loop) {
       unit.armTweenT = (unit.armTweenT || 0) + dt;
-      if (unit.armTweenT >= RELOAD_TWEEN_SEC) playReloadClip(unit, reload, true);
-    } else if ((unit.armTweenT || 0) < RELOAD_TWEEN_SEC) {
-      unit.armTweenT = Math.min(RELOAD_TWEEN_SEC, (unit.armTweenT || 0) + dt);
+      if (unit.armTweenT >= dur) playReloadClip(unit, reload, true);
+    } else if ((unit.armTweenT || 0) < dur) {
+      unit.armTweenT = Math.min(dur, (unit.armTweenT || 0) + dt);
     }
     return;
   }

@@ -32,6 +32,7 @@ import {
   getUpgradeRecipe,
   getWeaponDef,
   isBackpackItemId,
+  ReloadType,
   layerHitsMask,
 } from './config.js';
 import { resolveDamage } from './defs/damageResolver.js';
@@ -107,6 +108,7 @@ import {
 } from './occupancy.js';
 import { acquireDrop, acquireProjectile, acquireUnit, deactivateUnit, resetPools } from './pools.js';
 import {
+  clearReloadVisual,
   cutUnitVisualAction,
   shotVisualAction,
   enemySkinGroupId,
@@ -492,6 +494,8 @@ function applyActions(match, actions, mouseWorld, dt) {
       tryFire(match, unit);
     } else if (a.type === ActionType.RELOAD) {
       tryReload(match, unit);
+    } else if (a.type === ActionType.CANCEL_RELOAD) {
+      tryCancelReload(match, unit);
     } else if (a.type === ActionType.INTERACT) {
       if (unit.role === 'player') tryInteract(match, unit);
     } else if (a.type === ActionType.HARVEST) {
@@ -856,10 +860,27 @@ function getUnitWeaponAmmo(match, unit) {
   return { weapon, ammo: unit, fromSlot: false };
 }
 
+function clearAmmoReload(ammo) {
+  if (!ammo) return;
+  ammo.reloadTimer = 0;
+}
+
 function tryReload(match, unit) {
   const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
   if (!weapon || !ammo) return;
   const opts = unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
+  beginReload(ammo, weapon, opts);
+}
+
+function tryCancelReload(match, unit) {
+  const { ammo } = getUnitWeaponAmmo(match, unit);
+  clearAmmoReload(ammo);
+  clearReloadVisual(unit);
+}
+
+function continueShellReload(ammo, weapon, opts) {
+  if (!weapon || weapon.reloadType !== ReloadType.INDIVIDUAL_SHELL) return;
+  if (!ammo || ammo.ammoInMag >= weapon.magCapacity) return;
   beginReload(ammo, weapon, opts);
 }
 
@@ -918,6 +939,10 @@ function hotbarSwitchDelaySec() {
 function commitHotbarSlot(match, unit, slotIndex, isPlayer) {
   const slot = slotIndex | 0;
   if (isPlayer) {
+    if ((match.activeHotbar | 0) !== slot) {
+      clearAmmoReload(getActiveSlot(match.inventory, match.activeHotbar));
+      clearReloadVisual(unit);
+    }
     match.activeHotbar = slot;
     match.pendingHotbar = -1;
     match.hotbarSwitchT = 0;
@@ -925,6 +950,11 @@ function commitHotbarSlot(match, unit, slotIndex, isPlayer) {
     if (isArmorSlot(s) && unit) equipArmorOnUnit(unit, s.itemId);
     if (isShieldSlot(s) && unit) equipShieldOnUnit(unit, s.itemId);
   } else if (unit && unit.inventory) {
+    if ((unit.activeHotbar | 0) !== slot) {
+      clearAmmoReload(getActiveSlot(unit.inventory, unit.activeHotbar));
+      clearAmmoReload(unit);
+      clearReloadVisual(unit);
+    }
     unit.activeHotbar = slot;
     unit.pendingHotbar = -1;
     unit.hotbarSwitchT = 0;
@@ -1851,13 +1881,17 @@ function updateWeaponReloads(match, dt) {
     const slot = inv[i];
     if (!isWeaponSlot(slot)) continue;
     const def = getWeaponDef(slot.weaponId || slot.itemId);
-    tickReload(slot, def, dt, playerReloadOpts(match, def));
+    const opts = playerReloadOpts(match, def);
+    if (tickReload(slot, def, dt, opts)) {
+      continueShellReload(slot, def, playerReloadOpts(match, def));
+    }
   }
   const units = match.pools.units;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (!u.active || u.role !== 'enemy' || !u.weaponId) continue;
-    tickReload(u, getWeaponDef(u.weaponId), dt, null);
+    const def = getWeaponDef(u.weaponId);
+    if (tickReload(u, def, dt, null)) continueShellReload(u, def, null);
   }
 }
 

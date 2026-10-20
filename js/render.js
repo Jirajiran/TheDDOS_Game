@@ -365,14 +365,13 @@ function drawProjectiles(ctx, projectiles, zoom) {
     if (p.weaponId === 'GRENADE_LAUNCHER') {
       const rocket = getProjectileArt('Bullet_Rpg');
       const lay = rocket && rocket._layout;
-      if (rocket && lay && lay.h > 0) {
-        const h = Math.max(18, (p.radius || 12) * 2.2);
-        const w = h * (lay.w / lay.h);
+      if (rocket && lay && lay.w > 0 && lay.h > 0) {
+        // Bullet_Rpg is authored facing south (+Y). Do not resize it to the shot radius.
         ctx.save();
         ctx.translate(p.x, p.y);
-        ctx.rotate(aim);
+        ctx.rotate(aim - Math.PI / 2);
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(rocket, -w * 0.5, -h * 0.5, w, h);
+        ctx.drawImage(rocket, -lay.w * 0.5, -lay.h * 0.5, lay.w, lay.h);
         ctx.restore();
         continue;
       }

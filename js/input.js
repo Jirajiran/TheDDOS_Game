@@ -4,6 +4,7 @@ import {
   makeHarvestAction,
   makeMoveAction,
   makePlaceAction,
+  makeCancelReloadAction,
   makeReloadAction,
   makeSelectHotbarAction,
 } from './actions.js';
@@ -18,7 +19,7 @@ import {
 
 /**
  * Local human input → Action objects each frame.
- * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · Q Fist · E interact · F craft · 1-0 hotbar
+ * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · RMB cancel reload · Q Fist · E interact · F craft · 1-0 hotbar
  * When uiBlocked (panel open), suppress gameplay actions but still allow F/E/Esc toggle.
  * Hotbar drag sets actionBusy — suppress fire/place/harvest while held.
  * Chat mode: keys type into input; canvas mousedown dismisses chat then fires (enemy interrupt).
@@ -34,6 +35,7 @@ export function createInput(canvas, hooks = {}) {
   let interactPressed = false;
   let craftTogglePressed = false;
   let reloadPressed = false;
+  let cancelReloadPressed = false;
   let fistPressed = false;
   /** Skill slot 2 (SELF_HEAL) — KeyC (E is interact). */
   let healSkillPressed = false;
@@ -52,6 +54,7 @@ export function createInput(canvas, hooks = {}) {
       fireHeld = false;
       firePressed = false;
       reloadPressed = false;
+      cancelReloadPressed = false;
       fistPressed = false;
       healSkillPressed = false;
       wheelDelta = 0;
@@ -66,6 +69,7 @@ export function createInput(canvas, hooks = {}) {
       fireHeld = false;
       firePressed = false;
       reloadPressed = false;
+      cancelReloadPressed = false;
       fistPressed = false;
       healSkillPressed = false;
       wheelDelta = 0;
@@ -146,6 +150,10 @@ export function createInput(canvas, hooks = {}) {
   }
 
   function onMouseDown(e) {
+    if (e.button === 2) {
+      if (!uiBlocked && !actionBusy && !chatMode) cancelReloadPressed = true;
+      return;
+    }
     if (e.button !== 0) return;
     // Typing in chat + enemy: click world cancels chat and uses this click to fire.
     if (chatMode) {
@@ -171,6 +179,10 @@ export function createInput(canvas, hooks = {}) {
     wheelDelta += e.deltaY;
   }
 
+  function onContextMenu(e) {
+    e.preventDefault();
+  }
+
   function onBlur() {
     for (const k of Object.keys(keys)) keys[k] = false;
     fireHeld = false;
@@ -181,6 +193,7 @@ export function createInput(canvas, hooks = {}) {
   window.addEventListener('blur', onBlur);
   canvas.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('mouseup', onMouseUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
@@ -213,6 +226,7 @@ export function createInput(canvas, hooks = {}) {
       interactPressed = false;
       firePressed = false;
       reloadPressed = false;
+      cancelReloadPressed = false;
       fistPressed = false;
       healSkillPressed = false;
       wheelDelta = 0;
@@ -255,6 +269,7 @@ export function createInput(canvas, hooks = {}) {
       interactPressed = false;
       firePressed = false;
       reloadPressed = false;
+      cancelReloadPressed = false;
       fistPressed = false;
       healSkillPressed = false;
       wheelDelta = 0;
@@ -363,6 +378,10 @@ export function createInput(canvas, hooks = {}) {
     actions.push(makeReloadAction(playerUnitId));
     reloadPressed = false;
   }
+  if (cancelReloadPressed) {
+    actions.push(makeCancelReloadAction(playerUnitId));
+    cancelReloadPressed = false;
+  }
 
   return {
     actions,
@@ -390,6 +409,7 @@ export function createInput(canvas, hooks = {}) {
     window.removeEventListener('blur', onBlur);
     canvas.removeEventListener('mousemove', onMouseMove);
     canvas.removeEventListener('mousedown', onMouseDown);
+    canvas.removeEventListener('contextmenu', onContextMenu);
     window.removeEventListener('mouseup', onMouseUp);
     canvas.removeEventListener('wheel', onWheel);
   }

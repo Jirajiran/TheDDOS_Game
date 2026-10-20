@@ -7,6 +7,7 @@ export const ActionType = Object.freeze({
   PLACE: 'PLACE',
   SELECT_HOTBAR: 'SELECT_HOTBAR',
   RELOAD: 'RELOAD',
+  CANCEL_RELOAD: 'CANCEL_RELOAD',
   INTERACT: 'INTERACT',
   HARVEST: 'HARVEST',
   /** Take produced stock from a Gen block into inventory (sim mutates). */
@@ -43,6 +44,10 @@ export function makeSelectHotbarAction(unitId, slot) {
 
 export function makeReloadAction(unitId) {
   return { type: ActionType.RELOAD, unitId };
+}
+
+export function makeCancelReloadAction(unitId) {
+  return { type: ActionType.CANCEL_RELOAD, unitId };
 }
 
 export function makeInteractAction(unitId) {

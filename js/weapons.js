@@ -45,6 +45,7 @@ export function beginReload(ammo, weaponDef, opts = null) {
     return false;
   }
 
+  ammo.reloadSerial = (ammo.reloadSerial | 0) + 1;
   ammo.reloadTimer = weaponDef.reloadSec || 1.4;
   return true;
 }
@@ -54,16 +55,15 @@ export function tickReload(ammo, weaponDef, dt, opts = null) {
   ammo.reloadTimer -= dt;
   if (ammo.reloadTimer > 0) return false;
   ammo.reloadTimer = 0;
-  finishReload(ammo, weaponDef, opts);
-  return true;
+  return finishReload(ammo, weaponDef, opts);
 }
 
 export function finishReload(ammo, weaponDef, opts = null) {
-  if (!ammo || !weaponDef || weaponDef.infiniteAmmo) return;
-  if (ammo.mags <= 0) return;
+  if (!ammo || !weaponDef || weaponDef.infiniteAmmo) return false;
+  if (ammo.mags <= 0) return false;
 
   if (opts && typeof opts.spendReserve === 'function') {
-    if (!opts.spendReserve()) return;
+    if (!opts.spendReserve()) return false;
   }
 
   if (weaponDef.reloadType === ReloadType.INDIVIDUAL_SHELL) {
@@ -80,6 +80,7 @@ export function finishReload(ammo, weaponDef, opts = null) {
       ammo.mags = Math.max(ammo.mags, Math.min(weaponDef.maxMags, left));
     }
   }
+  return true;
 }
 
 /** Returns rounds consumed (0 if cannot fire). One shot action = 1 round (burst is sequential). */

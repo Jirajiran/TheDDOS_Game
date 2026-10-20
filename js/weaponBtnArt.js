@@ -3,7 +3,7 @@
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020c';
+const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020d';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -282,6 +282,37 @@ async function rasterCoreLayer(sourceDoc, defs, groupId, state, kind, frame) {
   return rasterFixed(defs, painted, frame);
 }
 
+/** Visible plate. Group getBBox includes art the mask already clips, and mask has no getBBox. */
+function iconPlateBox(clone) {
+  const mask = clone.querySelector('mask');
+  if (!mask) return null;
+  const use = mask.querySelector('use');
+  const href = use
+    ? use.getAttribute('href') || use.getAttribute('xlink:href') || ''
+    : '';
+  const refId = href.replace(/^#/, '');
+  const ref = refId ? clone.ownerDocument.getElementById(refId) : null;
+  return measureBox(ref) || measureBox(use);
+}
+
+/** Flying rocket only. SizeView is the body reference and stays out of the shot. */
+async function rasterProjectile(sourceDoc, defs, groupId) {
+  const src = sourceDoc.getElementById(groupId);
+  if (!src) return null;
+  const clone = src.cloneNode(true);
+  clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+  const host = mountHost(defs.cloneNode(true));
+  host.appendChild(clone);
+  const nodes = clone.querySelectorAll('[id]');
+  for (let i = 0; i < nodes.length; i++) {
+    const id = nodes[i].getAttribute('id') || '';
+    if (id.indexOf('SizeView') === 0) hideEl(nodes[i]);
+  }
+  const box = measureBox(clone);
+  host.remove();
+  return rasterLocal(defs, clone, box);
+}
+
 async function rasterIcon(sourceDoc, defs, groupId) {
   const src = sourceDoc.getElementById(groupId);
   if (!src) return null;
@@ -289,7 +320,8 @@ async function rasterIcon(sourceDoc, defs, groupId) {
   clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
   const host = mountHost(defs.cloneNode(true));
   host.appendChild(clone);
-  const box = measureBox(clone);
+  const plate = iconPlateBox(clone);
+  const box = plate || measureBox(clone);
   host.remove();
   return rasterLocal(defs, clone, box);
 }
@@ -348,7 +380,7 @@ export function preloadWeaponBtnArt(table) {
         _images.set('icon:' + id, icon);
       }
     }
-    const rocket = await rasterIcon(doc, defs, 'Bullet_Rpg');
+    const rocket = await rasterProjectile(doc, defs, 'Bullet_Rpg');
     _images.set('proj:Bullet_Rpg', rocket);
   })();
   return _load;

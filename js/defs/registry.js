@@ -45,7 +45,7 @@ const DEFAULT_DAY = Object.freeze({
   nightOverlayColor: '#55008C',
   nightOverlayMaxAlpha: 0.32,
   nightEnemyAiFireMul: 0.9,
-  nightCameraZoomMul: 0.92,
+  nightCameraZoomMul: 0.98,
   nightCameraTweenPerSec: 1.8,
   nightTurretAiFireMul: 0.9,
   applyNightTurretAiFire: false,

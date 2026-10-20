@@ -439,7 +439,7 @@ export function createPlayerUiGamePlay(opts) {
     if (state._btnArtReady || !state.svgRoot) return;
     state._btnArtReady = true;
     try {
-      const res = await fetch(`${BTN_SVG_URL}?v=20261020c`);
+      const res = await fetch(`${BTN_SVG_URL}?v=20261020d`);
       if (!res.ok) return;
       const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
       const defs = ensureDefs();
@@ -1657,7 +1657,7 @@ export function createPlayerUiGamePlay(opts) {
 
   async function mountSvg() {
     if (!mount) return false;
-    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020c`);
+    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020d`);
     if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
     mount.innerHTML = await res.text();
     state.svgRoot =

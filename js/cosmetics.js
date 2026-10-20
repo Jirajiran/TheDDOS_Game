@@ -624,6 +624,7 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
   if (img && layout) {
     // SizeView in the weapon group shares the unit's local space.
     // 1 SVG unit = body scale, so art past SizeView sticks out as the held gun.
+    // Heavy poses (hold_Gun_2) put that gun on Pivot_Arm_1 so it stays in the hand.
     const scale = (L3_SIZE * (unit.sizeScale || 1)) / UNIT_LOCAL_W;
     const facing =
       typeof unit.facingRad === 'number'
@@ -635,9 +636,22 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
       GAME_PACK.unitVisualFacingOffsetRad != null
         ? GAME_PACK.unitVisualFacingOffsetRad
         : -Math.PI / 2;
+    const family = weaponPoseFamily(weaponId);
+    const pivot = opts && opts.arm1Pivot;
+    const onHand =
+      family &&
+      family.hold === 'hold_Gun_2' &&
+      pivot &&
+      Number.isFinite(pivot.x) &&
+      Number.isFinite(pivot.y);
     ctx.save();
-    ctx.translate(unit.x, unit.y);
-    ctx.rotate(facing + packOff);
+    if (onHand) {
+      ctx.translate(pivot.x, pivot.y);
+      ctx.rotate(pivot.ang);
+    } else {
+      ctx.translate(unit.x, unit.y);
+      ctx.rotate(facing + packOff);
+    }
     if (kick > 0) ctx.translate(0, -kick);
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(
