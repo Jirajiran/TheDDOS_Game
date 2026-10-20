@@ -637,7 +637,7 @@ export const WEAPON_REGISTRY = Object.freeze({
     baseDamage: 55,
     cooldownSec: 1.8,
     spreadDeg: 8,
-    magCapacity: 4,
+    magCapacity: 1,
     maxMags: 3,
     ammoTypeId: 'AMMO_SHELL',
     maxDistancePath: 1.2,

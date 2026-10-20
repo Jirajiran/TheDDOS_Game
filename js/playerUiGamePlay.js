@@ -5,7 +5,7 @@
 
 import { getItemDef } from './config.js';
 import { formatClockFromSim, getDayBarPhase } from './dayCycle.js';
-import { getWeaponIconHref } from './weaponBtnArt.js';
+import { getWeaponIconHref, getWeaponIconLayout } from './weaponBtnArt.js';
 
 const ART_W = 1280;
 const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg';
@@ -327,7 +327,7 @@ export function createPlayerUiGamePlay(opts) {
    * Icon snapped to slot-body center (0,0), not NumberItem / text.
    * @param {boolean} [hitPad] when true, pad captures clicks (empty slots).
    */
-  function ensureIconOverlay(panel, color, show, iconSize, hitPad, imageHref) {
+  function ensureIconOverlay(panel, color, show, iconSize, hitPad, imageHref, iconLayout) {
     if (!panel) return;
     const size = iconSize > 0 ? iconSize : SLOT_ICON;
     const half = size / 2;
@@ -375,23 +375,29 @@ export function createPlayerUiGamePlay(opts) {
       rect.setAttribute('height', String(size));
       rect.setAttribute('fill', imageHref ? 'none' : color || '#4a5a6a');
       rect.setAttribute('stroke', imageHref ? 'none' : '#101820');
+      rect.setAttribute('pointer-events', imageHref ? 'none' : 'auto');
     }
     if (image) {
-      image.setAttribute('x', String(-half));
-      image.setAttribute('y', String(-half));
-      image.setAttribute('width', String(size));
-      image.setAttribute('height', String(size));
+      const box = imageHref && iconLayout && iconLayout.w > 0 ? iconLayout : null;
+      const iw = box ? box.w : size;
+      const ih = box ? box.h : size;
+      image.setAttribute('x', String(-iw / 2));
+      image.setAttribute('y', String(-ih / 2));
+      image.setAttribute('width', String(iw));
+      image.setAttribute('height', String(ih));
       if (imageHref) {
         image.setAttribute('href', imageHref);
         image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
         image.style.display = '';
+        image.style.pointerEvents = 'all';
+        image.style.cursor = 'pointer';
       } else {
         image.removeAttribute('href');
         image.style.display = 'none';
+        image.style.pointerEvents = 'none';
       }
-      image.style.pointerEvents = 'none';
     }
-    g.setAttribute('pointer-events', hitPad ? 'all' : 'none');
+    g.setAttribute('pointer-events', imageHref || hitPad ? 'all' : 'none');
     setVisible(g, !!show);
   }
 
@@ -433,7 +439,7 @@ export function createPlayerUiGamePlay(opts) {
     if (state._btnArtReady || !state.svgRoot) return;
     state._btnArtReady = true;
     try {
-      const res = await fetch(`${BTN_SVG_URL}?v=20261020b`);
+      const res = await fetch(`${BTN_SVG_URL}?v=20261020c`);
       if (!res.ok) return;
       const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
       const defs = ensureDefs();
@@ -1197,7 +1203,8 @@ export function createPlayerUiGamePlay(opts) {
         true,
         SLOT_ICON,
         false,
-        getWeaponIconHref(recipe.itemId)
+        getWeaponIconHref(recipe.itemId),
+        getWeaponIconLayout(recipe.itemId)
       );
     }
     syncCraftSelection();
@@ -1237,7 +1244,8 @@ export function createPlayerUiGamePlay(opts) {
       true,
       CURRENT_SLOT_ICON,
       false,
-      getWeaponIconHref(recipe.itemId)
+      getWeaponIconHref(recipe.itemId),
+      getWeaponIconLayout(recipe.itemId)
     );
     const num = findNumberHost(el);
     const count = recipe.resultCount || 1;
@@ -1536,7 +1544,8 @@ export function createPlayerUiGamePlay(opts) {
           true,
           SLOT_ICON,
           false,
-          getWeaponIconHref(slot.weaponId || slot.itemId)
+          getWeaponIconHref(slot.weaponId || slot.itemId),
+          getWeaponIconLayout(slot.weaponId || slot.itemId)
         );
       }
     }
@@ -1648,7 +1657,7 @@ export function createPlayerUiGamePlay(opts) {
 
   async function mountSvg() {
     if (!mount) return false;
-    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020b`);
+    const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261020c`);
     if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
     mount.innerHTML = await res.text();
     state.svgRoot =

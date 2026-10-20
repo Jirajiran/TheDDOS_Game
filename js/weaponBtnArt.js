@@ -3,7 +3,7 @@
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020b';
+const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261020c';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -47,6 +47,18 @@ function firstArm(group, prefix) {
   return null;
 }
 
+const ART_ALIAS = Object.freeze({
+  SMG_MODIFIED: 'SMG',
+  AK47_MODIFIED: 'AK47',
+  SHOTGUN_SHELL_MODIFIED: 'SHOTGUN_SHELL',
+  SHOTGUN_BUCK_MODIFIED: 'SHOTGUN_BUCK',
+  KAR98_MODIFIED: 'KAR98',
+});
+
+function artKey(weaponId) {
+  return ART_ALIAS[weaponId] || weaponId;
+}
+
 function readActionArmPoses(doc) {
   const out = {};
   const actions = Object.keys(ACTION_GROUPS);
@@ -56,8 +68,9 @@ function readActionArmPoses(doc) {
     if (!group) continue;
     const a1 = parseMatrixAttr(firstArm(group, 'Arm_1'));
     const a2 = parseMatrixAttr(firstArm(group, 'Arm_2'));
+    const piv = parseMatrixAttr(firstArm(group, 'Pivot_Arm_1'));
     if (!a1 || !a2) continue;
-    out[action] = { arm1: a1, arm2: a2 };
+    out[action] = { arm1: a1, arm2: a2, pivot1: piv };
   }
   return out;
 }
@@ -142,6 +155,11 @@ function prepareClone(sourceDoc, groupId, variant) {
     if (id.indexOf('SizeView') === 0) hideEl(measures[i]);
   }
   if (variant === 'rpg-empty') hideId(clone, 'Bullet_Rpg_onGun');
+  if (variant === 'pyro-body') {
+    hideId(clone, 'Core_Red_1');
+    hideId(clone, 'Core_Red_2');
+    hideId(clone, 'Core_Green');
+  }
   if (variant === 'pyro-empty' || variant === 'pyro-beam') {
     const kind = groupId.indexOf('Collagen') >= 0 ? 'green' : 'red';
     applyCoreState(
@@ -230,6 +248,40 @@ async function rasterGroup(sourceDoc, defs, groupId, variant) {
   return rasterLocal(defs, painted, unionBox(frame, sizeView));
 }
 
+function isolateCores(clone, sourceDoc, state, kind) {
+  const kids = clone.children;
+  for (let i = 0; i < kids.length; i++) {
+    const id = kids[i].getAttribute('id') || '';
+    if (id.indexOf('Core_') !== 0) hideEl(kids[i]);
+  }
+  if (state !== 'ready') {
+    applyCoreState(clone, sourceDoc, state === 'white' ? 'beam' : 'empty', kind);
+  }
+}
+
+async function rasterFixed(defs, clone, vb) {
+  if (!vb || !(vb.w > 1) || !(vb.h > 1)) return null;
+  const ppm = 4;
+  const pw = Math.max(32, Math.min(640, Math.ceil(vb.w * ppm)));
+  const ph = Math.max(32, Math.min(640, Math.ceil(vb.h * ppm)));
+  const markup =
+    `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
+    `width="${pw}" height="${ph}" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}">` +
+    new XMLSerializer().serializeToString(defs) +
+    new XMLSerializer().serializeToString(clone) +
+    `</svg>`;
+  const img = await svgToImage(markup);
+  if (img) img._layout = vb;
+  return img;
+}
+
+async function rasterCoreLayer(sourceDoc, defs, groupId, state, kind, frame) {
+  const painted = prepareClone(sourceDoc, groupId, 'base');
+  if (!painted || !frame) return null;
+  isolateCores(painted, sourceDoc, state, kind);
+  return rasterFixed(defs, painted, frame);
+}
+
 async function rasterIcon(sourceDoc, defs, groupId) {
   const src = sourceDoc.getElementById(groupId);
   if (!src) return null;
@@ -268,24 +320,42 @@ export function preloadWeaponBtnArt(table) {
       const variants = spec.rpg
         ? ['rpg-loaded', 'rpg-empty']
         : spec.core
-          ? ['pyro-ready', 'pyro-empty', 'pyro-beam']
+          ? ['pyro-body']
           : ['base'];
+      let frame = null;
       for (let v = 0; v < variants.length; v++) {
         const key = id + ':' + variants[v];
         const img = await rasterGroup(doc, defs, spec.group, variants[v]);
         _images.set(key, img);
+        if (img && img._layout) frame = img._layout;
+      }
+      if (spec.core && frame) {
+        const states = ['black', 'ready', 'white'];
+        for (let s = 0; s < states.length; s++) {
+          const core = await rasterCoreLayer(
+            doc,
+            defs,
+            spec.group,
+            states[s],
+            spec.core,
+            frame
+          );
+          _images.set(id + ':core:' + states[s], core);
+        }
       }
       if (spec.icon) {
         const icon = await rasterIcon(doc, defs, spec.icon);
         _images.set('icon:' + id, icon);
       }
     }
+    const rocket = await rasterIcon(doc, defs, 'Bullet_Rpg');
+    _images.set('proj:Bullet_Rpg', rocket);
   })();
   return _load;
 }
 
 export function getWeaponBtnImage(weaponId, variant) {
-  return _images.get(weaponId + ':' + variant) || null;
+  return _images.get(artKey(weaponId) + ':' + variant) || null;
 }
 
 /** Local SVG viewBox the weapon raster uses. SizeView sits inside this frame. */
@@ -294,8 +364,22 @@ export function getWeaponBtnLayout(weaponId, variant) {
   return (img && img._layout) || null;
 }
 
+export function getWeaponCoreImage(weaponId, state) {
+  return _images.get(artKey(weaponId) + ':core:' + state) || null;
+}
+
+export function getProjectileArt(artId) {
+  return _images.get('proj:' + artId) || null;
+}
+
 /** Data URL for a mapped Icon_* group, or null. */
 export function getWeaponIconHref(weaponOrItemId) {
-  const img = _images.get('icon:' + weaponOrItemId);
+  const img = _images.get('icon:' + artKey(weaponOrItemId));
   return img && img.src ? img.src : null;
+}
+
+/** Authored icon box in SVG units. Null until the icon has rastered. */
+export function getWeaponIconLayout(weaponOrItemId) {
+  const img = _images.get('icon:' + artKey(weaponOrItemId));
+  return (img && img._layout) || null;
 }

@@ -9,6 +9,7 @@
 import { GAME_PACK, L3_SIZE, ReloadType, getWeaponDef } from './config.js';
 import {
   resolveHeldVisual,
+  tickWeaponCoreVisual,
   WEAPON_POSE_FAMILY,
   weaponPoseFamily,
 } from './cosmetics.js';
@@ -219,9 +220,10 @@ function applyBtnActionArmPoses() {
     _armPoses.set(action, {
       arm1: src.arm1,
       arm2: src.arm2,
-      pivot1: cur && cur.pivot1
-        ? cur.pivot1
-        : { a: 1, b: 0, c: 0, d: 1, e: -19.85, f: 16.15 },
+      pivot1:
+        src.pivot1 ||
+        (cur && cur.pivot1) ||
+        { a: 1, b: 0, c: 0, d: 1, e: -19.85, f: 16.15 },
     });
   }
 }
@@ -512,10 +514,13 @@ function heldAmmoState(unit, match) {
   return unit;
 }
 
+const RELOAD_TWEEN_SEC = 0.2;
+
 /**
- * Reload pose while reloadTimer > 0.
- * Magazine on standard guns loops (once: false).
- * Shotgun shows once per shell. Heavy Mag_2 shows once per reload.
+ * Reload clip while reloadTimer > 0.
+ * No spare ammo never starts the timer, so no pose plays.
+ * Shell and Mag_2: one tween to the hold pose.
+ * Magazine: 0.2s tween, repeated until the reload timer ends.
  */
 function reloadVisualSpec(unit, match) {
   const weaponId = heldWeaponId(unit, match);
@@ -526,10 +531,18 @@ function reloadVisualSpec(unit, match) {
   const def = getWeaponDef(weaponId);
   const shell = def && def.reloadType === ReloadType.INDIVIDUAL_SHELL;
   if (family.reloadOnce) {
-    return { action: family.reloadMag, once: true };
+    return { from: family.reloadMag, to: family.hold, loop: false };
   }
-  if (shell) return { action: family.reloadShell, once: true };
-  return { action: family.reloadMag, once: false };
+  if (shell) return { from: family.reloadShell, to: family.hold, loop: false };
+  return { from: family.reloadMag, to: family.hold, loop: true };
+}
+
+function playReloadClip(unit, spec, restart) {
+  unit.visualActionPrev = spec.from;
+  unit.visualAction = spec.to;
+  unit.visualActionT = 0;
+  unit.armTweenDur = RELOAD_TWEEN_SEC;
+  if (restart) unit.armTweenT = 0;
 }
 
 function resolveHeldDesired(unit, match) {
@@ -551,16 +564,23 @@ export function shotVisualAction(unit, match) {
 export function tickUnitVisualAction(unit, match, dt) {
   if (!unit || !unit.active) return;
   applyBtnActionArmPoses();
+  tickWeaponCoreVisual(unit, heldWeaponId(unit, match), dt);
 
   const reload = reloadVisualSpec(unit, match);
-  if (reload && reload.once) {
-    if (!unit._reloadOnceLatched) {
-      unit._reloadOnceLatched = true;
-      cutUnitVisualAction(unit, reload.action, 0.35);
+  if (reload) {
+    const key = reload.from + '>' + reload.to + (reload.loop ? ':loop' : ':once');
+    if (unit._reloadClipKey !== key) {
+      unit._reloadClipKey = key;
+      playReloadClip(unit, reload, true);
+    } else if (reload.loop) {
+      unit.armTweenT = (unit.armTweenT || 0) + dt;
+      if (unit.armTweenT >= RELOAD_TWEEN_SEC) playReloadClip(unit, reload, true);
+    } else if ((unit.armTweenT || 0) < RELOAD_TWEEN_SEC) {
+      unit.armTweenT = Math.min(RELOAD_TWEEN_SEC, (unit.armTweenT || 0) + dt);
     }
-  } else {
-    unit._reloadOnceLatched = false;
+    return;
   }
+  unit._reloadClipKey = '';
 
   let desired = UNIT_VISUAL_ACTIONS.idle;
 
@@ -570,16 +590,10 @@ export function tickUnitVisualAction(unit, match, dt) {
       desired = unit.visualAction || UNIT_VISUAL_ACTIONS.PlaceBlock;
     } else {
       unit.visualActionT = 0;
-      desired =
-        reload && !reload.once
-          ? reload.action
-          : resolveHeldDesired(unit, match);
+      desired = resolveHeldDesired(unit, match);
     }
   } else {
-    desired =
-      reload && !reload.once
-        ? reload.action
-        : resolveHeldDesired(unit, match);
+    desired = resolveHeldDesired(unit, match);
   }
 
   const cur = unit.visualAction || UNIT_VISUAL_ACTIONS.idle;

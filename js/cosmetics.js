@@ -9,6 +9,7 @@ import { getActiveSlot, isToolSlot, isWeaponSlot } from './inventory.js';
 import {
   getWeaponBtnImage,
   getWeaponBtnLayout,
+  getWeaponCoreImage,
   preloadWeaponBtnArt,
 } from './weaponBtnArt.js';
 
@@ -22,6 +23,36 @@ const UNIT_LOCAL_W = 64;
  * pose standard = Action_hold_Gun, Action_Shoting, mag loop or shotgun once.
  */
 export const WEAPON_BTN_ART = Object.freeze({
+  M1991: Object.freeze({
+    group: 'Weapon_Colt_1911',
+    icon: 'Icon_Colt_1911',
+    pose: 'standard',
+  }),
+  SMG: Object.freeze({
+    group: 'Weapon_Skorpion_SMG',
+    icon: 'Icon_Skorpion_SMG',
+    pose: 'standard',
+  }),
+  AK47: Object.freeze({
+    group: 'Weapon_AK_47',
+    icon: 'Icon_AK_47',
+    pose: 'standard',
+  }),
+  SHOTGUN_SHELL: Object.freeze({
+    group: 'Weapon_ShotGun_shell',
+    icon: 'Icon_ShotGun_Shell',
+    pose: 'standard',
+  }),
+  SHOTGUN_BUCK: Object.freeze({
+    group: 'Weapon_ShotGun_Buck',
+    icon: 'Icon_ShotGun_Buck',
+    pose: 'standard',
+  }),
+  KAR98: Object.freeze({
+    group: 'Weapon_Kar98',
+    icon: 'Icon_Kar98',
+    pose: 'standard',
+  }),
   MEDIC_GUN: Object.freeze({
     group: 'Weapon_Meso_Gun',
     icon: 'Icon_Meso_Gun',
@@ -52,6 +83,20 @@ export const WEAPON_BTN_ART = Object.freeze({
   }),
 });
 
+/** Modified guns reuse the base art. No extra SVG ids. */
+export const WEAPON_ART_ALIAS = Object.freeze({
+  SMG_MODIFIED: 'SMG',
+  AK47_MODIFIED: 'AK47',
+  SHOTGUN_SHELL_MODIFIED: 'SHOTGUN_SHELL',
+  SHOTGUN_BUCK_MODIFIED: 'SHOTGUN_BUCK',
+  KAR98_MODIFIED: 'KAR98',
+});
+
+export function weaponArtSpec(weaponId) {
+  const id = WEAPON_ART_ALIAS[weaponId] || weaponId;
+  return WEAPON_BTN_ART[id] || null;
+}
+
 /** Action group family for hold / shot / reload playback. */
 export const WEAPON_POSE_FAMILY = Object.freeze({
   standard: Object.freeze({
@@ -71,9 +116,14 @@ export const WEAPON_POSE_FAMILY = Object.freeze({
 });
 
 export function weaponPoseFamily(weaponId) {
-  const art = WEAPON_BTN_ART[weaponId];
+  const art = weaponArtSpec(weaponId);
   if (!art) return null;
   return WEAPON_POSE_FAMILY[art.pose] || WEAPON_POSE_FAMILY.standard;
+}
+
+export function weaponCoreKind(weaponId) {
+  const art = weaponArtSpec(weaponId);
+  return art && art.core ? art.core : null;
 }
 
 /** @typedef {'pistol'|'smg'|'rifle'|'shotgun'|'sniper'|'laser'|'launcher'|'default'} WeaponShape */
@@ -495,9 +545,9 @@ export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
 
 /** Weapon-pivot recoil while visual Action_Shoting (arms unchanged). */
 function weaponRecoilKickPx(unit) {
-  if (!unit || unit.visualAction !== 'Shoting' || !(unit.visualActionT > 0)) {
-    return 0;
-  }
+  const act = unit && unit.visualAction;
+  if (act !== 'Shoting' && act !== 'Shoting_2') return 0;
+  if (!(unit.visualActionT > 0)) return 0;
   const pack = GAME_PACK;
   const maxKick = pack.unitVisualRecoilPx != null ? pack.unitVisualRecoilPx : 7;
   const dur =
@@ -517,32 +567,58 @@ function heldAmmo(unit, opts) {
 }
 
 /** Pyrotechnic core + RPG round variant. Other mapped guns use "base". */
-function weaponBtnVariant(weaponId, unit, opts) {
-  const spec = WEAPON_BTN_ART[weaponId];
+function weaponBtnVariant(weaponId) {
+  const spec = weaponArtSpec(weaponId);
   if (!spec) return null;
-  if (spec.rpg) {
-    const ammo = heldAmmo(unit, opts);
-    const loaded = ammo && ammo.ammoInMag > 0;
-    return loaded ? 'rpg-loaded' : 'rpg-empty';
-  }
-  if (spec.core) {
-    const def = getWeaponDef(weaponId);
-    const beam = def && def.beamDurationSec ? def.beamDurationSec : 0;
-    const cd = unit && unit.fireCooldown > 0 ? unit.fireCooldown : 0;
-    if (beam > 0 && cd > 0 && cd > (def.cooldownSec || 0)) return 'pyro-beam';
-    if (cd > 0) return 'pyro-empty';
-    return 'pyro-ready';
-  }
+  if (spec.rpg) return 'rpg';
+  if (spec.core) return 'pyro-body';
   return 'base';
+}
+
+/** 1 = that core fully visible. Eased in tickWeaponCoreVisual. */
+function coreTarget(unit, weaponId) {
+  const def = getWeaponDef(weaponId);
+  const beam = def && def.beamDurationSec ? def.beamDurationSec : 0;
+  const cool = def && def.cooldownSec ? def.cooldownSec : 0;
+  const cd = unit && unit.fireCooldown > 0 ? unit.fireCooldown : 0;
+  if (beam > 0 && cd > cool) return { black: 0, ready: 0, white: 1 };
+  if (cd > 0) return { black: 1, ready: 0, white: 0 };
+  return { black: 0, ready: 1, white: 0 };
+}
+
+const CORE_BLEND_SEC = 0.12;
+
+export function tickWeaponCoreVisual(unit, weaponId, dt) {
+  if (!unit) return;
+  if (!weaponCoreKind(weaponId)) {
+    unit._coreBlack = 0;
+    unit._coreReady = 0;
+    unit._coreWhite = 0;
+    return;
+  }
+  const target = coreTarget(unit, weaponId);
+  const k = 1 - Math.exp(-Math.max(0, dt) / CORE_BLEND_SEC);
+  if (unit._coreBlack == null) {
+    unit._coreBlack = target.black;
+    unit._coreReady = target.ready;
+    unit._coreWhite = target.white;
+    return;
+  }
+  unit._coreBlack += (target.black - unit._coreBlack) * k;
+  unit._coreReady += (target.ready - unit._coreReady) * k;
+  unit._coreWhite += (target.white - unit._coreWhite) * k;
 }
 
 function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPlayer, cache, opts) {
   const art = getWeaponArt(weaponId);
   if (!art) return;
-  const btn = WEAPON_BTN_ART[weaponId];
-  const variant = btn ? weaponBtnVariant(weaponId, unit, opts) : null;
-  const img = variant ? getWeaponBtnImage(weaponId, variant) : null;
-  const layout = variant ? getWeaponBtnLayout(weaponId, variant) : null;
+  const btn = weaponArtSpec(weaponId);
+  const variant = btn ? weaponBtnVariant(weaponId) : null;
+  const rpgLoaded =
+    btn && btn.rpg && heldAmmo(unit, opts) && heldAmmo(unit, opts).ammoInMag > 0;
+  const imgKey = btn && btn.rpg ? (rpgLoaded ? 'rpg-loaded' : 'rpg-empty') : variant;
+  const img = imgKey ? getWeaponBtnImage(weaponId, imgKey) : null;
+  const layout = imgKey ? getWeaponBtnLayout(weaponId, imgKey) : null;
   const kick = weaponRecoilKickPx(unit);
 
   if (img && layout) {
@@ -571,6 +647,7 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
       layout.w * scale,
       layout.h * scale
     );
+    if (btn && btn.core) drawWeaponCores(ctx, weaponId, unit, layout, scale);
     ctx.restore();
     return;
   }
@@ -594,6 +671,30 @@ function drawHeldWeapon(ctx, unit, aim, r, rimX, rimY, zoom, lw, weaponId, isPla
     ctx.stroke(path);
   }
   ctx.restore();
+}
+
+function drawWeaponCores(ctx, weaponId, unit, layout, scale) {
+  const layers = [
+    ['black', unit._coreBlack || 0],
+    ['ready', unit._coreReady == null ? 1 : unit._coreReady],
+    ['white', unit._coreWhite || 0],
+  ];
+  for (let i = 0; i < layers.length; i++) {
+    const alpha = layers[i][1];
+    if (alpha < 0.02) continue;
+    const core = getWeaponCoreImage(weaponId, layers[i][0]);
+    if (!core) continue;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(
+      core,
+      layout.x * scale,
+      layout.y * scale,
+      layout.w * scale,
+      layout.h * scale
+    );
+    ctx.restore();
+  }
 }
 
 function drawHeldTool(ctx, unit, aim, r, rimX, rimY, zoom, lw, toolId, isPlayer, cache) {

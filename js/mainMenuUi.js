@@ -825,7 +825,7 @@ export function createMainMenuUi(opts) {
     const btn = $('btn_Audio');
     if (!btn || !state.svgRoot || btn.dataset.audioArtReady === '1') return;
     try {
-      const res = await fetch(`${BTN_SVG_URL}?v=20261020b`, { cache: 'no-cache' });
+      const res = await fetch(`${BTN_SVG_URL}?v=20261020c`, { cache: 'no-cache' });
       if (!res.ok) return;
       const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
       const trueSrc = doc.getElementById('btn_Audio_True');

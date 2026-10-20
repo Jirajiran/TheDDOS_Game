@@ -6,6 +6,7 @@ import {
   getUnitArm1PivotWorld,
 } from './unitVisual.js';
 import { getNightOverlayStyle } from './dayCycle.js';
+import { getProjectileArt } from './weaponBtnArt.js';
 
 /**
  * World + units + projectiles + blocks + drops + place ghost.
@@ -361,6 +362,21 @@ function drawProjectiles(ctx, projectiles, zoom) {
     const sin = Math.sin(aim);
     const half = len * 0.5;
     const color = p.team === TEAM.PLAYER ? '#ffe08a' : '#ff8866';
+    if (p.weaponId === 'GRENADE_LAUNCHER') {
+      const rocket = getProjectileArt('Bullet_Rpg');
+      const lay = rocket && rocket._layout;
+      if (rocket && lay && lay.h > 0) {
+        const h = Math.max(18, (p.radius || 12) * 2.2);
+        const w = h * (lay.w / lay.h);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(aim);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(rocket, -w * 0.5, -h * 0.5, w, h);
+        ctx.restore();
+        continue;
+      }
+    }
 
     ctx.save();
     ctx.strokeStyle = color;

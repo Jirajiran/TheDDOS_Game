@@ -456,7 +456,7 @@
       "baseDamage": 55,
       "cooldownSec": 1.8,
       "spreadDeg": 8,
-      "magCapacity": 4,
+      "magCapacity": 1,
       "maxMags": 3,
       "maxDistancePath": 1.2,
       "bulletSpeedPxSec": 1126.4,
