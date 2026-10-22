@@ -2228,11 +2228,19 @@ export const GAME_PACK = Object.freeze({
    * Player can tune 0.25–2.0 in steps of 0.1.
    */
   cameraFollowZoom: 1,
+  /** Fraction of the half-view the cursor may pull the look point. */
+  cameraLeadFrac: 0.55,
+  /** Seconds for the look point to ease toward that pull. */
+  cameraLeadTweenSec: 0.5,
   cameraZoomMin: 0.25,
   cameraZoomMax: 2,
   cameraZoomStep: 0.1,
   /** Free-fly pan speed while dead (world units / sec). */
   cameraFreeFlySpeed: 520,
+  /** Place ghost stays within this many L3 cells of the player. */
+  placeMaxCells: 3,
+  /** Two taps on the aim handle inside this gap count as reload. */
+  controllerDoubleTapSec: 0.45,
   respawnBaseSec: 10,
   respawnExtraPerWave: 5,
   dropExpireSec: 180,

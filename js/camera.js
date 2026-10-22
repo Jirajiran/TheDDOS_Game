@@ -62,6 +62,53 @@ export function panCamera(camera, dx, dy, worldW, worldH, viewW, viewH) {
 }
 
 /**
+ * Ease the look point from the character toward the cursor.
+ * Screen-center cursor => pull is zero. Pull is clamped to a box around the character.
+ * Writes camera.lookX / camera.lookY in place.
+ */
+export function easeLookToward(
+  camera,
+  playerX,
+  playerY,
+  screenX,
+  screenY,
+  viewW,
+  viewH,
+  dt,
+  leadFrac,
+  tweenSec
+) {
+  const zoom = camera.zoom > 0 ? camera.zoom : 1;
+  const frac = leadFrac > 0 ? leadFrac : 0;
+  const boxX = (viewW / (2 * zoom)) * frac;
+  const boxY = (viewH / (2 * zoom)) * frac;
+  let leadX = (screenX - viewW * 0.5) / zoom;
+  let leadY = (screenY - viewH * 0.5) / zoom;
+  if (leadX > boxX) leadX = boxX;
+  else if (leadX < -boxX) leadX = -boxX;
+  if (leadY > boxY) leadY = boxY;
+  else if (leadY < -boxY) leadY = -boxY;
+
+  const goalX = playerX + leadX;
+  const goalY = playerY + leadY;
+  if (!Number.isFinite(camera.lookX) || !Number.isFinite(camera.lookY)) {
+    camera.lookX = goalX;
+    camera.lookY = goalY;
+    return;
+  }
+
+  const dx = goalX - camera.lookX;
+  const dy = goalY - camera.lookY;
+  if (dx * dx + dy * dy <= 0.01 && leadX * leadX + leadY * leadY <= 0.01) return;
+
+  const sec = tweenSec > 0 ? tweenSec : 0;
+  const step = dt > 0 ? dt : 0;
+  const k = sec > 0 ? 1 - Math.exp(-step / sec) : 1;
+  camera.lookX += dx * k;
+  camera.lookY += dy * k;
+}
+
+/**
  * Center view on a world point (snap after respawn).
  */
 export function snapCameraTo(camera, targetX, targetY, worldW, worldH, viewW, viewH) {

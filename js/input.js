@@ -8,7 +8,7 @@ import {
   makeReloadAction,
   makeSelectHotbarAction,
 } from './actions.js';
-import { GAME_PACK } from './config.js';
+import { GAME_PACK, L3_SIZE } from './config.js';
 import {
   getActiveSlot,
   isArmorSlot,
@@ -47,6 +47,13 @@ export function createInput(canvas, hooks = {}) {
   let actionBusy = false;
   let escapePressed = false;
   let chatMode = false;
+  let stickSource = null;
+  let anchorX = 0;
+  let anchorY = 0;
+
+  function stickPose() {
+    return stickSource ? stickSource() : null;
+  }
 
   function setUiBlocked(blocked) {
     uiBlocked = !!blocked;
@@ -144,12 +151,16 @@ export function createInput(canvas, hooks = {}) {
   }
 
   function onMouseMove(e) {
+    const stick = stickPose();
+    if (stick && stick.shown) return;
     const rect = canvas.getBoundingClientRect();
     mouseScreenX = e.clientX - rect.left;
     mouseScreenY = e.clientY - rect.top;
   }
 
   function onMouseDown(e) {
+    const stick = stickPose();
+    if (stick && stick.shown) return;
     if (e.button === 2) {
       if (!uiBlocked && !actionBusy && !chatMode) cancelReloadPressed = true;
       return;
@@ -212,7 +223,41 @@ export function createInput(canvas, hooks = {}) {
     return { dx, dy };
   }
 
+  function applyStickLook(viewW, viewH) {
+    const stick = stickPose();
+    if (!stick || !stick.shown) return stick;
+    const lead = GAME_PACK.cameraLeadFrac > 0 ? GAME_PACK.cameraLeadFrac : 0;
+    if (stick.aimHeld && stick.aimAmount > 0) {
+      mouseScreenX = viewW * 0.5 + stick.aimX * stick.aimAmount * (viewW * 0.5) * lead;
+      mouseScreenY = viewH * 0.5 + stick.aimY * stick.aimAmount * (viewH * 0.5) * lead;
+    } else {
+      mouseScreenX = viewW * 0.5;
+      mouseScreenY = viewH * 0.5;
+    }
+    return stick;
+  }
+
+  function currentMove(stick) {
+    if (stick && stick.shown) {
+      return { dx: stick.moveX || 0, dy: stick.moveY || 0 };
+    }
+    return moveAxis();
+  }
+
+  function stickPlaceWorld(stick) {
+    const maxR = (GAME_PACK.placeMaxCells > 0 ? GAME_PACK.placeMaxCells : 3) * L3_SIZE;
+    const useRelease = !!stick.placeRelease;
+    const amount = useRelease ? stick.placeAmount : stick.aimAmount;
+    const px = useRelease ? stick.placeX : stick.aimX;
+    const py = useRelease ? stick.placeY : stick.aimY;
+    return {
+      x: anchorX + px * amount * maxR,
+      y: anchorY + py * amount * maxR,
+    };
+  }
+
   function poll(playerUnitId, camera, _viewW, _viewH, activeHotbar, inventory) {
+    const stick = applyStickLook(_viewW, _viewH);
     const escaped = escapePressed;
     escapePressed = false;
     const craftToggle = craftTogglePressed;
@@ -231,6 +276,11 @@ export function createInput(canvas, hooks = {}) {
       healSkillPressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
+      if (stick) {
+        stick.placeRelease = false;
+        stick.reload = false;
+        stick.atRim = false;
+      }
       const zoom = camera.zoom > 0 ? camera.zoom : 1;
       return {
         actions: [],
@@ -259,12 +309,17 @@ export function createInput(canvas, hooks = {}) {
     if (uiBlocked) {
       // Panel open: MOVE + AIM (mouse facing). No fire / hotbar / place.
       // Gen must keep mouse aim — AIM after MOVE so facing is not WASD-only.
-      const { dx, dy } = moveAxis();
+      const { dx, dy } = currentMove(stick);
       const actions = [];
       if (dx !== 0 || dy !== 0) {
         actions.push(makeMoveAction(playerUnitId, dx, dy));
       }
-      actions.push(makeAimAction(playerUnitId, 0));
+      const aim = makeAimAction(
+        playerUnitId,
+        stick && stick.aimHeld ? Math.atan2(stick.aimY, stick.aimX) : 0
+      );
+      if (stick && stick.aimHeld && stick.aimAmount > 0) aim.stickAim = true;
+      actions.push(aim);
       const interactToggle = interactPressed;
       interactPressed = false;
       firePressed = false;
@@ -299,7 +354,7 @@ export function createInput(canvas, hooks = {}) {
     }
 
   const actions = [];
-  const { dx, dy } = moveAxis();
+  const { dx, dy } = currentMove(stick);
 
   // Hotbar select first in the list (sim also applies SELECT in pass-1).
   let hotbarDelta = 0;
@@ -337,17 +392,45 @@ export function createInput(canvas, hooks = {}) {
   actions.push(makeMoveAction(playerUnitId, dx, dy));
 
   const zoom = camera.zoom > 0 ? camera.zoom : 1;
-  const worldX = camera.x + mouseScreenX / zoom;
-  const worldY = camera.y + mouseScreenY / zoom;
+  let worldX = camera.x + mouseScreenX / zoom;
+  let worldY = camera.y + mouseScreenY / zoom;
+  if (stick && stick.shown && (stick.aimHeld || stick.placeRelease)) {
+    const placed = stickPlaceWorld(stick);
+    worldX = placed.x;
+    worldY = placed.y;
+  }
   const mouseWorld = { x: worldX, y: worldY };
 
-  actions.push(makeAimAction(playerUnitId, 0));
+  const aim = makeAimAction(
+    playerUnitId,
+    stick && stick.aimHeld ? Math.atan2(stick.aimY, stick.aimX) : 0
+  );
+  if (stick && stick.aimHeld && stick.aimAmount > 0) aim.stickAim = true;
+  actions.push(aim);
 
   const slot = inventory ? getActiveSlot(inventory, effectiveHotbar) : null;
 
+  if (stick && stick.shown) {
+    fireHeld = false;
+    firePressed = false;
+    if (stick.atRim && !isPlaceableSlot(slot)) {
+      fireHeld = true;
+      if (!stick.rimLatched) {
+        firePressed = true;
+        stick.rimLatched = true;
+      }
+    } else {
+      stick.rimLatched = false;
+    }
+    if (stick.reload) {
+      reloadPressed = true;
+      stick.reload = false;
+    }
+  }
+
   if (!actionBusy) {
     if (isPlaceableSlot(slot)) {
-      if (firePressed) {
+      if ((stick && stick.placeRelease) || (!stick || !stick.shown) && firePressed) {
         actions.push(makePlaceAction(playerUnitId, worldX, worldY));
       }
     } else if (isToolSlot(slot)) {
@@ -365,6 +448,7 @@ export function createInput(canvas, hooks = {}) {
     }
   }
   firePressed = false;
+  if (stick && stick.placeRelease) stick.placeRelease = false;
 
   // Fist / Heal / Interact: UI intent flags only — app dispatchUi (same pipe as SVG buttons).
   const fistToggle = fistPressed;
@@ -403,6 +487,19 @@ export function createInput(canvas, hooks = {}) {
   };
 }
 
+  function setStickSource(fn) {
+    stickSource = typeof fn === 'function' ? fn : null;
+  }
+
+  function setAimAnchor(x, y) {
+    anchorX = x;
+    anchorY = y;
+  }
+
+  function requestReload() {
+    reloadPressed = true;
+  }
+
   function destroy() {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
@@ -414,7 +511,7 @@ export function createInput(canvas, hooks = {}) {
     canvas.removeEventListener('wheel', onWheel);
   }
 
-  return { poll, destroy, keys, setUiBlocked, setActionBusy, setChatMode };
+  return { poll, destroy, keys, setUiBlocked, setActionBusy, setChatMode, setStickSource, setAimAnchor, requestReload };
 }
 
 function digitFromCode(code) {

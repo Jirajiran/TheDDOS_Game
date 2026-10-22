@@ -367,10 +367,24 @@ export function updatePlaceGhost(match, mouseWorld) {
 
   const fw = blockDef.footprint.w;
   const fh = blockDef.footprint.h;
-  const snapped = snapWorldToL3Origin(mouseWorld.x, mouseWorld.y);
+  const player = getPlayerUnit(match);
+  let aimX = mouseWorld.x;
+  let aimY = mouseWorld.y;
+  if (player) {
+    const cells = GAME_PACK.placeMaxCells > 0 ? GAME_PACK.placeMaxCells : 3;
+    const maxR = cells * L3_SIZE;
+    const dx = aimX - player.x;
+    const dy = aimY - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > maxR && dist > 0) {
+      const scale = maxR / dist;
+      aimX = player.x + dx * scale;
+      aimY = player.y + dy * scale;
+    }
+  }
+  const snapped = snapWorldToL3Origin(aimX, aimY);
   const ox = snapped.gx - Math.floor(fw / 2);
   const oy = snapped.gy - Math.floor(fh / 2);
-  const player = getPlayerUnit(match);
   const standing = player
     ? unitStandingCells(player.x, player.y, player.radius)
     : null;
@@ -484,7 +498,10 @@ function applyActions(match, actions, mouseWorld, dt) {
         unit.targetFacingRad = Math.atan2(a.dy, a.dx);
       }
     } else if (a.type === ActionType.AIM) {
-      if (unit.role === 'player' && mouseWorld) {
+      if (a.stickAim && typeof a.aimRad === 'number') {
+        unit.targetAimRad = a.aimRad;
+        unit.targetFacingRad = a.aimRad;
+      } else if (unit.role === 'player' && mouseWorld) {
         unit.targetAimRad = Math.atan2(mouseWorld.y - unit.y, mouseWorld.x - unit.x);
         unit.targetFacingRad = unit.targetAimRad;
       } else if (typeof a.aimRad === 'number') {

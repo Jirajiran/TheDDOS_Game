@@ -15,7 +15,7 @@ import {
   getItemDef,
   getWeaponDef,
 } from './config.js';
-import { createCamera, followPoint, panCamera, snapCameraTo, clampZoom } from './camera.js';
+import { createCamera, easeLookToward, followPoint, panCamera, snapCameraTo, clampZoom } from './camera.js';
 import { getWeaponIconHref } from './weaponBtnArt.js';
 import {
   getNightCameraZoomMul,
@@ -526,7 +526,15 @@ export function createApp(dom) {
       onSettingClose: () => dispatchUi('settingClose'),
       onLeaveGame: () => dispatchUi('leaveGame'),
       onAudioToggle: () => dispatchUi('audioToggle'),
-      onInteractive: () => dispatchUi('interact'),
+      onInteractive: () => {
+        const match = state.match;
+        const slot = match && getActiveSlot(match.inventory, match.activeHotbar);
+        if (isWeaponSlot(slot) && state.input && state.input.requestReload) {
+          state.input.requestReload();
+          return;
+        }
+        dispatchUi('interact');
+      },
       onGenTake: (resId) => dispatchUi('genTake', resId),
       onGenClose: () => dispatchUi('genClose'),
       onCastFist: () => dispatchUi('castFist'),
@@ -547,6 +555,9 @@ export function createApp(dom) {
         }
       },
     });
+    if (state.input && state.input.setStickSource) {
+      state.input.setStickSource(() => (playerUi ? playerUi.getStickPose() : null));
+    }
   }
 
   function openNearbyInteract() {
@@ -1218,7 +1229,7 @@ export function createApp(dom) {
         console.error('[TheDDOS] updatePlaying failed (loop kept alive)', err);
       }
       try {
-        drawPlaying();
+        drawPlaying({ dt });
       } catch (err) {
         console.error('[TheDDOS] drawPlaying failed (loop kept alive)', err);
       }
@@ -1247,6 +1258,10 @@ export function createApp(dom) {
       const cssW = canvas.clientWidth;
       const cssH = canvas.clientHeight;
       const playerId = match.playerUnitId >= 0 ? match.playerUnitId : 0;
+      const anchor = getPlayerUnit(match);
+      if (anchor && state.input.setAimAnchor) {
+        state.input.setAimAnchor(anchor.x, anchor.y);
+      }
       const polled = state.input.poll(
         playerId,
         state.camera,
@@ -1255,6 +1270,8 @@ export function createApp(dom) {
         match.activeHotbar,
         match.inventory
       );
+      state.mouseScreenX = polled.mouseScreenX;
+      state.mouseScreenY = polled.mouseScreenY;
 
       if (polled.escapePressed) {
         if (playerUi && playerUi.isChatOpen && playerUi.isChatOpen()) {
@@ -1388,7 +1405,8 @@ export function createApp(dom) {
       best &&
       ((best.isGen && best.genRate) || best.isDefeatCondition)
     );
-    playerUi.setInteractiveVisible(nearGenOrBase);
+    const slot = getActiveSlot(match.inventory, match.activeHotbar);
+    playerUi.setInteractiveVisible(isWeaponSlot(slot) || nearGenOrBase);
 
     // Gen panel = UI-only: out of range closes panel; never retarget / steer player.
     if (playerUi.isGenOpen && playerUi.isGenOpen() && !nearGenOrBase) {
@@ -1631,11 +1649,23 @@ export function createApp(dom) {
         panCamera(state.camera, 0, 0, match.world.worldW, match.world.worldH, cssW, cssH);
       } else {
         const player = getPlayerUnit(match);
+        const anchorX = player
+          ? player.x
+          : match.base
+            ? match.base.x + match.base.w / 2
+            : match.world.worldW / 2;
+        const anchorY = player
+          ? player.y
+          : match.base
+            ? match.base.y + match.base.h / 2
+            : match.world.worldH / 2;
         if (match.cameraSnapPending && player) {
+          state.camera.lookX = anchorX;
+          state.camera.lookY = anchorY;
           snapCameraTo(
             state.camera,
-            player.x,
-            player.y,
+            anchorX,
+            anchorY,
             match.world.worldW,
             match.world.worldH,
             cssW,
@@ -1644,20 +1674,23 @@ export function createApp(dom) {
           match.cameraSnapPending = false;
           match._freeFlyBooted = false;
         } else {
-          const followX = player
-            ? player.x
-            : match.base
-              ? match.base.x + match.base.w / 2
-              : match.world.worldW / 2;
-          const followY = player
-            ? player.y
-            : match.base
-              ? match.base.y + match.base.h / 2
-              : match.world.worldH / 2;
+          const dt = opts.dt > 0 ? opts.dt : 0;
+          easeLookToward(
+            state.camera,
+            anchorX,
+            anchorY,
+            state.mouseScreenX || 0,
+            state.mouseScreenY || 0,
+            cssW,
+            cssH,
+            dt,
+            GAME_PACK.cameraLeadFrac,
+            GAME_PACK.cameraLeadTweenSec
+          );
           followPoint(
             state.camera,
-            followX,
-            followY,
+            state.camera.lookX,
+            state.camera.lookY,
             match.world.worldW,
             match.world.worldH,
             cssW,

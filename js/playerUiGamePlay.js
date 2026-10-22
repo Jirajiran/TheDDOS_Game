@@ -5,6 +5,7 @@
 
 import { getItemDef } from './config.js';
 import { formatClockFromSim, getDayBarPhase } from './dayCycle.js';
+import { createMobileController } from './mobileController.js';
 import { getWeaponIconHref, getWeaponIconLayout } from './weaponBtnArt.js';
 
 const ART_W = 1280;
@@ -145,6 +146,8 @@ export function createPlayerUiGamePlay(opts) {
   const state = {
     ready: false,
     svgRoot: null,
+    stage: null,
+    stick: null,
     layoutBound: false,
     anchorBase: null,
     craftOpen: false,
@@ -558,24 +561,17 @@ export function createPlayerUiGamePlay(opts) {
     const rect = mount.getBoundingClientRect();
     const mw = rect.width || 1;
     const mh = rect.height || 1;
-    const aspect = mw / mh;
-    const artAspect = ART_W / ART_H;
-    let vbW;
-    let vbH;
-    let vbX;
-    let vbY;
-    if (aspect > artAspect) {
-      vbH = ART_H;
-      vbW = ART_H * aspect;
-      vbX = (ART_W - vbW) / 2;
-      vbY = 0;
-    } else {
-      vbW = ART_W;
-      vbH = ART_W / aspect;
-      vbX = 0;
-      vbY = (ART_H - vbH) / 2;
+    const s = Math.min(1, mw / ART_W, mh / ART_H);
+    const vbW = mw / s;
+    const vbH = mh / s;
+    const vbX = (ART_W - vbW) / 2;
+    const vbY = (ART_H - vbH) / 2;
+    const value = `${vbX} ${vbY} ${vbW} ${vbH}`;
+    const sheets = state.stage ? state.stage.querySelectorAll('svg') : [svg];
+    for (let i = 0; i < sheets.length; i++) {
+      sheets[i].setAttribute('viewBox', value);
+      sheets[i].setAttribute('preserveAspectRatio', 'xMidYMid meet');
     }
-    svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
     return { x: vbX, y: vbY, w: vbW, h: vbH };
   }
 
@@ -639,6 +635,15 @@ export function createPlayerUiGamePlay(opts) {
         f: chosen.vf + (base.f - chosen.f),
       });
     });
+  }
+
+  function ensureStage() {
+    if (state.stage && state.stage.parentNode) return state.stage;
+    const stage = document.createElement('div');
+    stage.className = 'player-ui-stage';
+    mount.appendChild(stage);
+    state.stage = stage;
+    return stage;
   }
 
   function layout() {
@@ -1657,17 +1662,19 @@ export function createPlayerUiGamePlay(opts) {
 
   async function mountSvg() {
     if (!mount) return false;
+    const stage = ensureStage();
     const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261021b`);
     if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
-    mount.innerHTML = await res.text();
+    stage.innerHTML = await res.text();
     state.svgRoot =
-      mount.querySelector('svg') ||
-      (mount.firstElementChild && mount.firstElementChild.tagName === 'svg'
-        ? mount.firstElementChild
+      stage.querySelector('svg') ||
+      (stage.firstElementChild && stage.firstElementChild.tagName === 'svg'
+        ? stage.firstElementChild
         : null);
     if (!state.svgRoot) throw new Error('PlayerUI svg root missing');
     state.svgRoot.setAttribute('width', '100%');
     state.svgRoot.setAttribute('height', '100%');
+    state.svgRoot.setAttribute('viewBox', `0 0 ${ART_W} ${ART_H}`);
     state.svgRoot.style.display = 'block';
     state.svgRoot.style.width = '100%';
     state.svgRoot.style.height = '100%';
@@ -1765,7 +1772,26 @@ export function createPlayerUiGamePlay(opts) {
     bindExitPressArt($('Btn_Press_false_Exit'));
     bindLayoutListeners();
     layout();
+    await mountController();
     return true;
+  }
+
+  async function mountController() {
+    const coarse = window.matchMedia('(pointer: coarse)');
+    const apply = async () => {
+      if (!coarse.matches) {
+        if (state.stick) state.stick.setShown(false);
+        return;
+      }
+      if (!state.stick && state.stage) {
+        state.stick = await createMobileController(state.stage);
+      }
+      if (state.stick) state.stick.setShown(true);
+      layout();
+    };
+    if (coarse.addEventListener) coarse.addEventListener('change', () => { apply(); });
+    else if (coarse.addListener) coarse.addListener(() => { apply(); });
+    await apply();
   }
 
   return {
@@ -1794,5 +1820,6 @@ export function createPlayerUiGamePlay(opts) {
     isSettingOpen: () => state.settingOpen,
     isGenOpen: () => state.genOpen,
     isEndOpen: () => state.endOpen,
+    getStickPose: () => (state.stick ? state.stick.pose : null),
   };
 }
