@@ -590,6 +590,7 @@ export function createPlayerUiGamePlay(opts) {
     captureAnchorBases();
     const vb = applyViewBox();
     if (!vb || !state.anchorBase) return;
+    const coarse = window.matchMedia('(pointer: coarse)').matches;
 
     const left = vb.x - ART_CX;
     const right = vb.x + vb.w - ART_CX;
@@ -607,6 +608,15 @@ export function createPlayerUiGamePlay(opts) {
       const el = $(id);
       if (!el || !base) return;
       const preset = ANCHOR_PRESETS[id];
+      if (coarse && id === 'Anchor_Top_Left_2') {
+        const shift = genPanelCenter(el);
+        setMatrix(el, {
+          ...base,
+          e: shift ? shift.e : 0,
+          f: shift ? shift.f : 0,
+        });
+        return;
+      }
       if (preset && preset.kind === 'center') {
         if (id === 'Anchor_Center_Top' || id === 'Anchor_Center_Bottom') {
           const artF = preset.artF;
@@ -629,12 +639,30 @@ export function createPlayerUiGamePlay(opts) {
         }
       }
       if (!chosen) return;
-      setMatrix(el, {
-        ...base,
-        e: chosen.ve + (base.e - chosen.e),
-        f: chosen.vf + (base.f - chosen.f),
-      });
+      let e = chosen.ve + (base.e - chosen.e);
+      let f = chosen.vf + (base.f - chosen.f);
+      if (coarse) {
+        if (chosen.ve < 0) e = Math.max(e, chosen.ve);
+        else if (chosen.ve > 0) e = Math.min(e, chosen.ve);
+        if (chosen.vf < 0) f = Math.max(f, chosen.vf);
+        else if (chosen.vf > 0) f = Math.min(f, chosen.vf);
+      }
+      setMatrix(el, { ...base, e, f });
     });
+  }
+
+  function genPanelCenter(el) {
+    if (state.genCenter) return state.genCenter;
+    const hidden = el.style.display === 'none';
+    if (hidden) el.style.display = '';
+    const box = el.getBBox();
+    if (hidden) el.style.display = 'none';
+    if (!box || box.width <= 0 || box.height <= 0) return null;
+    state.genCenter = {
+      e: -(box.x + box.width / 2),
+      f: -(box.y + box.height / 2),
+    };
+    return state.genCenter;
   }
 
   function ensureStage() {
@@ -659,6 +687,9 @@ export function createPlayerUiGamePlay(opts) {
       const ro = new ResizeObserver(() => layout());
       ro.observe(mount);
     }
+    const coarse = window.matchMedia('(pointer: coarse)');
+    if (coarse.addEventListener) coarse.addEventListener('change', layout);
+    else if (coarse.addListener) coarse.addListener(layout);
   }
 
   function syncModals() {

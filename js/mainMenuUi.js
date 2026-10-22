@@ -555,6 +555,11 @@ export function createMainMenuUi(opts) {
   function applyMenuViewBox() {
     const svg = state.svgRoot;
     if (!svg || !mount) return null;
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      svg.setAttribute('viewBox', `0 0 ${MENU_ART_W} ${MENU_ART_H}`);
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      return { x: 0, y: 0, w: MENU_ART_W, h: MENU_ART_H };
+    }
     const rect = mount.getBoundingClientRect();
     const mw = rect.width || 1;
     const mh = rect.height || 1;
@@ -598,6 +603,13 @@ export function createMainMenuUi(opts) {
     captureAnchorBases();
     const vb = applyMenuViewBox();
     if (!vb || !state.anchorBase) return;
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      state.anchorBase.forEach((base, id) => {
+        const el = $(id);
+        if (el && base) setMatrix(el, base);
+      });
+      return;
+    }
 
     const left = vb.x - MENU_ART_CX;
     const right = vb.x + vb.w - MENU_ART_CX;
@@ -1063,6 +1075,9 @@ export function createMainMenuUi(opts) {
       const ro = new ResizeObserver(() => layoutInputs());
       ro.observe(mount);
     }
+    const coarse = window.matchMedia('(pointer: coarse)');
+    if (coarse.addEventListener) coarse.addEventListener('change', layoutInputs);
+    else if (coarse.addListener) coarse.addListener(layoutInputs);
   }
 
   function overlayRootEl() {
