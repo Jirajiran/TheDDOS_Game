@@ -5,16 +5,12 @@
  * Stages stay single-job; Mediator still picks Stage from Goals/Events.
  */
 
-import { L1_SIZE, L3_SIZE, TEAM } from '../config.js';
+import { L1_SIZE, L3_SIZE, TEAM, getBalancePack } from '../config.js';
 import {
   applyLocalGeneralStub,
-  isUnitInsideSector,
-  resolveObstacleOnPath,
-} from '../general.js';
+} from './general.js';
 import {
   ensureBlackboard,
-  pushAiEvent,
-  reserveCombatTarget,
   writePathGoal,
 } from './blackboard.js';
 
@@ -38,6 +34,94 @@ export const DEFAULT_LOCAL_PATH = Object.freeze({
  * Apply Local layer for one unit after General wrote pathGoal/pivots.
  * @returns {{ goal, attackBlock, perception, steeringUsed }}
  */
+/**
+ * One forward ray inside the Path the unit stands on.
+ * A hit pushes one deeper point on a single side (LIFO). Quota resets on a new Path.
+ */
+function applyChunkDodge(match, unit, goal) {
+  const world = match.world;
+  const straight = goal || { x: unit.x, y: unit.y, radius: 80 };
+  if (!world || !world.paths) {
+    return { goal: straight, blocked: false, blocker: null, dodging: false };
+  }
+  const col = Math.floor(unit.x / world.pathSize);
+  const row = Math.floor(unit.y / world.pathSize);
+  const n = world.pathGridN;
+  if (col < 0 || row < 0 || col >= n || row >= n) {
+    return { goal: straight, blocked: false, blocker: null, dodging: false };
+  }
+  const path = world.paths[row * n + col];
+  const quotaMax = Math.max(0, getBalancePack().dodgeQuota | 0);
+  if (unit.dodgePathIndex !== path.index) {
+    unit.dodgePathIndex = path.index;
+    unit.dodgeStack = [];
+    unit.dodgeQuotaLeft = quotaMax;
+  }
+  if (!unit.dodgeStack) unit.dodgeStack = [];
+  if (unit.dodgeQuotaLeft == null) unit.dodgeQuotaLeft = quotaMax;
+
+  const stack = unit.dodgeStack;
+  const arrive = 48;
+  while (stack.length) {
+    const top = stack[stack.length - 1];
+    if (Math.hypot(top.x - unit.x, top.y - unit.y) <= arrive) {
+      stack.pop();
+      continue;
+    }
+    break;
+  }
+
+  const target = stack.length ? stack[stack.length - 1] : straight;
+  const aimX = target.x - unit.x;
+  const aimY = target.y - unit.y;
+  const aim = Math.atan2(aimY, aimX);
+  const dist = Math.hypot(aimX, aimY);
+  const range = Math.max(32, Math.min(dist || path.w * 0.5, path.w * 0.5));
+  const hit = castRay(match, unit.x, unit.y, aim, range);
+  const inside =
+    hit.hit &&
+    hit.x >= path.x &&
+    hit.y >= path.y &&
+    hit.x <= path.x + path.w &&
+    hit.y <= path.y + path.h;
+  if (inside && unit.dodgeQuotaLeft > 0) {
+    const side = unit.id % 2 === 0 ? 1 : -1;
+    const depth = quotaMax - unit.dodgeQuotaLeft + 1;
+    const step = Math.min(path.w, path.h) * 0.12;
+    const margin = 32;
+    let x = hit.x + -Math.sin(aim) * side * step * depth;
+    let y = hit.y + Math.cos(aim) * side * step * depth;
+    x = Math.max(path.x + margin, Math.min(path.x + path.w - margin, x));
+    y = Math.max(path.y + margin, Math.min(path.y + path.h - margin, y));
+    const top = stack[stack.length - 1];
+    if (!top || Math.hypot(top.x - x, top.y - y) > 24) {
+      stack.push({ x, y });
+      unit.dodgeQuotaLeft -= 1;
+    }
+    return {
+      goal: { x, y, radius: straight.radius },
+      blocked: true,
+      blocker: hit.block,
+      dodging: true,
+    };
+  }
+  if (stack.length) {
+    const top = stack[stack.length - 1];
+    return {
+      goal: { x: top.x, y: top.y, radius: straight.radius },
+      blocked: !!hit.hit,
+      blocker: hit.block,
+      dodging: true,
+    };
+  }
+  return {
+    goal: straight,
+    blocked: !!hit.hit,
+    blocker: hit.block,
+    dodging: false,
+  };
+}
+
 export function applyLocalPathLayer(match, unit, generalGoal, opts = {}) {
   const cfg = opts.config || DEFAULT_LOCAL_PATH;
   const bb = ensureBlackboard(unit);
@@ -57,82 +141,26 @@ export function applyLocalPathLayer(match, unit, generalGoal, opts = {}) {
     if (localGoal && unit.localGeneral) goal = localGoal;
   }
 
-  const facing = Math.atan2(goal.y - unit.y, goal.x - unit.x);
-  const perception = castRaycastFan(match, unit, facing, cfg);
+  const dodge = applyChunkDodge(match, unit, goal);
+  goal = dodge.goal;
   bb.perception = {
-    fanLines: perception.lineCount,
-    blocked: perception.blocked,
-    rearHit: perception.rearHit,
-    blockerId: perception.blocker ? perception.blocker.id : -1,
+    fanLines: 1,
+    blocked: dodge.blocked,
+    rearHit: false,
+    blockerId: dodge.blocker ? dodge.blocker.id : -1,
   };
-
-  let attackBlock = null;
-  const budgetLeft = getSteeringBudgetLeft(match, unit);
-
-  if (perception.blocked && perception.blocker) {
-    if (budgetLeft > 0) {
-      // Spend one steering point for a deterministic lateral dodge.
-      consumeSteeringBudget(match, unit, 1);
-      const dodge = buildDodgeGoal(unit, goal, perception.blocker, cfg);
-      goal = dodge;
-      bb.flags.LOCAL_DODGE = true;
-    } else {
-      // Budget exhausted → eliminate blocker via Event/Blackboard (not stage hop).
-      attackBlock = perception.blocker;
-      unit.attackBlockId = attackBlock.id;
-      bb.flags.STEERING_EXHAUSTED = true;
-      pushAiEvent(unit, 'PATH_BLOCKED', {
-        blockId: attackBlock.id,
-        reason: 'steering_budget',
-      });
-      reserveCombatTarget(unit, 'block', attackBlock.id, 2.5);
-      bb.priorityScratch.ELIMINATE_TARGET = attackBlock.id;
-    }
-  } else {
-    bb.flags.LOCAL_DODGE = false;
-    bb.flags.STEERING_EXHAUSTED = false;
-  }
-
-  // Fallback sample along segment if fan missed thin blockers.
-  if (!attackBlock && !bb.flags.LOCAL_DODGE && !bb.flags.STEERING_EXHAUSTED) {
-    const resolved = resolveObstacleOnPath(match, unit, goal);
-    if (resolved.attackBlock) {
-      const rem = getSteeringBudgetLeft(match, unit);
-      if (rem > 0) {
-        consumeSteeringBudget(match, unit, 1);
-        goal = resolved.goal;
-        bb.flags.LOCAL_DODGE = true;
-      } else {
-        attackBlock = resolved.attackBlock;
-        unit.attackBlockId = attackBlock.id;
-        bb.flags.STEERING_EXHAUSTED = true;
-        pushAiEvent(unit, 'PATH_BLOCKED', {
-          blockId: attackBlock.id,
-          reason: 'steering_budget',
-        });
-        reserveCombatTarget(unit, 'block', attackBlock.id, 2.5);
-        bb.priorityScratch.ELIMINATE_TARGET = attackBlock.id;
-      }
-    } else {
-      goal = resolved.goal;
-    }
-  }
-
-  // Rear Pi: flag threat so Events/Mediator can arm engage without stage calls.
-  if (perception.rearHit) {
-    bb.flags.REAR_THREAT = true;
-  } else {
-    bb.flags.REAR_THREAT = false;
-  }
+  bb.flags.LOCAL_DODGE = dodge.dodging;
+  bb.flags.STEERING_EXHAUSTED = false;
+  bb.flags.REAR_THREAT = false;
 
   writePathGoal(unit, goal.x, goal.y, goal.radius != null ? goal.radius : 80);
-  bb.steeringBudgetLeft = getSteeringBudgetLeft(match, unit);
-  bb.localAdjusted = !!(bb.flags.LOCAL_DODGE || unit.localGeneral);
+  bb.steeringBudgetLeft = unit.dodgeQuotaLeft != null ? unit.dodgeQuotaLeft : 0;
+  bb.localAdjusted = !!(dodge.dodging || unit.localGeneral);
 
   return {
     goal,
-    attackBlock,
-    perception,
+    attackBlock: null,
+    perception: bb.perception,
     steeringUsed: (unit.steeringUsed | 0),
   };
 }
@@ -337,5 +365,3 @@ export function resetGroupSteering(group, maxBudget = DEFAULT_LOCAL_PATH.steerin
   group.steeringBudgetMax = maxBudget;
   group.steeringUsed = 0;
 }
-
-export { isUnitInsideSector };

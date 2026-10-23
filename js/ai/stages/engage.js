@@ -4,12 +4,12 @@
  * optionally scaled by archetype preferredRange mult — never a separate L3 band.
  */
 
-import { ActionType } from '../../actions.js';
+import { ActionType } from '../../player/actions.js';
 import {
   getPreferredStandoffPx,
   getWeaponMaxRangePx,
 } from '../../config.js';
-import { getAiFireDecisionRangePx } from '../../dayCycle.js';
+import { getAiFireDecisionRangePx } from '../../view/dayCycle.js';
 
 export function runEngage(ctx) {
   const {

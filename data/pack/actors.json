@@ -5,8 +5,11 @@
     "PLAYER": {
       "id": "PLAYER",
       "role": "player",
-      "senseRadiusPath": 0.7,
-      "activeSkills": ["FIST", "SELF_HEAL"]
+      "senseRadiusPath": 1,
+      "activeSkills": [
+        "FIST",
+        "SELF_HEAL"
+      ]
     },
     "ENEMY_DEFAULT": {
       "id": "ENEMY_DEFAULT",

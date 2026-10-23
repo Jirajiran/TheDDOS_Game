@@ -8,7 +8,7 @@ import {
   getWeaponDef,
   getWeaponMaxRangePx,
 } from '../config.js';
-import { getAiFireDecisionRangePx } from '../dayCycle.js';
+import { getAiFireDecisionRangePx } from '../view/dayCycle.js';
 import {
   Goal,
   addEventBoost,

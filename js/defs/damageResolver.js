@@ -7,39 +7,17 @@ import { getArmorTypes } from './registry.js';
 
 let _matrix = Object.create(null);
 
-const FALLBACK_MATRIX = Object.freeze({
-  DEFAULT: Object.freeze({
-    DEFAULT: 1.0,
-    BULLET: 1.25,
-    EXPLOSION: 0.9,
-    LAZER: 0.75,
-  }),
-  BULLET: Object.freeze({
-    DEFAULT: 1.25,
-    BULLET: 0.75,
-    EXPLOSION: 0.85,
-    LAZER: 0.5,
-  }),
-  EXPLOSION: Object.freeze({
-    DEFAULT: 1.4,
-    BULLET: 0.9,
-    EXPLOSION: 0.7,
-    LAZER: 0.8,
-  }),
-  LAZER: Object.freeze({
-    DEFAULT: 1.6,
-    BULLET: 1.4,
-    EXPLOSION: 1.1,
-    LAZER: 0.6,
-  }),
-});
+/** Live table. Empty until installDamageMatrix (data/pack/damage_matrix.json). */
+export let DAMAGE_MULT_TABLE = Object.freeze(Object.create(null));
 
 /**
  * @param {object} matrixDoc — { matrix: { DAMAGE: { ARMOR: number } } } or bare table
  */
 export function installDamageMatrix(matrixDoc) {
-  const src =
-    (matrixDoc && matrixDoc.matrix) || matrixDoc || FALLBACK_MATRIX;
+  const src = (matrixDoc && matrixDoc.matrix) || matrixDoc;
+  if (!src || typeof src !== 'object') {
+    throw new Error('Damage matrix not loaded (data/pack/damage_matrix.json)');
+  }
   const next = Object.create(null);
   const rows = Object.keys(src);
   for (let i = 0; i < rows.length; i++) {
@@ -53,6 +31,7 @@ export function installDamageMatrix(matrixDoc) {
     next[dt] = Object.freeze(frozenRow);
   }
   _matrix = Object.freeze(next);
+  DAMAGE_MULT_TABLE = _matrix;
 }
 
 export function seedDamageMatrixFromTable(table) {
@@ -60,7 +39,10 @@ export function seedDamageMatrixFromTable(table) {
 }
 
 export function getDamageMult(damageType, armorType) {
-  const row = _matrix[damageType] || _matrix.DEFAULT || FALLBACK_MATRIX.DEFAULT;
+  const row = _matrix[damageType] || _matrix.DEFAULT;
+  if (!row) {
+    throw new Error('Damage matrix not loaded (data/pack/damage_matrix.json)');
+  }
   const mult = row[armorType];
   return typeof mult === 'number' ? mult : 1;
 }

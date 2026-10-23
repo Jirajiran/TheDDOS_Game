@@ -3,7 +3,7 @@
  * Heavy graph loads via dynamic import().
  */
 
-const CACHE_BUST = '20261021c';
+const CACHE_BUST = '20261023f';
 
 function setBootUi(pct, _label) {
   const fill = document.getElementById('loading-main-fill');
@@ -28,20 +28,13 @@ function showMainLoading() {
 
 function failBootUi(err) {
   window.__theDdosPhase = 'failed';
-  const main = document.getElementById('loading-main');
-  const gp = document.getElementById('loading-gameplay');
-  if (main) main.hidden = true;
-  if (gp) gp.hidden = true;
-  const fail = document.getElementById('loading-boot-panel');
-  if (fail) fail.hidden = false;
-  const title = document.getElementById('loading-title');
-  const text = document.getElementById('progress-label');
-  if (title) {
-    title.textContent = 'Boot failed';
-    title.dataset.locked = '1';
-  }
+  showMainLoading();
   const msg = err && err.message ? err.message : String(err);
-  if (text) text.textContent = `${msg} — Ctrl+Shift+R / check Console`;
+  const status = document.getElementById('loading-main-status');
+  if (status) {
+    status.hidden = false;
+    status.textContent = `${msg} — reload the page`;
+  }
   console.error('[TheDDOS] boot failed', err);
 }
 

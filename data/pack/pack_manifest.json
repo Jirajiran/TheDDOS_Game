@@ -14,6 +14,9 @@
     "craft": "craft.json",
     "actors": "actors.json",
     "day": "day.json",
-    "rules": "rules.json"
+    "rules": "rules.json",
+    "gamePack": "game_pack.json",
+    "ai": "ai.json",
+    "audio": "audio.json"
   }
 }

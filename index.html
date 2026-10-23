@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TheDDOS — Local Host</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="stylesheet" href="css/main.css?v=20261021c" />
+    <link rel="stylesheet" href="css/main.css?v=20261022d" />
   </head>
   <body>
     <div id="app">
@@ -67,6 +67,7 @@
             <div class="loading-bar loading-bar--menu" role="progressbar" aria-valuemin="0" aria-valuemax="100">
               <div id="loading-main-fill" class="loading-bar__fill"></div>
             </div>
+            <p id="loading-main-status" class="loading-view__status" hidden></p>
           </div>
         </div>
         <div id="loading-gameplay" class="loading-view loading-view--gameplay" hidden aria-label="Match loading">
@@ -92,11 +93,12 @@
               <div class="loading-bar loading-bar--gp" role="progressbar" aria-valuemin="0" aria-valuemax="100">
                 <div id="loading-gp-fill" class="loading-bar__fill"></div>
               </div>
+              <p id="loading-gp-status" class="loading-view__status" hidden></p>
               <p id="loading-gp-ready" class="loading-gp__ready" hidden>Click or tap anywhere to start</p>
             </div>
           </div>
         </div>
-        <!-- Fail-only stub (legacy ids kept for error path) -->
+        <!-- Hidden legacy progress nodes. Errors stay on the visible loading view. -->
         <div id="loading-boot-panel" class="loading-panel" hidden>
           <h2 id="loading-title">Boot failed</h2>
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
@@ -180,13 +182,12 @@
                 's';
             }
             /* Only warn after long import (sim.js can be large on cold cache). */
-            if (ticks >= 45 && phase === 'import-app') {
+              if (ticks >= 45 && phase === 'import-app') {
               clearInterval(timer);
-              if (title && title.dataset.locked !== '1') {
-                title.textContent = 'Import slow';
-              }
-              if (label) {
-                label.textContent =
+              var status = document.getElementById('loading-main-status');
+              if (status) {
+                status.hidden = false;
+                status.textContent =
                   'app.js/sim still loading after 45s — check Network for red JS, then Ctrl+Shift+R';
               }
               console.error('[TheDDOS] slow import-app after 45s');
@@ -196,9 +197,10 @@
           /* main.js never started (script tag failed). */
           if (ticks >= 8 && (phase === 'html' || !phase)) {
             clearInterval(timer);
-            if (title) title.textContent = 'Entry missing';
-            if (label) {
-              label.textContent =
+            var missing = document.getElementById('loading-main-status');
+            if (missing) {
+              missing.hidden = false;
+              missing.textContent =
                 'js/main.js did not run — open via play-local.bat HTTP, Disable cache, Ctrl+Shift+R';
             }
             console.error('[TheDDOS] main.js never set __theDdosPhase');
@@ -206,6 +208,6 @@
         }, 1000);
       })();
     </script>
-    <script type="module" src="js/main.js?v=20261021c"></script>
+    <script type="module" src="js/main.js?v=20261023f"></script>
   </body>
 </html>

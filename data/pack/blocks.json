@@ -31,7 +31,7 @@
       },
       "maxHp": 1000,
       "weaponId": "WEAPON_50CAL",
-      "detectRadius": 1178,
+      "detectRadius": 768,
       "generatorList": [
         {
           "itemId": "WOOD",
@@ -291,7 +291,7 @@
       },
       "maxHp": 350,
       "weaponId": "M1991",
-      "detectRadius": 870
+      "detectRadius": 819
     },
     "TURRET_M1911": {
       "kind": "PLACEABLE",
@@ -323,7 +323,7 @@
       },
       "maxHp": 350,
       "weaponId": "M1991",
-      "detectRadius": 870
+      "detectRadius": 819
     },
     "TURRET_50CAL": {
       "kind": "PLACEABLE",
@@ -355,7 +355,7 @@
       },
       "maxHp": 450,
       "weaponId": "WEAPON_50CAL",
-      "detectRadius": 1178
+      "detectRadius": 1024
     },
     "TURRET_SMG": {
       "kind": "PLACEABLE",
@@ -419,7 +419,7 @@
       },
       "maxHp": 420,
       "weaponId": "AK47",
-      "detectRadius": 922
+      "detectRadius": 973
     },
     "TURRET_LAZER": {
       "kind": "PLACEABLE",
@@ -451,7 +451,7 @@
       },
       "maxHp": 500,
       "weaponId": "LAZER",
-      "detectRadius": 1229
+      "detectRadius": 1126
     },
     "HEAL_BLOCK": {
       "kind": "PLACEABLE",

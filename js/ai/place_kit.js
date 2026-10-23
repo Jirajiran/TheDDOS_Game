@@ -7,7 +7,7 @@ import { GAME_PACK } from '../config.js';
 import {
   createEmptyInventory,
   makeSlotFromItem,
-} from '../inventory.js';
+} from '../player/inventory.js';
 import {
   ensureBlackboard,
   writePlaceIntent,

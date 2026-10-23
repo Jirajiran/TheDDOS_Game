@@ -1,23 +1,13 @@
 /**
- * Load Nozone definition pack from data/pack/ (HTTP). Falls back to in-memory seed.
+ * Load Nozone definition pack from data/pack/ (HTTP).
+ * Registries stay empty until every file loads. Lookups are synchronous after that.
  */
 
-import {
-  installPackData,
-  seedWeaponsFromRegistry,
-  seedBlocksFromRegistry,
-  seedItemsFromRegistry,
-  seedSkillsFromRegistry,
-  seedArchetypesFromRegistries,
-  seedWeaponUpgradesFromRegistry,
-  seedCraftFromData,
-  seedActorsFromRegistry,
-  isDefsReady,
-} from './registry.js';
-import {
-  installDamageMatrix,
-  seedDamageMatrixFromTable,
-} from './damageResolver.js';
+import { installPackData, isDefsReady } from './registry.js';
+import { installDamageMatrix } from './damageResolver.js';
+import { installGamePack } from './gamePack.js';
+import { installAiPack } from './aiPack.js';
+import { installAudioPack } from '../audio/sfx.js';
 
 export const PACK_BASE = 'data/pack/';
 
@@ -27,31 +17,12 @@ async function fetchJson(url) {
   return res.json();
 }
 
-function applySeeds(opts) {
-  if (opts.seedWeapons) seedWeaponsFromRegistry(opts.seedWeapons);
-  if (opts.seedBlocks) seedBlocksFromRegistry(opts.seedBlocks);
-  if (opts.seedItems) seedItemsFromRegistry(opts.seedItems);
-  if (opts.seedSkills) seedSkillsFromRegistry(opts.seedSkills);
-  if (opts.seedArchetypes) {
-    seedArchetypesFromRegistries(opts.seedArchetypes);
-  }
-  if (opts.seedWeaponUpgrades) {
-    seedWeaponUpgradesFromRegistry(opts.seedWeaponUpgrades);
-  }
-  if (opts.seedCraft) {
-    seedCraftFromData(opts.seedCraft.categories, opts.seedCraft.recipes);
-  }
-  if (opts.seedActors) seedActorsFromRegistry(opts.seedActors);
-  if (opts.seedDamageTable) seedDamageMatrixFromTable(opts.seedDamageTable);
-}
-
 /**
- * @param {object} [opts] seed* registries + onWarn
- * @returns {Promise<{ ok: boolean, fromJson: boolean, error?: string }>}
+ * @param {object} [opts] onWarn
+ * @returns {Promise<{ ok: boolean, fromJson: boolean, error?: string, loadedFiles?: number }>}
  */
 export async function loadDefinitionPack(opts = {}) {
   const warn = opts.onWarn || ((m) => console.warn('[defs]', m));
-  applySeeds(opts);
 
   try {
     const manifest = await fetchJson(PACK_BASE + 'pack_manifest.json');
@@ -71,6 +42,9 @@ export async function loadDefinitionPack(opts = {}) {
       actors: PACK_BASE + (files.actors || 'actors.json'),
       day: PACK_BASE + (files.day || 'day.json'),
       rules: PACK_BASE + (files.rules || 'rules.json'),
+      gamePack: PACK_BASE + (files.gamePack || 'game_pack.json'),
+      ai: PACK_BASE + (files.ai || 'ai.json'),
+      audio: PACK_BASE + (files.audio || 'audio.json'),
     };
 
     const entries = Object.keys(urls);
@@ -79,43 +53,57 @@ export async function loadDefinitionPack(opts = {}) {
         try {
           return { key, ok: true, data: await fetchJson(urls[key]) };
         } catch (err) {
-          warn(`pack skip ${key}: ${err && err.message ? err.message : err}`);
-          return { key, ok: false, data: null };
+          const message = err && err.message ? err.message : String(err);
+          return { key, ok: false, data: null, error: message };
         }
       })
     );
 
-    const pack = { version: manifest.version, manifest };
-    let loaded = 0;
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      if (!r.ok || !r.data) continue;
-      loaded += 1;
-      if (r.key === 'weapons') pack.weapons = r.data;
-      else if (r.key === 'armor') pack.armor = r.data;
-      else if (r.key === 'damageMatrix') {
-        installDamageMatrix(r.data);
-      } else if (r.key === 'blocks') pack.blocks = r.data;
-      else if (r.key === 'items') pack.items = r.data;
-      else if (r.key === 'skills') pack.skills = r.data;
-      else if (r.key === 'archetypes') pack.archetypes = r.data;
-      else if (r.key === 'weaponUpgrades') pack.weaponUpgrades = r.data;
-      else if (r.key === 'craft') pack.craft = r.data;
-      else if (r.key === 'actors') pack.actors = r.data;
-      else if (r.key === 'day') pack.day = r.data;
-      else if (r.key === 'rules') pack.rules = r.data;
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) {
+      const msg = `pack JSON failed: ${failed
+        .map((r) => `${r.key} (${r.error})`)
+        .join('; ')}`;
+      warn(msg);
+      return { ok: false, fromJson: false, error: msg };
     }
 
+    const byKey = Object.create(null);
+    for (let i = 0; i < results.length; i++) {
+      byKey[results[i].key] = results[i].data;
+    }
+
+    const pack = {
+      version: manifest.version,
+      manifest,
+      weapons: byKey.weapons,
+      armor: byKey.armor,
+      blocks: byKey.blocks,
+      items: byKey.items,
+      skills: byKey.skills,
+      archetypes: byKey.archetypes,
+      weaponUpgrades: byKey.weaponUpgrades,
+      craft: byKey.craft,
+      actors: byKey.actors,
+      day: byKey.day,
+      rules: byKey.rules,
+    };
+
+    installDamageMatrix(byKey.damageMatrix);
     installPackData(pack);
+    installGamePack(byKey.gamePack, byKey.rules);
+    installAiPack(byKey.ai);
+    installAudioPack(byKey.audio);
 
     if (!isDefsReady()) {
-      warn('JSON pack empty after load — using seed');
-      return { ok: isDefsReady(), fromJson: false, error: 'empty_pack' };
+      const msg = 'pack JSON loaded but weapon/block/item/rules/day registries are empty';
+      warn(msg);
+      return { ok: false, fromJson: false, error: msg };
     }
-    return { ok: true, fromJson: loaded > 0, loadedFiles: loaded };
+    return { ok: true, fromJson: true, loadedFiles: results.length };
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
-    warn(`pack JSON load failed (${msg}) — using in-memory seed`);
-    return { ok: isDefsReady(), fromJson: false, error: msg };
+    warn(`pack JSON load failed (${msg})`);
+    return { ok: false, fromJson: false, error: msg };
   }
 }

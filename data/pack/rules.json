@@ -6,6 +6,13 @@
   "enemiesPerWaveBase": 3,
   "enemiesPerWaveScale": 1,
   "waveGroupCount": 3,
+  "loseMode": 2,
+  "dodgeQuota": 4,
+  "territory": {
+    "base": { "padL3": 4, "importance": 3 },
+    "turret": { "padL3": 2, "importance": 2 },
+    "gen": { "padL3": 2, "importance": 1 }
+  },
   "playerMaxHp": 850,
   "playerSpeed": 200,
   "playerActiveSkills": ["FIST", "SELF_HEAL"]

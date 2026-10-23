@@ -9,7 +9,7 @@ import {
   makeMoveAction,
   makePlaceAction,
   makeSelectHotbarAction,
-} from '../../actions.js';
+} from '../../player/actions.js';
 import { L3_SIZE, getItemDef } from '../../config.js';
 import { clearPlaceIntent, clearRepairIntent } from '../blackboard.js';
 

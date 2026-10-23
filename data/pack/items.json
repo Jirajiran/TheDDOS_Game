@@ -898,6 +898,33 @@
       "kind": "WEAPON",
       "weaponId": "GRENADE_LAUNCHER",
       "maxStack": 1
+    },
+    "BACKPACK_T1": {
+      "id": "BACKPACK_T1",
+      "label": "Backpack T1",
+      "color": "#8a6b4a",
+      "kind": "BACKPACK",
+      "maxStack": 1,
+      "backpackTier": 1,
+      "backpackBonusSlots": 2
+    },
+    "BACKPACK_T2": {
+      "id": "BACKPACK_T2",
+      "label": "Backpack T2",
+      "color": "#6b8a4a",
+      "kind": "BACKPACK",
+      "maxStack": 1,
+      "backpackTier": 2,
+      "backpackBonusSlots": 4
+    },
+    "BACKPACK_T3": {
+      "id": "BACKPACK_T3",
+      "label": "Backpack T3",
+      "color": "#4a6b8a",
+      "kind": "BACKPACK",
+      "maxStack": 1,
+      "backpackTier": 3,
+      "backpackBonusSlots": 6
     }
   }
 }

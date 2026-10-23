@@ -2,7 +2,7 @@
  * REGROUP — walk toward ally centroid / reserved rally. Does not chase player.
  */
 
-import { ActionType } from '../../actions.js';
+import { ActionType } from '../../player/actions.js';
 
 export function runRegroup(ctx) {
   const { unit, allyX, allyY, allyN, pathGoal } = ctx;

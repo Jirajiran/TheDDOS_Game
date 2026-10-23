@@ -22,7 +22,7 @@
 | `input/` | Unified Input (คน+บอท) เชื่อม block ⇄ weapon | `README.md` |
 | `block/` | PlaceHold · BaseBlock · ประตู · occupancy | `README.md` |
 | `turret/` | ป้อมจาก `weaponId` + infiniteAmmo บนบล็อก | `README.md` |
-| `ai/` | Stage / Goal / Mediator | `AI-Stage-Goals-and-Actions.txt` + `NextPlan/` (Phase 1 ในโค้ดแล้ว · 2a+ ยัง) |
+| `ai/` | Stage / Goal / Mediator · Navigation | `AI-Stage-Goals-and-Actions.txt` + `Record-Goal.md` + `Navigation.md` + `NextPlan/` (Phase 1 ในโค้ดแล้ว · 2a+ ยัง) |
 | `world-gen/` | Gen object Map | `README.md` → AskKeep §5 |
 | `ui/` | HUD / overlay | `README.md` → AskKeep §6 |
 | `menu-net/` | Menu · hash join · net (เฟสถัดไป) | `README.md` → AskKeep §7 |

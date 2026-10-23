@@ -300,6 +300,15 @@ body.is-playing-lock #app {
   transform: none;
 }
 
+.loading-view__status {
+  margin: 0;
+  max-width: 40rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
 .loading-view__title {
   margin: 0;
   font-family: "Segoe UI", Arial, sans-serif;

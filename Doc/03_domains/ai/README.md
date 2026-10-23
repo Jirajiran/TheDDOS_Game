@@ -9,9 +9,11 @@
 | ไฟล์ | บทบาท |
 |------|--------|
 | `AI-Stage-Goals-and-Actions.txt` | blueprint สั้น · สูตร Goal→Stage→Action |
+| `Record-Goal.md` | แบบแผนขั้นต้น · บันทึกการเล่นแล้วค่อยตั้ง Goal ให้ mod กำหนด (ยังไม่ลงโค้ด) |
+| `Navigation.md` | ของเก่าคิดทุกเฟรม / ของใหม่ Area ขอบตอนพูล + หลบใน chuck · FSM สามท่า (ยังไม่ลงโค้ด) |
 | `NextPlan/` | สเปกต่อยอด (architecture · dictionaries · archetypes · prerequisites) |
 
-โค้ด runtime: `js/ai/blackboard.js` · `mediator.js` · `events.js` · `archetypes.js` · `local_group_manager.js` · `place_kit.js` · `stages/*` · `js/general.js` · `js/config.js` (`UNIT_ARCHETYPE_REGISTRY`)
+โค้ด runtime: `js/ai/blackboard.js` · `mediator.js` · `events.js` · `archetypes.js` · `local_group_manager.js` · `place_kit.js` · `stages/*` · `js/ai/general.js` · `js/config.js` (`UNIT_ARCHETYPE_REGISTRY`)
 
 ### Phase 3 (สั้น)
 - Archetype data: `allowedGoals` · `targetPriorityList` · `behaviorFlags`

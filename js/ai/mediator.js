@@ -4,14 +4,14 @@
  * Phase 3: Goals filtered to unit.allowedGoals (archetype data).
  */
 
-import { ActionType } from '../actions.js';
+import { ActionType } from '../player/actions.js';
 import {
   getPreferredStandoffPx,
   getSenseRadiusPx,
   getWeaponDef,
   getWeaponMaxRangePx,
 } from '../config.js';
-import { getAiFireDecisionRangePx } from '../dayCycle.js';
+import { getAiFireDecisionRangePx } from '../view/dayCycle.js';
 import {
   Goal,
   STAGE_TO_LEGACY,
@@ -25,7 +25,7 @@ import {
   getAllowedGoalSet,
   tickArchetypePhase,
 } from './archetypes.js';
-import { SkillPhase } from '../skills.js';
+import { SkillPhase } from '../combat/skills.js';
 import { runApproach } from './stages/approach.js';
 import { runEngage } from './stages/engage.js';
 import { runPlace } from './stages/place.js';

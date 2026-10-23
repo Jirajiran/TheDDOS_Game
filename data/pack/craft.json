@@ -416,6 +416,38 @@
         "WOOD": 4,
         "STONE": 2
       }
+    },
+    {
+      "id": "craft_backpack_t1",
+      "itemId": "BACKPACK_T1",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 6,
+        "STONE": 2
+      }
+    },
+    {
+      "id": "craft_backpack_t2",
+      "itemId": "BACKPACK_T2",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 8,
+        "STONE": 4,
+        "IRON": 2
+      }
+    },
+    {
+      "id": "craft_backpack_t3",
+      "itemId": "BACKPACK_T3",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "WOOD": 10,
+        "IRON": 6,
+        "STONE": 4
+      }
     }
   ]
 }

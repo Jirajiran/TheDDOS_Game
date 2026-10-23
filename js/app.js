@@ -1,48 +1,36 @@
 import {
-  makeCastSkillAction,
-  makeSelectHotbarAction,
-  makeTakeBaseAction,
-  makeTakeGenAction,
-} from './actions.js';
-import {
   AppState,
   AUTOSAVE_INTERVAL_SEC,
   FEATURE_SNAPSHOT,
   GAME_PACK,
-  getBalancePack,
   GameMode,
   PATH_SIZE,
   getItemDef,
-  getWeaponDef,
 } from './config.js';
-import { createCamera, easeLookToward, followPoint, panCamera, snapCameraTo, clampZoom } from './camera.js';
-import { getWeaponIconHref } from './weaponBtnArt.js';
-import {
-  getNightCameraZoomMul,
-  tickNightBlend,
-} from './dayCycle.js';
+import { createCamera, easeLookToward, followPoint, panCamera, snapCameraTo, clampZoom } from './view/camera.js';
+import { getWeaponIconHref } from './view/weaponBtnArt.js';
+import { getNightCameraZoomMul } from './view/dayCycle.js';
 import {
   createHostSession,
   generateRoomCode,
-  hostIngestActions,
   hostKickPlayer,
   hostSetLocalName,
   tryJoinRoom,
-} from './host.js';
-import { createInput } from './input.js';
+} from './session/host.js';
+import { createMatchEnd } from './app/matchEnd.js';
+import { createPlaySession } from './app/playSession.js';
+import { createInput } from './player/input.js';
 import {
-  countItem,
   getActiveSlot,
-  isBackpackSlot,
   isWeaponSlot,
   moveOrSwapInventorySlots,
-} from './inventory.js';
-import { runBootPreload } from './boot.js';
-import { runLoading } from './loading.js';
-import { createLoadingUi } from './loadingUi.js';
+} from './player/inventory.js';
+import { runBootPreload } from './session/boot.js';
+import { runLoading } from './session/loading.js';
+import { createLoadingUi } from './session/loadingUi.js';
 import { createMainMenuUi } from './mainMenuUi.js';
 import { createPlayerUiGamePlay } from './playerUiGamePlay.js';
-import { injectMenuSkinPreviews, isUnitVisualReady } from './unitVisual.js';
+import { injectMenuSkinPreviews, isUnitVisualReady } from './view/unitVisual.js';
 import {
   clearLocalSnapshot,
   exportMatchSnapshotFile,
@@ -52,27 +40,19 @@ import {
   parseSnapshotFileText,
   sanitizeLocalSnapshot,
   writeAutosave,
-} from './memento.js';
-import { createPanels } from './panels.js';
-import { resetPools } from './pools.js';
-import { clearCanvas, renderWorld } from './render.js';
+} from './session/memento.js';
+import { createPanels } from './ui/panels.js';
+import { resetPools } from './world/pools.js';
+import { clearCanvas, renderWorld } from './view/render.js';
 import {
   findInteractTarget,
-  findNearbyBackpackDrop,
   getEquippedBackpackTier,
   getGenReceiveState,
   getPlayerUnit,
   initMatchGameplay,
   restoreMatchFromSnapshot,
   throwHotbarSlot,
-  tickMatch,
-  tryEquipBackpackFromDrop,
-  tryEquipBackpackFromSlot,
-  tryUnequipBackpackToDrop,
-  updatePlaceGhost,
 } from './sim.js';
-import { formatAmmoHud } from './weapons.js';
-import { SkillPhase } from './skills.js';
 
 export function createApp(dom) {
   const state = {
@@ -267,12 +247,23 @@ export function createApp(dom) {
     gpPlayers: loadingGpPlayers,
     gpEnemies: loadingGpEnemies,
     gpReady: loadingGpReady,
+    mainStatus: document.getElementById('loading-main-status'),
+    gpStatus: document.getElementById('loading-gp-status'),
   });
 
   function showFailPanel(message) {
-    if (loadingUi) loadingUi.hide();
-    if (loadingBootPanel) loadingBootPanel.hidden = false;
-    if (progressLabel) progressLabel.textContent = message;
+    if (loadingBootPanel) loadingBootPanel.hidden = true;
+    if (loadingUi) {
+      if (!loadingUi.getVariant()) loadingUi.showMain();
+      loadingUi.setStatus(message);
+      return;
+    }
+    const status = document.getElementById('loading-main-status');
+    if (loadingMain) loadingMain.hidden = false;
+    if (status) {
+      status.hidden = false;
+      status.textContent = message;
+    }
   }
 
   function reportLoadProgress(pct, label) {
@@ -791,7 +782,6 @@ export function createApp(dom) {
       return true;
     } catch (err) {
       console.error(err);
-      setLoadingTitle('Boot failed');
       showFailPanel(
         (err && err.message ? err.message : 'Boot failed') + ' — reload the page'
       );
@@ -1169,51 +1159,26 @@ export function createApp(dom) {
     await frame();
   }
 
-  function endMatch(outcome) {
-    if (state.appState !== AppState.PLAYING) return;
-    if (state.panels) state.panels.close();
-    stopLoop();
-    const match = state.match;
-    // Win/Lose: CLEAR autosave — no Restore after finished match.
-    clearLocalSnapshot();
-    const waveReached = match ? match.waveIndex : 0;
-    const stats = match && match.stats ? match.stats : {};
-    state.result = {
-      outcome,
-      waveReached,
-      mode: match ? match.gameMode : state.host.gameMode,
-      stats,
-    };
-    const title = outcome === 'win' ? 'Victory' : 'Defeat';
-    const detailLine =
-      outcome === 'win'
-        ? `Cleared wave ${getBalancePack().targetWaveToWin}. Reached wave ${waveReached}.`
-        : `Base destroyed. Reached wave ${waveReached}.`;
-    const rows = [
-      `Mode: ${state.result.mode}`,
-      `Kills: ${stats.kills || 0}`,
-      `Shots: ${stats.shotsFired || 0}`,
-      `Blocks placed: ${stats.blocksPlaced || 0}`,
-      `Resources: ${stats.resourcesGathered || 0}`,
-      `Damage dealt: ${Math.round(stats.damageDealt || 0)}`,
-      `Room: ${state.host.roomCode}`,
-    ];
-
-    // SVG end only — pool Anchor_Center_3, inject text, no HTML result card.
-    if (playerUi && playerUi.isReady()) {
-      playerUi.setEndOpen(true, title, {
-        detail: detailLine,
-        lines: rows,
-      });
-    }
-    setAppState(AppState.RESULT);
-  }
-
-  function forceResult(outcome) {
-    if (state.appState !== AppState.PLAYING) return;
-    if (state.match) state.match.outcome = outcome;
-    endMatch(outcome);
-  }
+  const hub = {
+    state,
+    canvas,
+    get playerUi() {
+      return playerUi;
+    },
+    tryAutosave,
+    dispatchUi,
+    isCheatOpen,
+    closeCheat,
+    ensureFreeFlyCamera,
+    refreshHotbar,
+    syncDebugHudButtons,
+    stopLoop,
+    setAppState,
+  };
+  const matchEnd = createMatchEnd(hub);
+  hub.endMatch = matchEnd.endMatch;
+  const { forceResult } = matchEnd;
+  const playSession = createPlaySession(hub);
 
   function startLoop() {
     stopLoop();
@@ -1224,7 +1189,7 @@ export function createApp(dom) {
       const dt = Math.min(0.05, (ts - state.lastTs) / 1000);
       state.lastTs = ts;
       try {
-        updatePlaying(dt);
+        playSession.updatePlaying(dt);
       } catch (err) {
         console.error('[TheDDOS] updatePlaying failed (loop kept alive)', err);
       }
@@ -1242,281 +1207,6 @@ export function createApp(dom) {
     if (state.rafId) {
       cancelAnimationFrame(state.rafId);
       state.rafId = 0;
-    }
-  }
-
-  function updatePlaying(dt) {
-    const match = state.match;
-    if (!match) return;
-    state._hudDt = dt;
-    tickNightBlend(match, dt);
-
-    try {
-      state.autosaveAcc += dt;
-      tryAutosave(false);
-
-      const cssW = canvas.clientWidth;
-      const cssH = canvas.clientHeight;
-      const playerId = match.playerUnitId >= 0 ? match.playerUnitId : 0;
-      const anchor = getPlayerUnit(match);
-      if (anchor && state.input.setAimAnchor) {
-        state.input.setAimAnchor(anchor.x, anchor.y);
-      }
-      const polled = state.input.poll(
-        playerId,
-        state.camera,
-        cssW,
-        cssH,
-        match.activeHotbar,
-        match.inventory
-      );
-      state.mouseScreenX = polled.mouseScreenX;
-      state.mouseScreenY = polled.mouseScreenY;
-
-      if (polled.escapePressed) {
-        if (playerUi && playerUi.isChatOpen && playerUi.isChatOpen()) {
-          playerUi.closeChat();
-        } else if (isCheatOpen()) closeCheat();
-        else if (playerUi && playerUi.isSettingOpen()) {
-          playerUi.setSettingOpen(false);
-          if (state.input) state.input.setUiBlocked(false);
-        } else if (playerUi && playerUi.isGenOpen && playerUi.isGenOpen()) {
-          playerUi.setGenOpen(false);
-          if (state.panels) state.panels.close();
-        } else if (state.panels && state.panels.isOpen()) state.panels.close();
-      }
-
-      if (polled.chatTogglePressed) {
-        dispatchUi('chatToggle');
-      }
-
-      // Interactive prompt: show btn when near Gen/Base; auto-close Gen if out of range
-      syncInteractiveUi(match);
-
-      handleCraftOrBackpackF(polled, match, dt);
-      if (polled.interactTogglePressed) {
-        if (state.panels && state.panels.isReceiveOpen()) dispatchUi('genClose');
-        else dispatchUi('interact');
-      }
-      if (polled.fistTogglePressed) dispatchUi('castFist');
-      if (polled.healSkillTogglePressed) dispatchUi('castHeal');
-
-      if (match.playerDead || match.cameraFreeFly) {
-        ensureFreeFlyCamera(match, cssW, cssH);
-        const speed = GAME_PACK.cameraFreeFlySpeed || 520;
-        panCamera(
-          state.camera,
-          (polled.moveDx || 0) * speed * dt,
-          (polled.moveDy || 0) * speed * dt,
-          match.world.worldW,
-          match.world.worldH,
-          cssW,
-          cssH
-        );
-        const outcome = tickMatch(match, [], polled.mouseWorld, dt);
-        if (state.panels) {
-          state.panels.consumePendingUi(match);
-          state.panels.tick(dt);
-        }
-        if (outcome === 'win' || outcome === 'lose') {
-          endMatch(outcome);
-        }
-        return;
-      }
-
-      const prevHotbar = match.activeHotbar;
-      const invFingerprint = inventoryFingerprint(match.inventory);
-      let actions = hostIngestActions(state.host, polled.actions, null) || [];
-      if (state.pendingHotbarSelect >= 0) {
-        const slot = state.pendingHotbarSelect;
-        state.pendingHotbarSelect = -1;
-        actions = [
-          makeSelectHotbarAction(playerId, slot),
-          ...actions.filter((a) => a.type !== 'SELECT_HOTBAR'),
-        ];
-      }
-      if (state.pendingFistCast) {
-        state.pendingFistCast = false;
-        actions = actions.concat([makeCastSkillAction(playerId, 'FIST')]);
-      }
-      if (state.pendingHealCast) {
-        state.pendingHealCast = false;
-        actions = actions.concat([makeCastSkillAction(playerId, 'SELF_HEAL')]);
-      }
-      if (state.pendingTake) {
-        const pend = state.pendingTake;
-        state.pendingTake = null;
-        if (pend.kind === 'gen') {
-          actions = actions.concat([
-            makeTakeGenAction(playerId, pend.blockId),
-          ]);
-        } else if (pend.kind === 'base') {
-          actions = actions.concat([
-            makeTakeBaseAction(playerId, pend.itemId),
-          ]);
-        }
-      }
-      // SELECT_HOTBAR commit is owned by sim (delay + burst/beam lock) — do not
-      // write match.activeHotbar here or weapon/beam lock is bypassed.
-      updatePlaceGhost(match, polled.mouseWorld);
-      const outcome = tickMatch(match, actions, polled.mouseWorld, dt);
-
-      if (state.panels) {
-        state.panels.consumePendingUi(match);
-        state.panels.tick(dt);
-      }
-
-      if (
-        match.activeHotbar !== prevHotbar ||
-        inventoryFingerprint(match.inventory) !== invFingerprint
-      ) {
-        refreshHotbar();
-        if (state.panels) state.panels.refreshCraftIfOpen();
-      }
-
-      if (outcome === 'win' || outcome === 'lose') {
-        endMatch(outcome);
-      }
-    } finally {
-      // Always sync Hub to match state — even if tick threw mid-frame.
-      updateHud(match);
-    }
-  }
-
-  function inventoryFingerprint(inv) {
-    if (!inv) return '';
-    let s = `${state.match && state.match.equippedBackpackId}|`;
-    for (let i = 0; i < inv.length; i++) {
-      const slot = inv[i];
-      s += `${slot.itemId || ''}:${slot.count}:${slot.ammoInMag || 0}:${slot.mags || 0}|`;
-    }
-    return s;
-  }
-
-  function syncInteractiveUi(match) {
-    if (!playerUi || !playerUi.isReady()) return;
-    const player = getPlayerUnit(match);
-    if (!player) {
-      playerUi.setInteractiveVisible(false);
-      return;
-    }
-    const best = findInteractTarget(match, player);
-    const nearGenOrBase = !!(
-      best &&
-      ((best.isGen && best.genRate) || best.isDefeatCondition)
-    );
-    const slot = getActiveSlot(match.inventory, match.activeHotbar);
-    playerUi.setInteractiveVisible(isWeaponSlot(slot) || nearGenOrBase);
-
-    // Gen panel = UI-only: out of range closes panel; never retarget / steer player.
-    if (playerUi.isGenOpen && playerUi.isGenOpen() && !nearGenOrBase) {
-      playerUi.setGenOpen(false);
-      if (state.panels) state.panels.close();
-    }
-  }
-
-  /**
-   * F: near backpack drop → equip; active backpack slot → equip;
-   * hold F 3s with bag equipped (craft closed) → unequip; else toggle craft.
-   */
-  function handleCraftOrBackpackF(polled, match, dt) {
-    const fDown = !!(state.input && state.input.keys && state.input.keys.KeyF);
-    const craftOpen = state.panels && state.panels.getOpenKind() === 'craft';
-    const settingOpen = playerUi && playerUi.isSettingOpen();
-
-    if (!fDown || craftOpen || settingOpen) {
-      state.fHoldAcc = 0;
-    } else if (match.equippedBackpackId && !findNearbyBackpackDrop(match)) {
-      state.fHoldAcc += dt;
-      if (state.fHoldAcc >= 3) {
-        state.fHoldAcc = 0;
-        tryUnequipBackpackToDrop(match);
-        refreshHotbar();
-        return;
-      }
-    } else {
-      state.fHoldAcc = 0;
-    }
-
-    if (!polled.craftTogglePressed) return;
-    if (settingOpen) return;
-
-    const near = findNearbyBackpackDrop(match);
-    if (near) {
-      tryEquipBackpackFromDrop(match, near);
-      refreshHotbar();
-      return;
-    }
-    const active = getActiveSlot(match.inventory, match.activeHotbar);
-    if (isBackpackSlot(active)) {
-      tryEquipBackpackFromSlot(match, match.activeHotbar);
-      refreshHotbar();
-      return;
-    }
-    dispatchUi('craftToggle');
-  }
-
-  function updateHud(match) {
-    const player = getPlayerUnit(match);
-    let gunName = 'EMPTY';
-    let ammoLine = 'AMMO : —';
-    const slot = getActiveSlot(match.inventory, match.activeHotbar);
-    if (isWeaponSlot(slot)) {
-      const wdef = getWeaponDef(slot.weaponId || slot.itemId);
-      const reserve =
-        wdef && wdef.ammoTypeId
-          ? countItem(match.inventory, wdef.ammoTypeId)
-          : null;
-      gunName = slot.label || slot.itemId;
-      ammoLine = `AMMO : ${formatAmmoHud(slot, wdef, reserve)}`;
-    } else if (slot && slot.itemId) {
-      gunName = slot.label || slot.itemId;
-      ammoLine = `×${slot.count}`;
-    }
-    syncDebugHudButtons(match);
-
-    if (playerUi && playerUi.isReady()) {
-      const skills = [];
-      const skillIds =
-        player && Array.isArray(player.skillIds) && player.skillIds.length
-          ? player.skillIds
-          : getBalancePack().playerActiveSkills || ['FIST', 'SELF_HEAL'];
-      for (let si = 0; si < skillIds.length; si++) {
-        const sid = skillIds[si];
-        const rt = player && player.skills ? player.skills[sid] : null;
-        const cd =
-          rt && rt.phase === SkillPhase.COOLDOWN
-            ? rt.cooldownTimer || 0
-            : rt && rt.phase === SkillPhase.ACTIVE
-              ? rt.activeTimer || 0
-              : 0;
-        skills.push({ id: sid, cooldownSec: cd });
-      }
-      if (!skills.length) skills.push({ id: 'FIST', cooldownSec: 0 });
-      const effects = Array.isArray(match.playerEffects)
-        ? match.playerEffects
-        : player && Array.isArray(player.effects)
-          ? player.effects
-          : [];
-      playerUi.syncHud({
-        waveIndex: match.waveIndex || 0,
-        waveActive: !!(match.waveActive && match.enemiesAlive > 0),
-        baseHp: match.base ? match.base.hp : 0,
-        baseMaxHp: match.base ? match.base.maxHp : 0,
-        baseAlive: !!(match.base && match.base.alive),
-        playerHp: player ? player.hp : 0,
-        playerMaxHp: player ? player.maxHp : 1,
-        gunName,
-        ammoLine,
-        simTimeSec: match.simTime != null ? match.simTime : match.time || 0,
-        enemiesPresent: (match.enemiesAlive || 0) > 0,
-        slots: match.inventory || [],
-        activeHotbar: match.activeHotbar || 0,
-        backpackTier: getEquippedBackpackTier(match),
-        skills,
-        effects,
-        dt: state._hudDt || 1 / 60,
-      });
     }
   }
 

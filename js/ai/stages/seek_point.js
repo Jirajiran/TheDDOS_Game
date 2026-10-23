@@ -2,7 +2,7 @@
  * SEEK_POINT — walk to seekX/Y on Blackboard (heal/cover/rally coords only).
  */
 
-import { ActionType } from '../../actions.js';
+import { ActionType } from '../../player/actions.js';
 import { pushAiEvent } from '../blackboard.js';
 
 export function runSeekPoint(ctx) {

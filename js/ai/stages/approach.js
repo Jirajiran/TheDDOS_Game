@@ -4,8 +4,8 @@
  * Fire while approaching uses AI fire-decision range (night mul; bullet range unchanged).
  */
 
-import { ActionType } from '../../actions.js';
-import { getAiFireDecisionRangePx } from '../../dayCycle.js';
+import { ActionType } from '../../player/actions.js';
+import { getAiFireDecisionRangePx } from '../../view/dayCycle.js';
 
 export function runApproach(ctx) {
   const { unit, pathGoal, combatTarget, dt } = ctx;

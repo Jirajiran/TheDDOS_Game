@@ -1,0 +1,17 @@
+{
+  "sounds": {
+    "ui.click": "click.wav",
+    "weapon.M1991": "Shot_M1911.wav",
+    "weapon.SMG": "Shot_Smg.wav",
+    "weapon.AK47": "Shot_Ak47.wav",
+    "weapon.SHOTGUN_SHELL": "Shot_shotgun.wav",
+    "weapon.SHOTGUN_BUCK": "Shot_shotgun.wav",
+    "weapon.OTHER": "Shot_other.wav",
+    "combat.hit": "hit.wav",
+    "combat.death": "Death.wav",
+    "combat.explode": "explode.wav",
+    "world.pickup": "pickup.wav",
+    "world.place": "place.wav",
+    "world.broken": "Broken.wav"
+  }
+}

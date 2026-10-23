@@ -435,6 +435,10 @@
     [
       {
         "id": "GRUNT_BASIC",
+        "weight": 3
+      },
+      {
+        "id": "SUICIDE_BERSERKER",
         "weight": 1
       }
     ],
@@ -445,6 +449,10 @@
       },
       {
         "id": "STEALTH_SNIPER",
+        "weight": 1
+      },
+      {
+        "id": "STEALTH_SHADOW_MELEE",
         "weight": 1
       }
     ],
@@ -517,7 +525,7 @@
     null,
     "GRUNT_BASIC",
     "GRUNT_BASIC",
-    "GRUNT_BASIC",
+    "SUICIDE_BERSERKER",
     "SUPPORT_MEDIC",
     "COMMANDER_LEADER",
     "FLANK_SKIRMISHER",

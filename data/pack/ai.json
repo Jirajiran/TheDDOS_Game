@@ -1,0 +1,97 @@
+{
+  "version": "1",
+  "description": "Mediator goal weights, stage map, event boosts, local path.",
+  "goalBaseWeights": {
+    "SURVIVE_RETREAT": 900,
+    "SEEK_HEAL_POINT": 700,
+    "PLACE_TRAP": 620,
+    "REPAIR_STRUCTURE": 580,
+    "ELIMINATE_PLAYER": 500,
+    "ELIMINATE_TARGET": 480,
+    "SUICIDE_ATTACK": 520,
+    "DESTROY_BASE": 400,
+    "PROTECT_ALLY": 280,
+    "FLANK_POSITION": 260,
+    "HOLD_SECTOR": 150,
+    "REGROUP_ALLIES": 120,
+    "REACH_PATH_GOAL": 100
+  },
+  "goalToStage": {
+    "REACH_PATH_GOAL": "APPROACH_PATH",
+    "ELIMINATE_PLAYER": "ENGAGE",
+    "ELIMINATE_TARGET": "ENGAGE",
+    "DESTROY_BASE": "ENGAGE",
+    "SUICIDE_ATTACK": "ENGAGE",
+    "SURVIVE_RETREAT": "RETREAT",
+    "SEEK_HEAL_POINT": "SEEK_POINT",
+    "HOLD_SECTOR": "REGROUP",
+    "REGROUP_ALLIES": "REGROUP",
+    "PROTECT_ALLY": "REGROUP",
+    "FLANK_POSITION": "RETREAT",
+    "PLACE_TRAP": "PLACE",
+    "REPAIR_STRUCTURE": "PLACE"
+  },
+  "eventBoosts": {
+    "HIT_BY_PLAYER": {
+      "ELIMINATE_PLAYER": 400
+    },
+    "HIT_BY_TURRET": {
+      "ELIMINATE_TARGET": 380
+    },
+    "SPOTTED_PLAYER": {
+      "ELIMINATE_PLAYER": 220
+    },
+    "TAUNT_TRIGGERED": {
+      "ELIMINATE_TARGET": 450
+    },
+    "LOW_HP": {
+      "SURVIVE_RETREAT": 500,
+      "SEEK_HEAL_POINT": 200
+    },
+    "LEFT_GENERAL_SECTOR": {
+      "REACH_PATH_GOAL": 350,
+      "ELIMINATE_PLAYER": -180,
+      "ELIMINATE_TARGET": -180,
+      "PLACE_TRAP": -120,
+      "REPAIR_STRUCTURE": -80
+    },
+    "BASE_IN_RANGE": {
+      "DESTROY_BASE": 280
+    },
+    "PATH_GOAL_REACHED": {
+      "REACH_PATH_GOAL": -40
+    },
+    "HEAL_POINT_AVAILABLE": {
+      "SEEK_HEAL_POINT": 260
+    },
+    "PATH_BLOCKED": {
+      "ELIMINATE_TARGET": 420
+    },
+    "PLACE_SLOT_RESERVED": {
+      "PLACE_TRAP": 480
+    },
+    "REPAIR_TARGET_RESERVED": {
+      "REPAIR_STRUCTURE": 460
+    },
+    "BURST_COMPLETE": {
+      "FLANK_POSITION": 520,
+      "ELIMINATE_PLAYER": -120
+    },
+    "MORALE_BROKEN": {
+      "SURVIVE_RETREAT": 600,
+      "REGROUP_ALLIES": -200
+    }
+  },
+  "localPath": {
+    "fanSpanRad": 0.7853981633974483,
+    "fanStages": [
+      1,
+      3,
+      5
+    ],
+    "fanRange": 320,
+    "rearPiRadius": 96,
+    "steeringBudgetMax": 10,
+    "dodgeLateral": 179.2
+  }
+}

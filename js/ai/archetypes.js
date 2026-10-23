@@ -8,8 +8,8 @@ import {
   pickArchetypeIdForWaveSlot,
 } from '../config.js';
 import { Goal } from './blackboard.js';
-import { createAmmoState } from '../weapons.js';
-import { ensureUnitSkills } from '../skills.js';
+import { createAmmoState } from '../combat/weapons.js';
+import { ensureUnitSkills } from '../combat/skills.js';
 
 /** Always available for General path following (even if omitted in JSON). */
 const IMPLICIT_GOALS = Object.freeze([Goal.REACH_PATH_GOAL]);

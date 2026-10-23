@@ -73,7 +73,7 @@
       "label": "AK47",
       "color": "#6b8a4a",
       "baseDamage": 37,
-      "cooldownSec": 0.2,
+      "cooldownSec": 0.45,
       "spreadDeg": 30,
       "magCapacity": 30,
       "maxMags": 4,
@@ -108,8 +108,7 @@
       "bulletSpeedPxSec": 1495.04,
       "damageType": "BULLET",
       "reloadType": "INDIVIDUAL_SHELL",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.4
+      "burstIntervalSec": 0.06
     },
     "SHOTGUN_BUCK": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -135,8 +134,7 @@
       "bulletSpeedPxSec": 1597.44,
       "damageType": "BULLET",
       "reloadType": "INDIVIDUAL_SHELL",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.55
+      "burstIntervalSec": 0.06
     },
     "KAR98": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -177,8 +175,7 @@
       "bulletSpeedPxSec": 3604.48,
       "damageType": "BULLET",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 1
+      "burstIntervalSec": 0.06
     },
     "MEDIC_GUN": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -204,8 +201,7 @@
       "bulletSpeedPxSec": 3194.88,
       "damageType": "DEFAULT",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.3
+      "burstIntervalSec": 0.06
     },
     "LAZER_HEAL": {
       "projectileMode": "CONTINUOUS_BEAM",
@@ -231,8 +227,7 @@
       "bulletSpeedPxSec": null,
       "damageType": "LAZER",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.3
+      "burstIntervalSec": 0.06
     },
     "LAZER": {
       "projectileMode": "CONTINUOUS_BEAM",
@@ -258,8 +253,7 @@
       "bulletSpeedPxSec": null,
       "damageType": "LAZER",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 1.2
+      "burstIntervalSec": 0.06
     },
     "WEAPON_50CAL": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -279,7 +273,7 @@
       "baseDamage": 90,
       "cooldownSec": 0.9,
       "spreadDeg": 5,
-      "magCapacity": 22,
+      "magCapacity": 999,
       "maxMags": 1,
       "maxDistancePath": 2.5,
       "bulletSpeedPxSec": 3993.6,
@@ -312,8 +306,7 @@
       "bulletSpeedPxSec": 1003.52,
       "damageType": "BULLET",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.055,
-      "aiFireRangePath": 0.8
+      "burstIntervalSec": 0.055
     },
     "AK47_MODIFIED": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -339,8 +332,7 @@
       "bulletSpeedPxSec": 1802.24,
       "damageType": "BULLET",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 1
+      "burstIntervalSec": 0.06
     },
     "SHOTGUN_SHELL_MODIFIED": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -366,8 +358,7 @@
       "bulletSpeedPxSec": 1699.84,
       "damageType": "BULLET",
       "reloadType": "INDIVIDUAL_SHELL",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.5
+      "burstIntervalSec": 0.06
     },
     "SHOTGUN_BUCK_MODIFIED": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -393,8 +384,7 @@
       "bulletSpeedPxSec": 1802.24,
       "damageType": "BULLET",
       "reloadType": "INDIVIDUAL_SHELL",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.7
+      "burstIntervalSec": 0.06
     },
     "KAR98_MODIFIED": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -435,8 +425,7 @@
       "bulletSpeedPxSec": 4403.2,
       "damageType": "BULLET",
       "reloadType": "MAGAZINE",
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 1.15
+      "burstIntervalSec": 0.06
     },
     "GRENADE_LAUNCHER": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -464,8 +453,7 @@
       "reloadType": "MAGAZINE",
       "explosionRadius": 141,
       "explosionDamage": 70,
-      "burstIntervalSec": 0.06,
-      "aiFireRangePath": 0.85
+      "burstIntervalSec": 0.06
     }
   }
 }

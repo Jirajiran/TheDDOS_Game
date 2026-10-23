@@ -1,71 +1,76 @@
 /**
- * DefinitionRegistry — DOP lookup by id only. No name-branches in gameplay logic.
- * Stores: weapons, blocks, items, skills, archetypes, actors, upgrades, craft, armor.
+ * DefinitionRegistry — DOP lookup by id only.
+ * Catalogs are filled from data/pack JSON at boot (loadDefinitionPack).
+ * Lookups stay synchronous after that install.
  */
+
+function cloneFreeze(value) {
+  if (Array.isArray(value)) {
+    const next = new Array(value.length);
+    for (let i = 0; i < value.length; i++) next[i] = cloneFreeze(value[i]);
+    return Object.freeze(next);
+  }
+  if (value && typeof value === 'object') {
+    const next = {};
+    const keys = Object.keys(value);
+    for (let i = 0; i < keys.length; i++) {
+      next[keys[i]] = cloneFreeze(value[keys[i]]);
+    }
+    return Object.freeze(next);
+  }
+  return value;
+}
 
 function freezeMap(src) {
   const next = Object.create(null);
   if (!src || typeof src !== 'object') return Object.freeze(next);
   const keys = Object.keys(src);
   for (let i = 0; i < keys.length; i++) {
-    const id = keys[i];
-    const v = src[id];
-    next[id] =
-      v && typeof v === 'object' && !Array.isArray(v)
-        ? Object.freeze({ ...v })
-        : v;
+    next[keys[i]] = cloneFreeze(src[keys[i]]);
   }
   return Object.freeze(next);
 }
 
+/**
+ * Shallow copy used for wave composition rows.
+ * Array rows become plain objects (no .length), so pickArchetypeIdForWaveSlot
+ * keeps using the wave table — same result as the previous in-module seed.
+ */
 function freezeArray(arr) {
   if (!Array.isArray(arr)) return Object.freeze([]);
-  return Object.freeze(arr.map((x) => (x && typeof x === 'object' ? Object.freeze({ ...x }) : x)));
+  return Object.freeze(
+    arr.map((x) => (x && typeof x === 'object' ? Object.freeze({ ...x }) : x))
+  );
 }
 
-let _weapons = Object.freeze(Object.create(null));
-let _blocks = Object.freeze(Object.create(null));
-let _items = Object.freeze(Object.create(null));
-let _skills = Object.freeze(Object.create(null));
-let _archetypes = Object.freeze(Object.create(null));
-let _archetypeAliases = Object.freeze(Object.create(null));
-let _waveComposition = Object.freeze([]);
-let _waveTable = Object.freeze([]);
-let _weaponUpgrades = Object.freeze(Object.create(null));
-let _craftRecipes = Object.freeze([]);
-let _craftCategories = Object.freeze([]);
+export let WEAPON_REGISTRY = Object.freeze(Object.create(null));
+export let BLOCK_REGISTRY = Object.freeze(Object.create(null));
+export let ITEM_REGISTRY = Object.freeze(Object.create(null));
+export let SKILL_REGISTRY = Object.freeze(Object.create(null));
+export let UNIT_ARCHETYPE_REGISTRY = Object.freeze(Object.create(null));
+export let ARCHETYPE_ALIASES = Object.freeze(Object.create(null));
+export let WAVE_ARCHETYPE_COMPOSITION = Object.freeze([]);
+export let WAVE_ARCHETYPE_TABLE = Object.freeze([]);
+export let WEAPON_UPGRADES = Object.freeze(Object.create(null));
+export let CRAFT_RECIPES = Object.freeze([]);
+export let CRAFT_CATEGORIES = Object.freeze([]);
 let _armorItems = Object.freeze(Object.create(null));
 let _armorTypes = Object.freeze(['DEFAULT', 'BULLET', 'EXPLOSION', 'LAZER']);
-let _actors = Object.freeze(Object.create(null));
-const DEFAULT_DAY = Object.freeze({
-  dayLengthSec: 300,
-  startHour: 6,
-  dawnHour: 6,
-  duskHour: 18,
-  nightOverlayColor: '#55008C',
-  nightOverlayMaxAlpha: 0.32,
-  nightEnemyAiFireMul: 0.9,
-  nightCameraZoomMul: 0.98,
-  nightCameraTweenPerSec: 1.8,
-  nightTurretAiFireMul: 0.9,
-  applyNightTurretAiFire: false,
-});
-let _day = DEFAULT_DAY;
-
-const DEFAULT_RULES = Object.freeze({
-  targetWaveToWin: 7,
-  setupPhaseDurationSec: 60,
-  waveCountdownSec: 20,
-  enemiesPerWaveBase: 3,
-  enemiesPerWaveScale: 1,
-  waveGroupCount: 3,
-  playerMaxHp: 850,
-  playerSpeed: 200,
-  playerActiveSkills: Object.freeze(['FIST', 'SELF_HEAL']),
-});
-let _rules = DEFAULT_RULES;
+export let ACTOR_REGISTRY = Object.freeze(Object.create(null));
+let _day = null;
+let _rules = null;
 let _ready = false;
 let _version = '0';
+
+function markReady() {
+  _ready =
+    Object.keys(WEAPON_REGISTRY).length > 0 &&
+    Object.keys(BLOCK_REGISTRY).length > 0 &&
+    Object.keys(ITEM_REGISTRY).length > 0 &&
+    _rules != null &&
+    _day != null;
+  return _ready;
+}
 
 export function isDefsReady() {
   return _ready;
@@ -75,57 +80,56 @@ export function getDefsVersion() {
   return _version;
 }
 
-/** Deep-ish install from pack JSON docs + optional seeds already applied. */
+/** Install pack JSON docs. Does not merge a second hardcoded catalog. */
 export function installPackData(pack) {
   if (!pack) return _ready;
 
   if (pack.weapons && pack.weapons.weapons) {
-    _weapons = freezeMap(pack.weapons.weapons);
+    WEAPON_REGISTRY = freezeMap(pack.weapons.weapons);
   }
   if (pack.blocks && pack.blocks.blocks) {
-    _blocks = freezeMap(pack.blocks.blocks);
+    BLOCK_REGISTRY = freezeMap(pack.blocks.blocks);
   }
   if (pack.items && pack.items.items) {
-    _items = freezeMap(pack.items.items);
+    ITEM_REGISTRY = freezeMap(pack.items.items);
   }
   if (pack.skills && pack.skills.skills) {
-    _skills = freezeMap(pack.skills.skills);
+    SKILL_REGISTRY = freezeMap(pack.skills.skills);
   }
   if (pack.archetypes) {
     if (pack.archetypes.archetypes) {
-      _archetypes = freezeMap(pack.archetypes.archetypes);
+      UNIT_ARCHETYPE_REGISTRY = freezeMap(pack.archetypes.archetypes);
     }
     if (pack.archetypes.aliases) {
-      _archetypeAliases = freezeMap(pack.archetypes.aliases);
+      ARCHETYPE_ALIASES = freezeMap(pack.archetypes.aliases);
     }
     if (pack.archetypes.waveComposition) {
-      _waveComposition = freezeArray(pack.archetypes.waveComposition);
+      WAVE_ARCHETYPE_COMPOSITION = freezeArray(pack.archetypes.waveComposition);
     }
     if (pack.archetypes.waveTable) {
-      _waveTable = Object.freeze(pack.archetypes.waveTable.slice());
+      WAVE_ARCHETYPE_TABLE = Object.freeze(pack.archetypes.waveTable.slice());
     }
   }
   if (pack.weaponUpgrades && pack.weaponUpgrades.upgrades) {
-    _weaponUpgrades = freezeMap(pack.weaponUpgrades.upgrades);
+    WEAPON_UPGRADES = freezeMap(pack.weaponUpgrades.upgrades);
   }
   if (pack.craft) {
-    if (pack.craft.recipes) _craftRecipes = freezeArray(pack.craft.recipes);
+    if (pack.craft.recipes) CRAFT_RECIPES = cloneFreeze(pack.craft.recipes);
     if (pack.craft.categories) {
-      _craftCategories = Object.freeze(pack.craft.categories.slice());
+      CRAFT_CATEGORIES = Object.freeze(pack.craft.categories.slice());
     }
   }
   if (pack.actors && pack.actors.actors) {
-    _actors = freezeMap(pack.actors.actors);
+    ACTOR_REGISTRY = freezeMap(pack.actors.actors);
   }
   if (pack.day && typeof pack.day === 'object') {
-    _day = Object.freeze({ ...DEFAULT_DAY, ...pack.day });
+    _day = Object.freeze({ ...pack.day });
   }
   if (pack.rules && typeof pack.rules === 'object') {
     const skills = Array.isArray(pack.rules.playerActiveSkills)
       ? Object.freeze(pack.rules.playerActiveSkills.slice())
-      : DEFAULT_RULES.playerActiveSkills;
+      : Object.freeze([]);
     _rules = Object.freeze({
-      ...DEFAULT_RULES,
       ...pack.rules,
       playerActiveSkills: skills,
     });
@@ -144,82 +148,80 @@ export function installPackData(pack) {
     (pack && pack.manifest && pack.manifest.version) ||
     _version ||
     '1';
-  _ready =
-    Object.keys(_weapons).length > 0 ||
-    Object.keys(_blocks).length > 0 ||
-    Object.keys(_items).length > 0;
-  return _ready;
+  return markReady();
 }
 
 export function seedWeaponsFromRegistry(registry) {
   if (!registry) return;
-  _weapons = freezeMap(registry);
-  _ready = Object.keys(_weapons).length > 0 || _ready;
+  WEAPON_REGISTRY = freezeMap(registry);
+  markReady();
 }
 
 export function seedBlocksFromRegistry(registry) {
   if (!registry) return;
-  _blocks = freezeMap(registry);
-  _ready = Object.keys(_blocks).length > 0 || _ready;
+  BLOCK_REGISTRY = freezeMap(registry);
+  markReady();
 }
 
 export function seedItemsFromRegistry(registry) {
   if (!registry) return;
-  _items = freezeMap(registry);
-  _ready = Object.keys(_items).length > 0 || _ready;
+  ITEM_REGISTRY = freezeMap(registry);
+  markReady();
 }
 
 export function seedSkillsFromRegistry(registry) {
   if (!registry) return;
-  _skills = freezeMap(registry);
+  SKILL_REGISTRY = freezeMap(registry);
 }
 
 export function seedArchetypesFromRegistries(opts = {}) {
-  if (opts.archetypes) _archetypes = freezeMap(opts.archetypes);
-  if (opts.aliases) _archetypeAliases = freezeMap(opts.aliases);
-  if (opts.waveComposition) _waveComposition = freezeArray(opts.waveComposition);
-  if (opts.waveTable) _waveTable = Object.freeze(opts.waveTable.slice());
+  if (opts.archetypes) UNIT_ARCHETYPE_REGISTRY = freezeMap(opts.archetypes);
+  if (opts.aliases) ARCHETYPE_ALIASES = freezeMap(opts.aliases);
+  if (opts.waveComposition) {
+    WAVE_ARCHETYPE_COMPOSITION = freezeArray(opts.waveComposition);
+  }
+  if (opts.waveTable) WAVE_ARCHETYPE_TABLE = Object.freeze(opts.waveTable.slice());
 }
 
 export function seedWeaponUpgradesFromRegistry(registry) {
   if (!registry) return;
-  _weaponUpgrades = freezeMap(registry);
+  WEAPON_UPGRADES = freezeMap(registry);
 }
 
 export function seedCraftFromData(categories, recipes) {
-  if (categories) _craftCategories = Object.freeze(categories.slice());
-  if (recipes) _craftRecipes = freezeArray(recipes);
+  if (categories) CRAFT_CATEGORIES = Object.freeze(categories.slice());
+  if (recipes) CRAFT_RECIPES = cloneFreeze(recipes);
 }
 
 export function seedActorsFromRegistry(registry) {
   if (!registry) return;
-  _actors = freezeMap(registry);
+  ACTOR_REGISTRY = freezeMap(registry);
 }
 
 export function getWeapon(id) {
-  return id ? _weapons[id] || null : null;
+  return id ? WEAPON_REGISTRY[id] || null : null;
 }
 
 export function getBlock(id) {
-  return id ? _blocks[id] || null : null;
+  return id ? BLOCK_REGISTRY[id] || null : null;
 }
 
 export function getItem(id) {
-  return id ? _items[id] || null : null;
+  return id ? ITEM_REGISTRY[id] || null : null;
 }
 
 export function getSkill(id) {
-  return id ? _skills[id] || null : null;
+  return id ? SKILL_REGISTRY[id] || null : null;
 }
 
 export function getArchetype(id) {
   if (!id) return null;
-  const resolved = _archetypeAliases[id] || id;
-  return _archetypes[resolved] || _archetypes[id] || null;
+  const resolved = ARCHETYPE_ALIASES[id] || id;
+  return UNIT_ARCHETYPE_REGISTRY[resolved] || UNIT_ARCHETYPE_REGISTRY[id] || null;
 }
 
 export function getWeaponUpgrade(weaponId) {
-  return weaponId ? _weaponUpgrades[weaponId] || null : null;
+  return weaponId ? WEAPON_UPGRADES[weaponId] || null : null;
 }
 
 export function getArmorItem(id) {
@@ -227,33 +229,39 @@ export function getArmorItem(id) {
 }
 
 export function getActor(id) {
-  return id ? _actors[id] || null : null;
+  return id ? ACTOR_REGISTRY[id] || null : null;
 }
 
-/** Day/night rules from data/pack/day.json (defaults if missing). */
+/** Day/night rules from data/pack/day.json. */
 export function getDayConfig() {
-  return _day || DEFAULT_DAY;
+  if (!_day) {
+    throw new Error('Day pack not loaded (data/pack/day.json)');
+  }
+  return _day;
 }
 
-/** Gameloop / player balance from data/pack/rules.json (defaults if missing). */
+/** Gameloop / player balance from data/pack/rules.json. */
 export function getRulesConfig() {
-  return _rules || DEFAULT_RULES;
+  if (!_rules) {
+    throw new Error('Rules pack not loaded (data/pack/rules.json)');
+  }
+  return _rules;
 }
 
 export function listWeaponIds() {
-  return Object.keys(_weapons);
+  return Object.keys(WEAPON_REGISTRY);
 }
 
 export function listBlockIds() {
-  return Object.keys(_blocks);
+  return Object.keys(BLOCK_REGISTRY);
 }
 
 export function listItemIds() {
-  return Object.keys(_items);
+  return Object.keys(ITEM_REGISTRY);
 }
 
 export function listArchetypeIds() {
-  return Object.keys(_archetypes);
+  return Object.keys(UNIT_ARCHETYPE_REGISTRY);
 }
 
 export function getArmorTypes() {
@@ -261,28 +269,32 @@ export function getArmorTypes() {
 }
 
 export function getWaveArchetypeTable() {
-  return _waveTable;
+  return WAVE_ARCHETYPE_TABLE;
 }
 
 export function getWaveArchetypeComposition() {
-  return _waveComposition;
+  return WAVE_ARCHETYPE_COMPOSITION;
 }
 
 export function getCraftRecipes() {
-  return _craftRecipes;
+  return CRAFT_RECIPES;
 }
 
 export function getCraftCategories() {
-  return _craftCategories;
+  return CRAFT_CATEGORIES;
 }
 
 export function getCraftRecipeById(recipeId) {
-  for (let i = 0; i < _craftRecipes.length; i++) {
-    if (_craftRecipes[i].id === recipeId) return _craftRecipes[i];
+  for (let i = 0; i < CRAFT_RECIPES.length; i++) {
+    if (CRAFT_RECIPES[i].id === recipeId) return CRAFT_RECIPES[i];
   }
   return null;
 }
 
 export function getCraftRecipesByCategory(category) {
-  return _craftRecipes.filter((r) => r.category === category);
+  const out = [];
+  for (let i = 0; i < CRAFT_RECIPES.length; i++) {
+    if (CRAFT_RECIPES[i].category === category) out.push(CRAFT_RECIPES[i]);
+  }
+  return out;
 }

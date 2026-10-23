@@ -2,7 +2,7 @@
  * RETREAT — move away from threat / toward ally centroid. No self-switch to ENGAGE.
  */
 
-import { ActionType } from '../../actions.js';
+import { ActionType } from '../../player/actions.js';
 
 export function runRetreat(ctx) {
   const { unit, combatTarget, pathGoal, allyX, allyY, allyN } = ctx;
