@@ -14,6 +14,7 @@ import { PATH_GRID_N } from '../config.js';
 import { createOccupancy } from '../world/occupancy.js';
 import { runParallelStages, timed, wait } from './loadPipeline.js';
 import { preloadEquipArtCache } from '../view/cosmetics.js';
+import { warmSfxPool } from '../audio/sfx.js';
 
 const STAGE_TIMEOUT_MS = 10000;
 
@@ -46,6 +47,12 @@ export async function runLoading(onProgress) {
         required: false,
         timeoutMs: 2000,
         run: () => preloadEquipArtCache(),
+      },
+      {
+        id: 'sfx_pool',
+        required: true,
+        timeoutMs: STAGE_TIMEOUT_MS,
+        run: () => warmSfxPool(),
       },
     ],
     {

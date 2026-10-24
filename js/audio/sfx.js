@@ -1,10 +1,16 @@
 /**
- * Short SFX. Call sites name an event id. The pack row names the file.
- * A missing row or a missing file stays silent.
+ * Fixed SFX pool. One set of voices per file, built once and kept.
+ * A play restarts a voice already in the ring. The ring never grows or shrinks.
+ * A missing row or a file that never becomes ready stays silent.
  */
 
 const AUDIO_BASE = 'Asset/AudioV2/';
 const MUTE_KEY = 'theddos_mute';
+const SFX_VOLUME = 0.5;
+/** One-shot ceiling per file. A full ring restarts the oldest voice. */
+const ONE_SHOT_VOICES = 3;
+const READY_STATE = 2;
+const WARM_MS = 4000;
 
 const RELOAD_KEY = {
   M1991: 'reload.M1991',
@@ -17,11 +23,23 @@ const RELOAD_KEY = {
 
 let sounds = Object.create(null);
 let unlocked = false;
-let loops = Object.create(null);
+/** @type {Record<string, { voices: HTMLAudioElement[], cursor: number, loop: boolean }> | null} */
+let voicesByFile = null;
+let warmPromise = null;
 
 export function installAudioPack(doc) {
   const next = doc && doc.sounds;
   sounds = next && typeof next === 'object' ? next : Object.create(null);
+}
+
+/**
+ * Build the voice ring once. Later calls return the same set.
+ * Call after the pack is installed, before the first shot or menu click.
+ */
+export function warmSfxPool() {
+  if (warmPromise) return warmPromise;
+  warmPromise = buildPool();
+  return warmPromise;
 }
 
 function muted() {
@@ -43,18 +61,100 @@ function fileFor(id) {
   return null;
 }
 
-export function playSfx(id) {
-  if (!unlocked || muted()) return;
-  const file = fileFor(id);
-  if (!file || typeof Audio === 'undefined') return;
+function buildPool() {
+  const next = Object.create(null);
+  if (typeof Audio === 'undefined') {
+    voicesByFile = next;
+    return Promise.resolve(next);
+  }
+
+  const loopByFile = Object.create(null);
+  const ids = Object.keys(sounds);
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const file = sounds[id];
+    if (!file) continue;
+    const loop = id.startsWith('ambience.');
+    if (loopByFile[file] == null) loopByFile[file] = loop;
+  }
+
+  const pending = [];
+  const files = Object.keys(loopByFile);
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const loop = loopByFile[file];
+    const count = loop ? 1 : ONE_SHOT_VOICES;
+    const voices = new Array(count);
+    for (let v = 0; v < count; v++) {
+      const clip = new Audio();
+      clip.preload = 'auto';
+      clip.loop = loop;
+      clip.volume = loop ? 0 : SFX_VOLUME;
+      clip.src = `${AUDIO_BASE}${file}`;
+      voices[v] = clip;
+      pending.push(waitReady(clip));
+    }
+    next[file] = { voices, cursor: 0, loop };
+  }
+
+  voicesByFile = next;
+  return Promise.all(pending).then(() => next);
+}
+
+function waitReady(clip) {
+  if (clip.readyState >= READY_STATE) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, WARM_MS);
+    function finish() {
+      clearTimeout(timer);
+      clip.removeEventListener('canplay', finish);
+      clip.removeEventListener('error', finish);
+      resolve();
+    }
+    clip.addEventListener('canplay', finish);
+    clip.addEventListener('error', finish);
+    try {
+      clip.load();
+    } catch (_) {
+      finish();
+    }
+  });
+}
+
+function takeVoice(slot) {
+  const voices = slot.voices;
+  const n = voices.length;
+  for (let i = 0; i < n; i++) {
+    const idx = (slot.cursor + i) % n;
+    const clip = voices[idx];
+    if (clip.readyState < READY_STATE) continue;
+    slot.cursor = (idx + 1) % n;
+    return clip;
+  }
+  return null;
+}
+
+function replay(clip) {
   try {
-    const clip = new Audio(`${AUDIO_BASE}${file}`);
-    clip.volume = 0.5;
+    clip.volume = SFX_VOLUME;
+    clip.pause();
+    clip.currentTime = 0;
     const pending = clip.play();
     if (pending && typeof pending.catch === 'function') pending.catch(() => {});
   } catch (_) {
-    /* missing file or blocked playback */
+    /* element not seekable yet */
   }
+}
+
+export function playSfx(id) {
+  if (!unlocked || muted() || !voicesByFile) return;
+  const file = fileFor(id);
+  if (!file) return;
+  const slot = voicesByFile[file];
+  if (!slot || slot.loop) return;
+  const clip = takeVoice(slot);
+  if (!clip) return;
+  replay(clip);
 }
 
 export function playWeaponSfx(weaponId) {
@@ -69,19 +169,17 @@ export function playReloadSfx(weaponId) {
 }
 
 function loopFor(id) {
-  if (loops[id]) return loops[id];
+  if (!voicesByFile) return null;
   const file = fileFor(id);
-  if (!file || typeof Audio === 'undefined') return null;
-  const clip = new Audio(`${AUDIO_BASE}${file}`);
-  clip.loop = true;
-  clip.volume = 0;
-  loops[id] = clip;
-  return clip;
+  if (!file) return null;
+  const slot = voicesByFile[file];
+  if (!slot) return null;
+  return slot.voices[0];
 }
 
 function setLoop(id, volume) {
   const clip = loopFor(id);
-  if (!clip) return;
+  if (!clip || clip.readyState < READY_STATE) return;
   if (!unlocked || muted() || volume <= 0.001) {
     clip.pause();
     return;
@@ -103,8 +201,12 @@ export function tickAmbience(nightBlend) {
 }
 
 export function stopAmbience() {
-  const keys = Object.keys(loops);
-  for (let i = 0; i < keys.length; i++) loops[keys[i]].pause();
+  if (!voicesByFile) return;
+  const files = Object.keys(voicesByFile);
+  for (let i = 0; i < files.length; i++) {
+    const slot = voicesByFile[files[i]];
+    if (slot.loop) slot.voices[0].pause();
+  }
 }
 
 function unlock() {

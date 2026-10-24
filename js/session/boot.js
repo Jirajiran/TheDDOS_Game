@@ -7,6 +7,7 @@ import { runParallelStages, wait } from './loadPipeline.js';
 import { preloadEquipArtCache } from '../view/cosmetics.js';
 import { initUnitVisualFromSvgText } from '../view/unitVisual.js';
 import { loadDefinitionPack } from '../defs/loadPack.js';
+import { warmSfxPool } from '../audio/sfx.js';
 
 export const BOOT_ASSETS = Object.freeze([
   { id: 'css', url: 'css/main.css' },
@@ -111,6 +112,9 @@ export async function runBootPreload(onProgress, options = {}) {
   if (!packResult.ok) {
     throw new Error(packResult.error || 'Definition pack failed to load');
   }
+
+  report(90, 'Sound pool…');
+  await warmSfxPool();
 
   report(92, 'Unit visuals…');
   const unitAsset = assets.unit_template;
