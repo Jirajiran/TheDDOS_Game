@@ -1,5 +1,23 @@
 import { POOL_DROPS, POOL_PROJECTILES, POOL_UNITS } from '../config.js';
 
+const MUZZLE_QUEUE = 4;
+
+function makeMuzzleSlot() {
+  return { active: false, t: 0, aimRad: 0, weaponId: null, simTime: 0 };
+}
+
+function makeMuzzleQueue() {
+  const q = new Array(MUZZLE_QUEUE);
+  for (let i = 0; i < MUZZLE_QUEUE; i++) q[i] = makeMuzzleSlot();
+  return q;
+}
+
+export function clearMuzzleQueue(u) {
+  const q = u && u.muzzleQueue;
+  if (!q) return;
+  for (let i = 0; i < q.length; i++) q[i].active = false;
+}
+
 function makeInactiveUnit(i) {
   return {
     id: i,
@@ -76,6 +94,8 @@ function makeInactiveUnit(i) {
     /** Weapon sequential burst (SMG etc.) — remaining rounds after first shot. */
     burstRemaining: 0,
     burstIntervalT: 0,
+    /** Delayed volleys. Fixed ring, cleared on release. */
+    muzzleQueue: makeMuzzleQueue(),
     /** Hotbar switch queue (AI units with inventory). */
     pendingHotbar: -1,
     hotbarSwitchT: 0,
@@ -215,6 +235,7 @@ export function resetPools(pools) {
     u._burstTimer = 0;
     u.burstRemaining = 0;
     u.burstIntervalT = 0;
+    clearMuzzleQueue(u);
     u.pendingHotbar = -1;
     u.hotbarSwitchT = 0;
     u.hotbarFireLockT = 0;
@@ -273,6 +294,7 @@ export function deactivateUnit(u) {
   u.aggroChase = false;
   u.burstRemaining = 0;
   u.burstIntervalT = 0;
+  clearMuzzleQueue(u);
   u.pendingHotbar = -1;
   u.hotbarSwitchT = 0;
   u.hotbarFireLockT = 0;

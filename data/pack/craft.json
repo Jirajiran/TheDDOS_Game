@@ -206,16 +206,6 @@
       }
     },
     {
-      "id": "craft_turret_pistol",
-      "itemId": "TURRET_PISTOL",
-      "category": "Turret",
-      "resultCount": 1,
-      "cost": {
-        "STONE": 10,
-        "IRON": 1
-      }
-    },
-    {
       "id": "craft_turret_m1911",
       "itemId": "TURRET_M1911",
       "category": "Turret",

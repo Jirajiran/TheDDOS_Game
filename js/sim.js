@@ -77,6 +77,7 @@ import {
   decideTurretActions,
   queueHotbarSelect,
   tickHotbarSwitches,
+  tickMuzzleLead,
   tickWeaponBursts,
   tryFire,
   tryTurretFire,
@@ -232,6 +233,7 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   separateUnits(match);
   updateCooldowns(match, dt);
   tickWeaponBursts(match, dt);
+  tickMuzzleLead(match, dt);
   tickHotbarSwitches(match, dt);
   updateWeaponReloads(match, dt);
   tickAllSkills(match, dt);

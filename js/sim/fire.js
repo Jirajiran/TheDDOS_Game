@@ -20,6 +20,7 @@ import {
   getActiveSlot,
   equipArmorOnUnit,
   equipShieldOnUnit,
+  ejectBrokenBasicShield,
   isArmorSlot,
   isShieldSlot,
 } from '../player/inventory.js';
@@ -60,8 +61,8 @@ import {
   applyDamageToUnit,
   getPlayerUnit,
 } from './unit.js';
-export function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad) {
-  const tick = Math.floor((match.simTime || 0) * 60);
+export function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad, simTime) {
+  const tick = Math.floor(((simTime != null ? simTime : match.simTime) || 0) * 60);
   let h =
     (((unit.id | 0) + 1) * 73856093) ^
     (tick * 19349663) ^
@@ -82,16 +83,79 @@ export function playShotingVisual(unit, match) {
 
 /** Spawn pellet volley for one shot action (does not consume ammo / cooldown). */
 
-export function spawnShotVolley(match, unit, weapon, aimRad) {
+export function spawnShotVolley(match, unit, weapon, aimRad, simTime) {
+  const time = simTime != null ? simTime : match.simTime;
   const pellets = Math.max(1, weapon.pelletCount || 1);
   const spread = ((weapon.spreadDeg || 0) * Math.PI) / 180;
   for (let p = 0; p < pellets; p++) {
     const offset =
       pellets === 1
-        ? pelletAimOffsetRad(match, unit, p, spread * 0.35)
-        : pelletAimOffsetRad(match, unit, p, spread);
+        ? pelletAimOffsetRad(match, unit, p, spread * 0.35, time)
+        : pelletAimOffsetRad(match, unit, p, spread, time);
     spawnProjectile(match, unit, weapon, aimRad + offset);
   }
+}
+
+function muzzleLeadOf(weapon) {
+  const v = weapon && weapon.muzzleLeadSec;
+  return typeof v === 'number' && v > 0 ? v : 0;
+}
+
+function scheduleUnitVolley(match, unit, weapon, aimRad) {
+  const simTime = match.simTime || 0;
+  const lead = muzzleLeadOf(weapon);
+  if (lead <= 0) {
+    spawnShotVolley(match, unit, weapon, aimRad, simTime);
+    return;
+  }
+  const q = unit.muzzleQueue;
+  if (!q) {
+    spawnShotVolley(match, unit, weapon, aimRad, simTime);
+    return;
+  }
+  for (let i = 0; i < q.length; i++) {
+    if (q[i].active) continue;
+    q[i].active = true;
+    q[i].t = lead;
+    q[i].aimRad = aimRad;
+    q[i].weaponId = weapon.id;
+    q[i].simTime = simTime;
+    return;
+  }
+  spawnShotVolley(match, unit, weapon, aimRad, simTime);
+}
+
+function turretOwner(block) {
+  return {
+    id: -block.id,
+    x: block.x + block.w / 2,
+    y: block.y + block.h / 2,
+    radius: Math.min(block.w, block.h) * 0.35,
+    team: TEAM.PLAYER,
+    fromTurret: true,
+    sourceBlockId: block.id,
+  };
+}
+
+function releaseTurretShot(match, block) {
+  const weapon = getWeaponDef(block.muzzleWeaponId);
+  block.muzzlePending = false;
+  if (!weapon || !block.alive) return;
+  spawnProjectile(match, turretOwner(block), weapon, block.muzzleAimRad);
+}
+
+function scheduleTurretShot(match, block, weapon, aim) {
+  const lead = muzzleLeadOf(weapon);
+  if (lead <= 0) {
+    spawnProjectile(match, turretOwner(block), weapon, aim);
+    return;
+  }
+  if (block.muzzlePending) releaseTurretShot(match, block);
+  block.muzzlePending = true;
+  block.muzzleLeadT = lead;
+  block.muzzleAimRad = aim;
+  block.muzzleWeaponId = weapon.id;
+  block.muzzleSimTime = match.simTime || 0;
 }
 
 export function clearUnitBurst(unit) {
@@ -193,13 +257,13 @@ export function tickHotbarSwitches(match, dt) {
   }
 }
 
-export function fireProjectileShot(match, unit, weapon, ammo) {
+export function fireProjectileShot(match, unit, weapon, ammo, playSound) {
   const consumed = consumeAmmoForShot(ammo, weapon);
   if (!consumed && !weapon.infiniteAmmo) return false;
-  spawnShotVolley(match, unit, weapon, unit.aimRad);
+  scheduleUnitVolley(match, unit, weapon, unit.aimRad);
   match.stats.shotsFired += 1;
   playShotingVisual(unit, match);
-  playWeaponSfx(weapon.id);
+  if (playSound) playWeaponSfx(weapon.id);
   return true;
 }
 
@@ -233,7 +297,7 @@ export function tryFire(match, unit) {
     return;
   }
 
-  if (!fireProjectileShot(match, unit, weapon, ammo)) return;
+  if (!fireProjectileShot(match, unit, weapon, ammo, true)) return;
   markHotbarFireLock(match, unit);
 
   const burst = Math.max(1, weapon.burstCount || 1);
@@ -276,7 +340,7 @@ export function tickWeaponBursts(match, dt) {
       continue;
     }
 
-    if (!fireProjectileShot(match, unit, weapon, ammo)) {
+    if (!fireProjectileShot(match, unit, weapon, ammo, false)) {
       clearUnitBurst(unit);
       unit.fireCooldown = weapon.cooldownSec || 0;
       continue;
@@ -293,6 +357,42 @@ export function tickWeaponBursts(match, dt) {
       clearUnitBurst(unit);
       unit.fireCooldown = weapon.cooldownSec || 0;
     }
+  }
+}
+
+export function tickMuzzleLead(match, dt) {
+  const units = match.pools.units;
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    const q = unit.muzzleQueue;
+    if (!q) continue;
+    for (let s = 0; s < q.length; s++) {
+      const slot = q[s];
+      if (!slot.active) continue;
+      if (!unit.active) {
+        slot.active = false;
+        continue;
+      }
+      slot.t -= dt;
+      if (slot.t > 0) continue;
+      const weapon = getWeaponDef(slot.weaponId);
+      slot.active = false;
+      if (!weapon) continue;
+      spawnShotVolley(match, unit, weapon, slot.aimRad, slot.simTime);
+    }
+  }
+  const blocks = match.blocks;
+  if (!blocks) return;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (!block.muzzlePending) continue;
+    if (!block.alive) {
+      block.muzzlePending = false;
+      continue;
+    }
+    block.muzzleLeadT -= dt;
+    if (block.muzzleLeadT > 0) continue;
+    releaseTurretShot(match, block);
   }
 }
 
@@ -397,15 +497,7 @@ export function tryTurretFire(match, blockId, aimRad) {
   if (block.fireCooldown > 0) return;
   const weapon = getWeaponDef(block.weaponId);
   if (!weapon) return;
-  const owner = {
-    id: -block.id,
-    x: block.x + block.w / 2,
-    y: block.y + block.h / 2,
-    radius: Math.min(block.w, block.h) * 0.35,
-    team: TEAM.PLAYER,
-    fromTurret: true,
-    sourceBlockId: block.id,
-  };
+  const owner = turretOwner(block);
   const aim =
     typeof aimRad === 'number'
       ? aimRad
@@ -419,7 +511,7 @@ export function tryTurretFire(match, blockId, aimRad) {
     const duration = weapon.beamDurationSec || 0;
     block.fireCooldown = duration + (weapon.cooldownSec || 0);
   } else {
-    spawnProjectile(match, owner, weapon, aim);
+    scheduleTurretShot(match, block, weapon, aim);
     block.fireCooldown = weapon.cooldownSec;
   }
   match.stats.shotsFired += 1;
@@ -584,6 +676,7 @@ export function updateProjectiles(match, dt) {
       if (hit.kind === 'shield') {
         const unit = hit.unit;
         const abs = absorbDamageWithShield(unit, p.damage);
+        if (abs.broke) ejectBrokenBasicShield(match, unit);
         if (abs.absorbed > 0 && abs.leftover <= 0) playSfx('combat.hit.shield');
         if (abs.leftover > 0) {
           const dmg = scaledHitDamage(

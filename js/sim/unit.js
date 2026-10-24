@@ -27,6 +27,7 @@ import { huntAreaGoal } from './huntArea.js';
 import {
   equipArmorOnUnit,
   equipShieldOnUnit,
+  ejectBrokenBasicShield,
   getArmorDamageReduction,
 } from '../player/inventory.js';
 import {
@@ -42,6 +43,7 @@ import {
 } from '../world/occupancy.js';
 import {
   acquireUnit,
+  clearMuzzleQueue,
   deactivateUnit,
 } from '../world/pools.js';
 import {
@@ -120,6 +122,7 @@ export function resetPlayerStats(u, pack) {
   u.targetAimRad = 0;
   u.targetFacingRad = 0;
   u.fireCooldown = 0;
+  clearMuzzleQueue(u);
   u.aiStage = 'approach';
   u.groupId = -1;
   u.pivotIndex = 0;
@@ -308,6 +311,7 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
     const abs = absorbDamageWithShield(unit, dmg);
     dmg = abs.leftover;
     shieldHit = abs.absorbed > 0;
+    if (abs.broke) ejectBrokenBasicShield(match, unit);
   }
   if (dmg <= 0) {
     if (ctx.impact && shieldHit) playSfx('combat.hit.shield');

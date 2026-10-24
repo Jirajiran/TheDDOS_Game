@@ -1,4 +1,5 @@
 import { AppState, getBalancePack } from '../config.js';
+import { stopAmbience } from '../audio/sfx.js';
 import { clearLocalSnapshot } from '../session/memento.js';
 
 /**
@@ -9,6 +10,7 @@ export function createMatchEnd(hub) {
   function endMatch(outcome) {
     const { state, playerUi } = hub;
     if (state.appState !== AppState.PLAYING) return;
+    stopAmbience();
     if (state.panels) state.panels.close();
     hub.stopLoop();
     const match = state.match;

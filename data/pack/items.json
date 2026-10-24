@@ -261,38 +261,6 @@
       "maxHp": 150,
       "blocksProjectiles": true
     },
-    "TURRET_PISTOL": {
-      "kind": "PLACEABLE",
-      "maxStack": 8,
-      "walkSolid": true,
-      "projectileSolid": true,
-      "allowProjectilePass": false,
-      "canToggle": false,
-      "isDefeatCondition": false,
-      "isTurret": true,
-      "isHeal": false,
-      "isGen": false,
-      "isFactory": false,
-      "isDoor": false,
-      "isWire": false,
-      "isHarvest": false,
-      "infiniteAmmo": true,
-      "priorityScore": 30,
-      "pierceCost": 2,
-      "team": 1,
-      "armorType": "BULLET",
-      "id": "TURRET_PISTOL",
-      "typeId": "TURRET",
-      "label": "Turret M1911",
-      "color": "#4a7a9a",
-      "footprint": {
-        "w": 1,
-        "h": 1
-      },
-      "maxHp": 350,
-      "weaponId": "M1991",
-      "detectRadius": 819
-    },
     "TURRET_M1911": {
       "kind": "PLACEABLE",
       "maxStack": 8,
@@ -883,12 +851,12 @@
       "color": "#4a7a9a",
       "kind": "SHIELD",
       "maxStack": 1,
-      "shieldMaxHp": 100,
+      "shieldMaxHp": 200,
       "shieldRadius": 35,
       "shieldOffset": 42,
       "shieldPierceCost": 2,
       "shieldAbsorbRatio": 1,
-      "shieldRegenPerSec": 4,
+      "shieldRegenPerSec": 0,
       "markerColor": "#6a9ccc"
     },
     "GRENADE_LAUNCHER": {

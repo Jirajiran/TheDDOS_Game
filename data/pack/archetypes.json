@@ -264,7 +264,7 @@
       "meleeMultiplier": 1,
       "hasPlacementSkill": true,
       "placeableBlockTypes": [
-        "TURRET_PISTOL",
+        "TURRET_M1911",
         "WALL_WOOD"
       ],
       "allowedGoals": [

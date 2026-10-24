@@ -46,7 +46,8 @@ import {
 } from '../combat/weapons.js';
 export function updateWaves(match, dt) {
   const pack = getBalancePack();
-  if (!match.basePlaced || !match.base || !match.base.alive) return;
+  if (!match.basePlaced || !match.base) return;
+  if (!match.base.alive && !pack.lastStand) return;
   if (match.outcome) return;
 
   // Win: cleared target wave (all enemies dead after wave N spawned).

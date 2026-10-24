@@ -230,6 +230,23 @@ export function equipShieldOnUnit(unit, itemId) {
   return true;
 }
 
+/** SHIELD_BASIC breaks out of the hotbar. The slot returns to the empty pool. */
+export function ejectBrokenBasicShield(match, unit) {
+  if (!unit || unit.activeShieldId !== 'SHIELD_BASIC') return;
+  if (!unit.shield || !unit.shield.broken) return;
+  if (unit.role === 'player' && match) clearBasicShieldSlots(match.inventory);
+  clearBasicShieldSlots(unit.inventory);
+  equipShieldOnUnit(unit, null);
+}
+
+function clearBasicShieldSlots(bag) {
+  if (!bag) return;
+  for (let i = 0; i < bag.length; i++) {
+    const slot = bag[i];
+    if (slot && slot.itemId === 'SHIELD_BASIC') bag[i] = emptySlot();
+  }
+}
+
 function restorePassiveOrClearShield(unit) {
   const arch = getUnitArchetype(unit.archetypeId);
   if (arch && arch.hasPassiveShield) {

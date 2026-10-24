@@ -682,6 +682,7 @@ export function createApp(dom) {
   }
 
   function enterMenu() {
+    stopAmbience();
     stopLoop();
     // Autosave is primary while PLAYING; Result already cleared autosave on win/lose.
     // Do not re-persist finished matches when returning to menu.

@@ -269,6 +269,12 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
     /** Inherent BaseBlock multi-gen (or empty). */
     generatorList: initGeneratorList(blockDef.generatorList),
     fireCooldown: 0,
+    /** One delayed turret shot. Released by tickMuzzleLead. */
+    muzzlePending: false,
+    muzzleLeadT: 0,
+    muzzleAimRad: 0,
+    muzzleWeaponId: null,
+    muzzleSimTime: 0,
     /** Turret gun layer aim (base stays fixed). */
     turretAimRad: 0,
     turretTargetAimRad: 0,
