@@ -25,6 +25,7 @@ import {
   isWeaponSlot,
   moveOrSwapInventorySlots,
 } from './player/inventory.js';
+import { stopAmbience } from './audio/sfx.js';
 import { runBootPreload } from './session/boot.js';
 import { runLoading } from './session/loading.js';
 import { createLoadingUi } from './session/loadingUi.js';
@@ -1184,7 +1185,10 @@ export function createApp(dom) {
     stopLoop();
     state.lastTs = 0;
     const tick = (ts) => {
-      if (state.appState !== AppState.PLAYING) return;
+      if (state.appState !== AppState.PLAYING) {
+        stopAmbience();
+        return;
+      }
       if (!state.lastTs) state.lastTs = ts;
       const dt = Math.min(0.05, (ts - state.lastTs) / 1000);
       state.lastTs = ts;

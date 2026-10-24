@@ -79,9 +79,9 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
   }
 
   if (match) {
+    drawBotAreas(ctx, world);
     if (match.territories && match.territories.length) drawTerritories(ctx, match.territories);
     else drawBaseChunk(ctx, match.baseChunk, zoom);
-    drawGeneralPaths(ctx, match.general, zoom);
     drawBlocks(ctx, match.blocks, zoom);
     drawDrops(ctx, match.pools && match.pools.drops, zoom);
     drawPlaceGhost(ctx, match.placeGhost, zoom);
@@ -110,6 +110,69 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
   }
 }
 
+function rectsShareEdge(a, b) {
+  const ax2 = a.x + a.w;
+  const ay2 = a.y + a.h;
+  const bx2 = b.x + b.w;
+  const by2 = b.y + b.h;
+  const vertical = (ax2 === b.x || bx2 === a.x) && a.y < by2 && ay2 > b.y;
+  const horizontal = (ay2 === b.y || by2 === a.y) && a.x < bx2 && ax2 > b.x;
+  return vertical || horizontal;
+}
+
+/** One fill per connected set of edge Areas. Open and closed stay separate bodies. */
+function drawBotAreas(ctx, world) {
+  const areas = world && world.edgeAreas;
+  if (!areas || !areas.length) return;
+  fillAreaGroups(ctx, areas, true, 'rgba(220, 48, 40, 0.34)');
+  fillAreaGroups(ctx, areas, false, 'rgba(220, 48, 40, 0.12)');
+}
+
+function fillAreaGroups(ctx, areas, open, fillStyle) {
+  const list = [];
+  for (let i = 0; i < areas.length; i++) {
+    if (!!areas[i].open === open) list.push(areas[i]);
+  }
+  if (!list.length) return;
+  const parent = new Array(list.length);
+  for (let i = 0; i < list.length; i++) parent[i] = i;
+  function find(i) {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  }
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (!rectsShareEdge(list[i], list[j])) continue;
+      parent[find(i)] = find(j);
+    }
+  }
+  const groups = [];
+  const byRoot = Object.create(null);
+  for (let i = 0; i < list.length; i++) {
+    const root = find(i);
+    let group = byRoot[root];
+    if (!group) {
+      group = [];
+      byRoot[root] = group;
+      groups.push(group);
+    }
+    group.push(list[i]);
+  }
+  ctx.fillStyle = fillStyle;
+  for (let g = 0; g < groups.length; g++) {
+    const pads = groups[g];
+    ctx.beginPath();
+    for (let p = 0; p < pads.length; p++) {
+      const pad = pads[p];
+      ctx.rect(pad.x, pad.y, pad.w, pad.h);
+    }
+    ctx.fill();
+  }
+}
+
 function drawTerritories(ctx, territories) {
   ctx.fillStyle = 'rgba(196, 163, 90, 0.28)';
   for (let i = 0; i < territories.length; i++) {
@@ -133,29 +196,6 @@ function drawBaseChunk(ctx, zone, zoom) {
   ctx.setLineDash([8 / zoom, 6 / zoom]);
   ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
   ctx.setLineDash([]);
-}
-
-function drawGeneralPaths(ctx, general, zoom) {
-  if (!general || !general.groups) return;
-  ctx.strokeStyle = 'rgba(255,120,80,0.35)';
-  ctx.lineWidth = 2 / zoom;
-  for (let g = 0; g < general.groups.length; g++) {
-    const group = general.groups[g];
-    if (!group.pivots || group.pivots.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(group.pivots[0].x, group.pivots[0].y);
-    for (let i = 1; i < group.pivots.length; i++) {
-      ctx.lineTo(group.pivots[i].x, group.pivots[i].y);
-    }
-    ctx.stroke();
-    for (let i = 0; i < group.pivots.length; i++) {
-      const p = group.pivots[i];
-      ctx.fillStyle = 'rgba(255,100,60,0.7)';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 6 / zoom, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
 }
 
 function drawBlocks(ctx, blocks, zoom) {

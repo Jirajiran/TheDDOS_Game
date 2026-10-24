@@ -13,6 +13,10 @@ import {
   clearReloadVisual,
 } from '../view/unitVisual.js';
 import {
+  playReloadSfx,
+  playSfx,
+} from '../audio/sfx.js';
+import {
   beginReload,
   tickReload,
 } from '../combat/weapons.js';
@@ -35,7 +39,7 @@ export function tryReload(match, unit) {
   const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
   if (!weapon || !ammo) return;
   const opts = unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
-  beginReload(ammo, weapon, opts);
+  if (beginReload(ammo, weapon, opts)) playReloadSfx(weapon.id);
 }
 
 export function tryCancelReload(match, unit) {
@@ -47,7 +51,7 @@ export function tryCancelReload(match, unit) {
 export function continueShellReload(ammo, weapon, opts) {
   if (!weapon || weapon.reloadType !== ReloadType.INDIVIDUAL_SHELL) return;
   if (!ammo || ammo.ammoInMag >= weapon.magCapacity) return;
-  beginReload(ammo, weapon, opts);
+  if (beginReload(ammo, weapon, opts)) playReloadSfx(weapon.id);
 }
 
 /** Deterministic pellet aim offset in [-spread/2, spread/2]. */
@@ -61,6 +65,13 @@ export function updateWeaponReloads(match, dt) {
     const opts = playerReloadOpts(match, def);
     if (tickReload(slot, def, dt, opts)) {
       continueShellReload(slot, def, playerReloadOpts(match, def));
+      if (
+        def &&
+        def.reloadType === ReloadType.INDIVIDUAL_SHELL &&
+        slot.reloadTimer <= 0
+      ) {
+        playSfx('reload.SHOTGUN_DONE');
+      }
     }
   }
   const units = match.pools.units;
@@ -68,7 +79,16 @@ export function updateWeaponReloads(match, dt) {
     const u = units[i];
     if (!u.active || u.role !== 'enemy' || !u.weaponId) continue;
     const def = getWeaponDef(u.weaponId);
-    if (tickReload(u, def, dt, null)) continueShellReload(u, def, null);
+    if (tickReload(u, def, dt, null)) {
+      continueShellReload(u, def, null);
+      if (
+        def &&
+        def.reloadType === ReloadType.INDIVIDUAL_SHELL &&
+        u.reloadTimer <= 0
+      ) {
+        playSfx('reload.SHOTGUN_DONE');
+      }
+    }
   }
 }
 

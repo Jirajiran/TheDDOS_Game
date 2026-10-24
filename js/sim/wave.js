@@ -8,6 +8,7 @@ import {
   pickArchetypeIdForWaveSlot,
 } from '../config.js';
 import { pickEdgeSpawnPosition } from '../defs/spawnPolicy.js';
+import { edgeSpawnAnchor } from '../world/world.js';
 import {
   attachUnitToGroup,
   deployPreparedGroups,
@@ -250,16 +251,7 @@ function pickOpenEdgeAreaPosition(match, slot) {
   if (!open.length) return null;
   const waveIndex = match.waveIndex | 0;
   const area = open[(waveIndex + slot) % open.length];
-  const cx = area.x + area.w * 0.5;
-  const cy = area.y + area.h * 0.5;
-  const step = Math.min(area.w, area.h) * 0.08;
-  const x = cx + ((slot % 5) - 2) * step;
-  const y = cy + ((slot % 3) - 1) * step * 0.5;
-  const inset = Math.min(48, area.w * 0.2, area.h * 0.2);
-  return {
-    x: Math.max(area.x + inset, Math.min(area.x + area.w - inset, x)),
-    y: Math.max(area.y + inset, Math.min(area.y + area.h - inset, y)),
-  };
+  return edgeSpawnAnchor(area, match.world, slot);
 }
 
 /** Apply pack damage matrix (heal amounts stay raw). */

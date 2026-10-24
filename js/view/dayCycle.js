@@ -92,8 +92,9 @@ export function getNightOverlayStyle(nightBlend, day) {
 
 export function getNightCameraZoomMul(nightBlend, day) {
   const d = day || cfg();
-  const nightMul =
+  let nightMul =
     typeof d.nightCameraZoomMul === 'number' ? d.nightCameraZoomMul : 0.98;
+  if (!(nightMul < 1)) nightMul = 1;
   const blend = Math.max(0, Math.min(1, nightBlend || 0));
   return 1 + (nightMul - 1) * blend;
 }

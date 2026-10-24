@@ -26,6 +26,7 @@ import {
 import { generateWorldObjects } from './world/mapgen.js';
 import { refreshEdgeAreas } from './world/world.js';
 import { rebuildTerritories } from './sim/territory.js';
+import { openHuntArea } from './sim/huntArea.js';
 import {
   getEffectiveSpeedMult,
   tickMoralePassives,
@@ -161,6 +162,7 @@ export function initMatchGameplay(match, options = {}) {
   match.baseChunk = null;
   refreshEdgeAreas(match);
   match.territories = [];
+  match.huntArea = null;
   match.blocks = [];
   match.worldObjects = [];
   match.blockById = Object.create(null);
@@ -516,6 +518,8 @@ export function restoreMatchFromSnapshot(match, snap) {
   }
   refreshEdgeAreas(match);
   rebuildTerritories(match);
+  if (snap.basePlaced && !(match.base && match.base.alive)) openHuntArea(match);
+  else match.huntArea = null;
 
   if (snap.pathPipeMask) {
     match.pathPipeMask = {

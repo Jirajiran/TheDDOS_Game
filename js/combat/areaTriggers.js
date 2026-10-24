@@ -127,7 +127,7 @@ export function applyExplosionAoE(
 ) {
   if (!match || radius <= 0 || !damage) return;
   spawnExplosionVfx(match, cx, cy, radius);
-  playSfx('combat.explode');
+  playSfx(opts.sound || 'combat.explode');
   const applyUnit = opts.applyDamageToUnit;
   const applyBlock = opts.applyDamageToBlock;
   const sourceTeam = opts.sourceTeam;
@@ -223,6 +223,7 @@ export function tickAreaTriggers(match, dt, hooks = {}) {
           sourceTeam: at.team,
           skipTeam: at.team,
           skipBlockId: block.id,
+          sound: 'combat.explode.mine',
         }
       );
       // Self-destruct 100% maxHp.

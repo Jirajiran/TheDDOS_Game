@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "dayLengthSec": 300,
+  "dayLengthSec": 1440,
   "startHour": 6,
   "dawnHour": 6,
   "duskHour": 18,

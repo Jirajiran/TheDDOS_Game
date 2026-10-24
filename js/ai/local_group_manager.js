@@ -130,6 +130,31 @@ export function applyLocalPathLayer(match, unit, generalGoal, opts = {}) {
 
   ensureSteeringState(match, unit, cfg);
 
+  if (opts.holdGoal && generalGoal) {
+    writePathGoal(
+      unit,
+      generalGoal.x,
+      generalGoal.y,
+      generalGoal.radius != null ? generalGoal.radius : 80
+    );
+    bb.perception = {
+      fanLines: 0,
+      blocked: !!opts.attackBlock,
+      rearHit: false,
+      blockerId: opts.attackBlock ? opts.attackBlock.id : -1,
+    };
+    bb.flags.LOCAL_DODGE = false;
+    bb.flags.STEERING_EXHAUSTED = false;
+    bb.flags.REAR_THREAT = false;
+    bb.localAdjusted = false;
+    return {
+      goal: generalGoal,
+      attackBlock: opts.attackBlock || null,
+      perception: bb.perception,
+      steeringUsed: unit.steeringUsed | 0,
+    };
+  }
+
   // Sector / off-path rejoin (Local General stub → blackboard goal).
   let goal = generalGoal;
   const leftSector = !!opts.leftSector;

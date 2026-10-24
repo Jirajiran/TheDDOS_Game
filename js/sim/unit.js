@@ -22,6 +22,8 @@ import {
   writeGeneralPathToBlackboard,
 } from '../ai/local_group_manager.js';
 import { territoryWalkGoal } from './territory.js';
+import { marchIntoBaseChunk } from './march.js';
+import { huntAreaGoal } from './huntArea.js';
 import {
   equipArmorOnUnit,
   equipShieldOnUnit,
@@ -301,11 +303,16 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
   }
 
   let dmg = damage;
+  let shieldHit = false;
   if (!ctx.skipShield && unit.shield) {
     const abs = absorbDamageWithShield(unit, dmg);
     dmg = abs.leftover;
+    shieldHit = abs.absorbed > 0;
   }
-  if (dmg <= 0) return;
+  if (dmg <= 0) {
+    if (ctx.impact && shieldHit) playSfx('combat.hit.shield');
+    return;
+  }
 
   const reduction = getPassiveDamageReduction(unit);
   if (reduction > 0) dmg *= 1 - reduction;
@@ -313,7 +320,7 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
   if (armorRed > 0) dmg *= 1 - armorRed;
 
   unit.hp -= dmg;
-  if (ctx.impact && dmg > 0) playSfx('combat.hit');
+  if (ctx.impact && dmg > 0) playSfx('combat.hit.body');
   noteMoralePressure(unit, 2);
 
   // Player-team projectile / turret hit → sticky aggro + HIT Event for Mediator.
@@ -419,8 +426,19 @@ export function decideEnemyActions(match, dt) {
     ensureBlackboard(e);
 
     let pathGoal = null;
-    if (!baseAlive) {
-      pathGoal = territoryWalkGoal(match, e) || nextOpenEdgeGoal(match, e);
+    let marchBlock = null;
+    let holdGoal = false;
+    if (baseAlive && match.baseChunk) {
+      const march = marchIntoBaseChunk(match, e);
+      if (march) {
+        pathGoal = march.goal;
+        marchBlock = march.attackBlock;
+        holdGoal = true;
+      }
+    } else if (!baseAlive) {
+      pathGoal = huntAreaGoal(match, e);
+      if (pathGoal) holdGoal = true;
+      if (!pathGoal) pathGoal = territoryWalkGoal(match, e) || nextOpenEdgeGoal(match, e);
     }
     if (!pathGoal) {
       pathGoal = advanceUnitAlongChain(match, e);
@@ -452,6 +470,8 @@ export function decideEnemyActions(match, dt) {
       baseY: by,
       leftSector: !!leftSector,
       config: AI_LOCAL_PATH,
+      holdGoal,
+      attackBlock: marchBlock,
     });
     pathGoal = local.goal;
     if (local.attackBlock) {

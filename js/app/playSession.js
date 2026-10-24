@@ -7,6 +7,7 @@ import {
 import { GAME_PACK, getBalancePack, getWeaponDef } from '../config.js';
 import { panCamera } from '../view/camera.js';
 import { tickNightBlend } from '../view/dayCycle.js';
+import { tickAmbience } from '../audio/sfx.js';
 import { hostIngestActions } from '../session/host.js';
 import {
   countItem,
@@ -175,6 +176,7 @@ export function createPlaySession(hub) {
     if (!match) return;
     state._hudDt = dt;
     tickNightBlend(match, dt);
+    tickAmbience(match.nightBlend || 0);
 
     try {
       state.autosaveAcc += dt;

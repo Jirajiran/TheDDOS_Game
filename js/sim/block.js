@@ -25,6 +25,7 @@ import {
 import { playSfx } from '../audio/sfx.js';
 import { refreshEdgeAreas } from '../world/world.js';
 import { rebuildTerritories } from './territory.js';
+import { openHuntArea } from './huntArea.js';
 import {
   ejectDropTowardPlayer,
   spawnDrop,
@@ -372,6 +373,13 @@ export function updateFactory(match, dt) {
   }
 }
 
+function blockHitSfx(block) {
+  const kind = block && block.harvestKind;
+  if (kind === 'TREE') return 'combat.hit.wood';
+  if (kind === 'STONE' || kind === 'ORE') return 'combat.hit.stone';
+  return 'combat.hit.block';
+}
+
 export function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {}) {
   if (!block || !block.alive) return;
 
@@ -404,7 +412,7 @@ export function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {
     dmg *= WIRE_MELEE_MULT;
   }
   block.hp -= dmg;
-  if (ctx.impact && dmg > 0 && hpBefore > 0) playSfx('combat.hit');
+  if (ctx.impact && dmg > 0 && hpBefore > 0) playSfx(blockHitSfx(block));
   match.stats.damageDealt += dmg;
   if (block.hp <= 0) {
     destroyBlock(match, block, { skipLoot: skipLoot && !!block.isHarvest });
@@ -432,6 +440,7 @@ export function destroyBlock(match, block, opts = {}) {
     match.baseChunk = null;
     clearBaseChunkL1Mask(match);
     refreshEdgeAreas(match);
+    openHuntArea(match);
     const loseMode = getBalancePack().loseMode === 2 ? 2 : 1;
     if (loseMode !== 2 && !match.outcome) match.outcome = 'lose';
   }

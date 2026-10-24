@@ -8,6 +8,7 @@
   "waveGroupCount": 3,
   "loseMode": 2,
   "dodgeQuota": 4,
+  "area": { "cellsW": 3, "cellsH": 3 },
   "territory": {
     "base": { "padL3": 4, "importance": 3 },
     "turret": { "padL3": 2, "importance": 2 },

@@ -1,3 +1,4 @@
+import { playSfx } from '../audio/sfx.js';
 import {
   GAME_PACK,
   L3_SIZE,
@@ -81,6 +82,7 @@ export function applyMeleeSwingHits(match, unit) {
           if (healed > 0 && unit.role === 'player') {
             match.interactPrompt = `Repaired ${target.label || target.itemId} +${Math.round(healed)}`;
           }
+          if (healed > 0) playSfx('combat.hit.fix');
           if (
             healed > 0 &&
             unit.blackboard &&

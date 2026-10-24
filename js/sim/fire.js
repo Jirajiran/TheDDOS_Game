@@ -1,4 +1,4 @@
-import { playWeaponSfx } from '../audio/sfx.js';
+import { playSfx, playWeaponSfx } from '../audio/sfx.js';
 import { ActionType } from '../player/actions.js';
 import {
   tryProjectileExplosion,
@@ -584,6 +584,7 @@ export function updateProjectiles(match, dt) {
       if (hit.kind === 'shield') {
         const unit = hit.unit;
         const abs = absorbDamageWithShield(unit, p.damage);
+        if (abs.absorbed > 0 && abs.leftover <= 0) playSfx('combat.hit.shield');
         if (abs.leftover > 0) {
           const dmg = scaledHitDamage(
             abs.leftover,

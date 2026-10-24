@@ -47,6 +47,7 @@ export function installGamePack(doc, rulesDoc) {
     waveGroupCount: r.waveGroupCount,
     loseMode: r.loseMode != null ? r.loseMode : 1,
     dodgeQuota: r.dodgeQuota != null ? r.dodgeQuota : 4,
+    area: r.area || null,
     territory: r.territory || null,
     playerMaxHp: r.playerMaxHp,
     playerSpeed: r.playerSpeed,
@@ -94,6 +95,7 @@ export function getBalancePack() {
     loseMode: r.loseMode != null ? r.loseMode : g.loseMode != null ? g.loseMode : 1,
     dodgeQuota:
       r.dodgeQuota != null ? r.dodgeQuota : g.dodgeQuota != null ? g.dodgeQuota : 4,
+    area: r.area || g.area || null,
     territory: r.territory || g.territory || null,
     playerMaxHp: r.playerMaxHp != null ? r.playerMaxHp : g.playerMaxHp,
     playerSpeed: r.playerSpeed != null ? r.playerSpeed : g.playerSpeed,
