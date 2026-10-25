@@ -174,7 +174,10 @@ export function serializeMatchSnapshot(match) {
         : null,
       factoryBusy: !!b.factoryBusy,
       factoryTimer: b.factoryTimer || 0,
+      factoryDuration: b.factoryDuration || 0,
       factoryWeaponId: b.factoryWeaponId || null,
+      factoryPendingId: b._pendingResult || null,
+      factorySourceId: b.factorySourceId || null,
     });
   }
 
@@ -220,6 +223,8 @@ export function serializeMatchSnapshot(match) {
     basePlaced: match.basePlaced,
     outcome: match.outcome,
     activeHotbar: match.activeHotbar,
+    wornArmorSlot: match.wornArmorSlot != null ? match.wornArmorSlot : -1,
+    wornShieldSlot: match.wornShieldSlot != null ? match.wornShieldSlot : -1,
     playerUnitId: match.playerUnitId,
     playerDead: match.playerDead,
     respawnTimer: match.respawnTimer,

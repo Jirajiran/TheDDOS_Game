@@ -1,7 +1,9 @@
 import {
   makeCastSkillAction,
+  makeInteractAction,
   makeSelectHotbarAction,
   makeTakeBaseAction,
+  makeTakeFactoryAction,
   makeTakeGenAction,
 } from '../player/actions.js';
 import { GAME_PACK, getBalancePack, getWeaponDef } from '../config.js';
@@ -12,7 +14,6 @@ import { hostIngestActions } from '../session/host.js';
 import {
   countItem,
   getActiveSlot,
-  isBackpackSlot,
   isWeaponSlot,
 } from '../player/inventory.js';
 import {
@@ -21,8 +22,6 @@ import {
   getEquippedBackpackTier,
   getPlayerUnit,
   tickMatch,
-  tryEquipBackpackFromDrop,
-  tryEquipBackpackFromSlot,
   tryUnequipBackpackToDrop,
   updatePlaceGhost,
 } from '../sim.js';
@@ -58,11 +57,15 @@ export function createPlaySession(hub) {
       best &&
       ((best.isGen && best.genRate) || best.isDefeatCondition)
     );
-    const slot = getActiveSlot(match.inventory, match.activeHotbar);
-    playerUi.setInteractiveVisible(isWeaponSlot(slot) || nearGenOrBase);
+    const nearFactory = !!(best && best.isFactory);
+    playerUi.setInteractiveVisible(nearGenOrBase || nearFactory);
 
     if (playerUi.isGenOpen && playerUi.isGenOpen() && !nearGenOrBase) {
       playerUi.setGenOpen(false);
+      if (state.panels) state.panels.close();
+    }
+    if (playerUi.isUpgradeOpen && playerUi.isUpgradeOpen() && !nearFactory) {
+      playerUi.setUpgradeOpen(false);
       if (state.panels) state.panels.close();
     }
   }
@@ -89,19 +92,6 @@ export function createPlaySession(hub) {
 
     if (!polled.craftTogglePressed) return;
     if (settingOpen) return;
-
-    const near = findNearbyBackpackDrop(match);
-    if (near) {
-      tryEquipBackpackFromDrop(match, near);
-      hub.refreshHotbar();
-      return;
-    }
-    const active = getActiveSlot(match.inventory, match.activeHotbar);
-    if (isBackpackSlot(active)) {
-      tryEquipBackpackFromSlot(match, match.activeHotbar);
-      hub.refreshHotbar();
-      return;
-    }
     hub.dispatchUi('craftToggle');
   }
 
@@ -162,11 +152,20 @@ export function createPlaySession(hub) {
         enemiesPresent: (match.enemiesAlive || 0) > 0,
         slots: match.inventory || [],
         activeHotbar: match.activeHotbar || 0,
+        wornArmorSlot: match.wornArmorSlot != null ? match.wornArmorSlot : -1,
+        wornShieldSlot: match.wornShieldSlot != null ? match.wornShieldSlot : -1,
         backpackTier: getEquippedBackpackTier(match),
         skills,
         effects,
+        interactPrompt: match.interactPrompt || '',
+        factoryNotice:
+          match.factoryNotice &&
+          (match.simTime || 0) < match.factoryNotice.until
+            ? match.factoryNotice.lines
+            : null,
         dt: state._hudDt || 1 / 60,
       });
+      if (playerUi.syncUpgrade) playerUi.syncUpgrade(match);
     }
   }
 
@@ -220,14 +219,10 @@ export function createPlaySession(hub) {
       syncInteractiveUi(match);
 
       handleCraftOrBackpackF(polled, match, dt);
-      if (polled.interactTogglePressed) {
-        if (state.panels && state.panels.isReceiveOpen()) hub.dispatchUi('genClose');
-        else hub.dispatchUi('interact');
-      }
+      if (polled.interactTogglePressed) hub.dispatchUi('interact');
       if (polled.fistTogglePressed) hub.dispatchUi('castFist');
-      if (polled.healSkillTogglePressed) hub.dispatchUi('castHeal');
-
       if (match.playerDead || match.cameraFreeFly) {
+        state.pendingInteract = false;
         hub.ensureFreeFlyCamera(match, cssW, cssH);
         const speed = GAME_PACK.cameraFreeFlySpeed || 520;
         panCamera(
@@ -265,9 +260,10 @@ export function createPlaySession(hub) {
         state.pendingFistCast = false;
         actions = actions.concat([makeCastSkillAction(playerId, 'FIST')]);
       }
-      if (state.pendingHealCast) {
-        state.pendingHealCast = false;
-        actions = actions.concat([makeCastSkillAction(playerId, 'SELF_HEAL')]);
+      if (state.pendingHealCast) state.pendingHealCast = false;
+      if (state.pendingInteract) {
+        state.pendingInteract = false;
+        actions = actions.concat([makeInteractAction(playerId)]);
       }
       if (state.pendingTake) {
         const pend = state.pendingTake;
@@ -279,6 +275,10 @@ export function createPlaySession(hub) {
         } else if (pend.kind === 'base') {
           actions = actions.concat([
             makeTakeBaseAction(playerId, pend.itemId),
+          ]);
+        } else if (pend.kind === 'factory') {
+          actions = actions.concat([
+            makeTakeFactoryAction(playerId, pend.blockId, pend.slotIndex, pend.role),
           ]);
         }
       }

@@ -5,11 +5,13 @@ import {
   CRAFT_CATEGORIES,
   CRAFT_RECIPES,
   getCraftRecipe,
+  getBackpackTier,
   getItemDef,
   isBackpackItemId,
 } from '../config.js';
 import { countItem, tryCraftBuy } from '../player/inventory.js';
 import {
+  equipCraftedBackpack,
   getBaseReceiveState,
   getGenReceiveState,
   tryEquipBackpackFromSlot,
@@ -61,10 +63,9 @@ export function createPanels(_dom, hooks) {
     return openKind != null;
   }
 
-  function setStatus(msg, ok) {
+  function setStatus(msg, _ok) {
     lastStatus = msg || '';
-    statusTimer = msg ? 2.5 : 0;
-    void ok;
+    statusTimer = 0;
     syncSvgCraft();
   }
 
@@ -75,6 +76,7 @@ export function createPanels(_dom, hooks) {
     if (uiReady()) {
       hooks.playerUi.setCraftOpen(false);
       if (hooks.playerUi.setGenOpen) hooks.playerUi.setGenOpen(false);
+      if (hooks.playerUi.setUpgradeOpen) hooks.playerUi.setUpgradeOpen(false);
     }
     if (hooks.onClose) hooks.onClose();
   }
@@ -98,6 +100,7 @@ export function createPanels(_dom, hooks) {
   }
 
   function selectCraftSlot(index) {
+    lastStatus = '';
     craftSelectedIndex = Math.max(0, index | 0);
     syncSvgCraft();
   }
@@ -122,9 +125,22 @@ export function createPanels(_dom, hooks) {
     const def = getItemDef(recipe.itemId);
     const full = getCraftRecipe(recipe.id) || recipe;
     const mFree = !!m.freeCraft;
-    const res = tryCraftBuy(m.inventory, full, { freeCraft: mFree });
+    const res = tryCraftBuy(m.inventory, full, {
+      freeCraft: mFree,
+      equippedBackpackId: m.equippedBackpackId,
+    });
+    if (res.ok && res.equipNow) {
+      const worn = equipCraftedBackpack(m, recipe.itemId);
+      if (!worn.ok) {
+        setStatus(worn.reason || 'Cannot equip backpack', false);
+        return;
+      }
+      setStatus(`Equipped ${def ? def.label : recipe.itemId}`, true);
+      if (hooks.onInventoryChanged) hooks.onInventoryChanged();
+      return;
+    }
     if (res.ok) {
-      if (isBackpackItemId(recipe.itemId)) {
+      if (isBackpackItemId(recipe.itemId) && getBackpackTier(recipe.itemId) >= getBackpackTier(m.equippedBackpackId)) {
         for (let i = 0; i < m.inventory.length; i++) {
           if (m.inventory[i] && m.inventory[i].itemId === recipe.itemId) {
             tryEquipBackpackFromSlot(m, i);
@@ -201,14 +217,7 @@ export function createPanels(_dom, hooks) {
     if (hooks.playerUi.syncGenPanel) hooks.playerUi.syncGenPanel(info);
   }
 
-  function tick(dt) {
-    if (statusTimer > 0) {
-      statusTimer -= dt;
-      if (statusTimer <= 0) {
-        lastStatus = '';
-        if (openKind === 'craft') syncSvgCraft();
-      }
-    }
+  function tick(_dt) {
     const match = hooks.getMatch && hooks.getMatch();
     if (match && match.lastTakeResult) {
       const r = match.lastTakeResult;
@@ -227,6 +236,15 @@ export function createPanels(_dom, hooks) {
     if (!match || !match.pendingUi) return;
     const pending = match.pendingUi;
     match.pendingUi = null;
+    if (pending.type === 'upgrade') {
+      if (!uiReady() || !hooks.playerUi.setUpgradeOpen) return;
+      openKind = 'upgrade';
+      receiveCtx = { type: 'upgrade', blockId: pending.blockId };
+      hooks.playerUi.setCraftOpen(false);
+      hooks.playerUi.setUpgradeOpen(true, pending);
+      if (hooks.onOpen) hooks.onOpen('upgrade');
+      return;
+    }
     openReceive(pending);
   }
 
@@ -241,7 +259,11 @@ export function createPanels(_dom, hooks) {
   }
 
   function isReceiveOpen() {
-    return openKind === 'receive-gen' || openKind === 'receive-base';
+    return (
+      openKind === 'receive-gen' ||
+      openKind === 'receive-base' ||
+      openKind === 'upgrade'
+    );
   }
 
   function getOpenKind() {

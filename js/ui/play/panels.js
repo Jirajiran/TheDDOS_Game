@@ -108,11 +108,31 @@ export function installPlayPanels(api) {
       if (anchor === 'end' && xEnd != null) spans[i].setAttribute('x', String(xEnd));
       else if (anchor === 'middle' && xMid != null) {
         spans[i].setAttribute('x', String(xMid));
-      } else if (anchor === 'start' && xStart != null) {
+      }       else if (anchor === 'start' && xStart != null) {
         spans[i].setAttribute('x', String(xStart));
       }
     }
   }
+
+  api.fitTextToClip = function fitTextToClip(el) {
+    if (!el) return;
+    const span = api.firstTspan(el);
+    const clip = el.querySelector('clipPath rect') || el.querySelector('rect');
+    if (!span || !clip || !span.getComputedTextLength) return;
+    const box = parseFloat(clip.getAttribute('width') || '0');
+    if (!(box > 8)) return;
+    const limit = box - 8;
+    const base = parseFloat(span.getAttribute('data-base-size') || span.getAttribute('font-size') || '42');
+    if (!span.getAttribute('data-base-size')) span.setAttribute('data-base-size', String(base));
+    let size = base;
+    span.setAttribute('font-size', String(size));
+    let guard = 0;
+    while (guard < 16 && span.getComputedTextLength() > limit && size > 12) {
+      size -= 2;
+      span.setAttribute('font-size', String(size));
+      guard += 1;
+    }
+  };
   
   api.applyAllTextColumns = function applyAllTextColumns() {
     for (let i = 0; i < TEXT_COL_MIDDLE.length; i++) {
@@ -233,6 +253,29 @@ export function installPlayPanels(api) {
     }
     api.setVisible(g, !!selected);
   }
+
+  api.ensureWornFill = function ensureWornFill(panel, worn) {
+    if (!panel) return;
+    let g = panel.querySelector('[data-slot-worn]');
+    if (!g) {
+      g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('data-slot-worn', '1');
+      g.setAttribute('pointer-events', 'none');
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      const half = SLOT_BODY / 2;
+      rect.setAttribute('x', String(-half));
+      rect.setAttribute('y', String(-half));
+      rect.setAttribute('width', String(SLOT_BODY));
+      rect.setAttribute('height', String(SLOT_BODY));
+      rect.setAttribute('fill', 'rgba(255, 214, 64, 0.45)');
+      rect.setAttribute('stroke', 'none');
+      g.appendChild(rect);
+      const frame = panel.querySelector('[data-slot-select]');
+      if (frame) panel.insertBefore(g, frame);
+      else panel.appendChild(g);
+    }
+    api.setVisible(g, !!worn);
+  }
   
   api.ensureDefs = function ensureDefs() {
     let defs = api.state.svgRoot && api.state.svgRoot.querySelector('defs');
@@ -255,6 +298,8 @@ export function installPlayPanels(api) {
       const needIds = [
         'Ui_Btn_Color_2_2_Layer0_0_FILL',
         'Ui_Btn_Color_2_2_Layer0_0_1_STROKES',
+        'Ui_Btn_Color_2_3_Layer0_0_FILL',
+        'Ui_Btn_Color_2_3_Layer0_0_1_STROKES',
         'Ui_IconUi_3_Layer1_0_FILL',
       ];
       for (let i = 0; i < needIds.length; i++) {
@@ -275,6 +320,15 @@ export function installPlayPanels(api) {
         defs.appendChild(tpl);
         api.state.pressOnTpl = tpl;
       }
+      const pressTrue = doc.getElementById('Btn_Press_True');
+      if (pressTrue && !api.state.pressTrueTpl) {
+        const tpl = pressTrue.cloneNode(true);
+        api.stripIds(tpl);
+        tpl.setAttribute('id', 'Tpl_Btn_Press_True');
+        tpl.setAttribute('data-press-tpl', 'true');
+        defs.appendChild(tpl);
+        api.state.pressTrueTpl = tpl;
+      }
       const iconClose = doc.getElementById('Icon_Audio_Close');
       if (iconClose) {
         const tpl = iconClose.cloneNode(true);
@@ -283,6 +337,7 @@ export function installPlayPanels(api) {
         defs.appendChild(tpl);
         api.state.iconAudioCloseTpl = tpl;
       }
+      api.dressTakeButtons();
     } catch (_) {
       /* offline / missing — fallbacks still work */
     }
@@ -304,6 +359,7 @@ export function installPlayPanels(api) {
     api.setVisible(api.$('Anchor_Center_2'), api.state.settingOpen);
     api.setVisible(api.$('Anchor_Top_Left_2'), api.state.genOpen);
     api.setVisible(api.$('Anchor_Center_3'), api.state.endOpen);
+    api.setVisible(api.$('Anchor_Top_Left_3'), !!api.state.upgradeOpen);
     api.setVisible(api.$('Panel_objective'), api.state.objectiveOpen);
     api.setVisible(api.$('btn_interactive'), api.state.interactiveVisible);
     // ChatShow always on; InputChat hit zone always visible (click opens). HTML field only when typing.
@@ -315,11 +371,303 @@ export function installPlayPanels(api) {
     }
   }
   
+  const UPGRADE_BAR_START = Object.freeze({ x: -0.4, y1: -29.95, y2: -25.45 });
+  const UPGRADE_BAR_END = Object.freeze({ x: -1.15, y1: 26.95, y2: 31.45 });
+
+  api.setUpgradeOpen = function setUpgradeOpen(on, ctx) {
+    api.state.upgradeOpen = !!on;
+    api.state.upgradeBlockId = on && ctx ? ctx.blockId : null;
+    if (api.state.upgradeOpen) {
+      api.state.craftOpen = false;
+      api.state.settingOpen = false;
+      api.state.genOpen = false;
+      api.prepareUpgradeArt();
+    }
+    api.syncModals();
+  };
+
+  api.isUpgradeOpen = function isUpgradeOpen() {
+    return !!api.state.upgradeOpen;
+  };
+
+  api.getUpgradeBlockId = function getUpgradeBlockId() {
+    return api.state.upgradeOpen ? api.state.upgradeBlockId : null;
+  };
+
+  api.hitUpgradeSlot = function hitUpgradeSlot(clientX, clientY) {
+    if (!api.state.upgradeOpen) return '';
+    const hit = document.elementFromPoint(clientX, clientY);
+    let node = hit;
+    while (node) {
+      if (node.id === 'Slot_CurrentWeapon') return 'deposit';
+      if (node.id === 'Slot_Done_Upgrate') return 'collect';
+      node = node.parentNode;
+    }
+    return '';
+  };
+
+  api.prepareUpgradeArt = function prepareUpgradeArt() {
+    const doc = api.state.svgRoot;
+    if (!doc || doc.getElementById('UpgradeLoadGrad')) {
+      api.retargetUpgradeFill();
+      return;
+    }
+    const grad = document.createElementNS(SVG_NS, 'linearGradient');
+    grad.setAttribute('id', 'UpgradeLoadGrad');
+    grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+    grad.setAttribute('spreadMethod', 'pad');
+    const dark = document.createElementNS(SVG_NS, 'stop');
+    dark.setAttribute('offset', '69.01960784313725%');
+    dark.setAttribute('stop-color', '#00162D');
+    const light = document.createElementNS(SVG_NS, 'stop');
+    light.setAttribute('offset', '73.72549019607843%');
+    light.setAttribute('stop-color', '#CAE5FF');
+    grad.appendChild(dark);
+    grad.appendChild(light);
+    const defs = doc.querySelector('defs') || doc;
+    defs.appendChild(grad);
+    const src = doc.getElementById('Ui_Btn_Color_2_0_Layer0_0_FILL');
+    if (src && !doc.getElementById('UpgradeBtnTrueFill')) {
+      const clone = src.cloneNode(true);
+      clone.setAttribute('id', 'UpgradeBtnTrueFill');
+      const paths = clone.querySelectorAll('path');
+      for (let i = 0; i < paths.length; i++) {
+        const fill = (paths[i].getAttribute('fill') || '').toUpperCase();
+        if (fill === '#FFBEB6') paths[i].setAttribute('fill', '#B6F0C4');
+        else if (fill === '#FF705E') paths[i].setAttribute('fill', '#3E9B5A');
+        else if (fill === '#101820') paths[i].setAttribute('fill', '#102018');
+      }
+      src.parentNode.insertBefore(clone, src.nextSibling);
+    }
+    api.retargetUpgradeFill();
+  };
+
+  api.retargetUpgradeFill = function retargetUpgradeFill() {
+    const doc = api.state.svgRoot;
+    if (!doc) return;
+    const path = doc.querySelector('#LoadUi_0_Layer0_0_FILL path');
+    if (path) path.setAttribute('fill', 'url(#UpgradeLoadGrad)');
+  };
+
+  api.paintUpgradeBar = function paintUpgradeBar(t) {
+    const doc = api.state.svgRoot;
+    const grad = doc && doc.getElementById('UpgradeLoadGrad');
+    if (!grad) return;
+    const u = Math.max(0, Math.min(1, t));
+    const x = UPGRADE_BAR_START.x + (UPGRADE_BAR_END.x - UPGRADE_BAR_START.x) * u;
+    const y1 = UPGRADE_BAR_START.y1 + (UPGRADE_BAR_END.y1 - UPGRADE_BAR_START.y1) * u;
+    const y2 = UPGRADE_BAR_START.y2 + (UPGRADE_BAR_END.y2 - UPGRADE_BAR_START.y2) * u;
+    grad.setAttribute('x1', String(x));
+    grad.setAttribute('x2', String(x));
+    grad.setAttribute('y1', String(y1));
+    grad.setAttribute('y2', String(y2));
+  };
+
+  api.dressTakeButtons = function dressTakeButtons() {
+    const buttons = [
+      ['Btn_Press_false_TakeWood', 'WOOD'],
+      ['Btn_Press_false_TakeStone', 'STONE'],
+      ['Btn_Press_false_TakeIron', 'IRON'],
+      ['Btn_Press_false_TakeWeapon', 'weapon'],
+    ];
+    for (let i = 0; i < buttons.length; i++) {
+      dressOneTakeButton(buttons[i][0], buttons[i][1]);
+    }
+  };
+
+  function dressOneTakeButton(id, icon) {
+    const btn = api.$(id);
+    if (!btn) return;
+    const stacked = btn.querySelector('[data-take-stroke]');
+    if (stacked) stacked.remove();
+    if (!btn.getAttribute('data-take-dressed')) {
+      btn.setAttribute('data-take-dressed', '1');
+      const fill = btn.querySelector('use');
+      if (fill) fill.setAttribute('data-take-fill', '1');
+    }
+    if (icon === 'weapon' && !btn.querySelector('[data-take-icon="weapon"]')) {
+      const src = api.$('Icon_Weapon');
+      if (src) {
+        const clone = src.cloneNode(true);
+        api.stripIds(clone);
+        clone.setAttribute('data-take-icon', 'weapon');
+        clone.setAttribute('pointer-events', 'none');
+        clone.style.pointerEvents = 'none';
+        btn.appendChild(clone);
+      }
+    } else if (RESOURCE_COLORS[icon] && !btn.querySelector('[data-take-icon]')) {
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('data-take-icon', icon);
+      g.setAttribute('pointer-events', 'none');
+      g.style.pointerEvents = 'none';
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', '-16');
+      rect.setAttribute('y', '-18');
+      rect.setAttribute('width', '32');
+      rect.setAttribute('height', '32');
+      rect.setAttribute('rx', '4');
+      rect.setAttribute('fill', RESOURCE_COLORS[icon]);
+      rect.setAttribute('stroke', '#101820');
+      rect.setAttribute('stroke-width', '2');
+      g.appendChild(rect);
+      btn.appendChild(g);
+    }
+    const num = api.findNumberHost(btn);
+    if (num) api.setCountOnHost(num, 0, false);
+    bindTakePress(btn);
+  }
+
+  function bindTakePress(btn) {
+    if (!btn || btn.querySelector('[data-press="true"]') || !api.state.pressTrueTpl) return;
+    const press = api.state.pressTrueTpl.cloneNode(true);
+    api.stripIds(press);
+    press.setAttribute('data-press', 'true');
+    press.setAttribute('transform', 'matrix( 1, 0, 0, 1, 0,0) ');
+    press.setAttribute('pointer-events', 'none');
+    press.style.pointerEvents = 'none';
+    const icon = btn.querySelector('[data-take-icon]');
+    if (icon) btn.insertBefore(press, icon);
+    else btn.appendChild(press);
+    press.style.opacity = '0';
+    const fill = btn.querySelector('[data-take-fill]');
+    const rest = fill && fill.parentNode && fill.parentNode !== btn ? fill.parentNode : fill;
+    if (rest) rest.style.pointerEvents = 'auto';
+    const show = (on) => {
+      press.style.display = '';
+      press.style.opacity = on ? '1' : '0';
+      press.style.pointerEvents = 'none';
+      if (!rest) return;
+      rest.style.display = '';
+      rest.style.opacity = on ? '0' : '1';
+      rest.style.pointerEvents = 'auto';
+    };
+    btn.addEventListener('pointerdown', () => show(true));
+    btn.addEventListener('pointerup', () => show(false));
+    btn.addEventListener('pointerleave', () => show(false));
+    btn.addEventListener('pointercancel', () => show(false));
+  }
+
+  api.paintUpgradeButton = function paintUpgradeButton(mode, resultId) {
+    api.dressTakeButtons();
+    const btn = api.$('Btn_Press_false_TakeWeapon');
+    if (!btn) return;
+    const ready = mode === 'return';
+    const use = btn.querySelector('[data-take-fill]') || btn.querySelector('use');
+    if (use) {
+      const href = '#Ui_Btn_Color_2_0_Layer0_0_FILL';
+      use.setAttribute('href', href);
+      use.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+    }
+    const icon = btn.querySelector('[data-take-icon="weapon"]');
+    if (icon) {
+      api.setVisible(icon, mode === 'deposit');
+      icon.style.pointerEvents = 'none';
+      icon.setAttribute('pointer-events', 'none');
+    }
+    if (ready && resultId) {
+      api.ensureIconOverlay(
+        btn,
+        null,
+        true,
+        36,
+        false,
+        getWeaponIconHref(resultId),
+        getWeaponIconLayout(resultId)
+      );
+    } else {
+      api.ensureIconOverlay(btn, null, false);
+    }
+    const overlay = btn.querySelector('[data-icon-overlay]');
+    if (overlay) {
+      if (overlay.parentNode === btn) btn.appendChild(overlay);
+      overlay.style.pointerEvents = 'none';
+      overlay.setAttribute('pointer-events', 'none');
+      const image = overlay.querySelector('[data-icon-image]');
+      if (image) image.style.pointerEvents = 'none';
+    }
+    const num = api.findNumberHost(btn);
+    if (num) api.setCountOnHost(num, 0, false);
+  };
+
+  function paintUpgradeSlot(id, weaponId) {
+    const el = api.$(id);
+    if (!el) return;
+    const num = api.findNumberHost(el);
+    if (num) api.setCountOnHost(num, 0, false);
+    if (!weaponId) {
+      api.ensureIconOverlay(el, EMPTY_SLOT_PAD, true, SLOT_ICON, true);
+      return;
+    }
+    api.ensureIconOverlay(
+      el,
+      '#6a7a8a',
+      true,
+      SLOT_ICON,
+      false,
+      getWeaponIconHref(weaponId),
+      getWeaponIconLayout(weaponId)
+    );
+  }
+
+  api.syncUpgrade = function syncUpgrade(match) {
+    if (!api.state.ready || !api.state.upgradeOpen) return;
+    let factory = null;
+    const blocks = match && match.blocks;
+    if (blocks) {
+      for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i] && blocks[i].id === api.state.upgradeBlockId) {
+          factory = blocks[i];
+          break;
+        }
+      }
+    }
+    if (!factory || !factory.alive) {
+      api.setUpgradeOpen(false);
+      return;
+    }
+    const busy = !!factory.factoryBusy;
+    const ready = !busy && !!factory.factoryWeaponId;
+    const dur = factory.factoryDuration || 0;
+    const t = ready ? 1 : dur > 0 ? 1 - Math.max(0, factory.factoryTimer) / dur : 0;
+    api.prepareUpgradeArt();
+    api.paintUpgradeBar(t);
+    const mode = ready ? 'return' : busy ? 'busy' : 'deposit';
+    api.paintUpgradeButton(mode, ready ? factory.factoryWeaponId : null);
+    paintUpgradeSlot(
+      'Slot_CurrentWeapon',
+      busy ? factory.factorySourceId || factory._pendingResult : null
+    );
+    paintUpgradeSlot('Slot_Done_Upgrate', ready ? factory.factoryWeaponId : null);
+    const label = api.$('HpUpgrate');
+    if (label) {
+      const line = ready
+        ? 'Ready'
+        : busy
+          ? `${Math.max(0, Math.ceil(factory.factoryTimer))}s`
+          : 'Upgrade';
+      api.setTspans(label, [line]);
+      api.applyTextColumn(label, 'middle');
+    }
+    const name = api.$('NameGen_FL');
+    if (name) {
+      api.setTspans(name, [
+        ready
+          ? factory.factoryWeaponId || ''
+          : busy
+            ? factory._pendingResult || ''
+            : 'Upgrade',
+      ]);
+      api.applyTextColumn(name, 'middle');
+      api.fitTextToClip(name);
+    }
+  };
+
   api.setCraftOpen = function setCraftOpen(on) {
     api.state.craftOpen = !!on;
     if (api.state.craftOpen) {
       api.state.settingOpen = false;
       api.state.genOpen = false;
+      api.state.upgradeOpen = false;
     }
     api.syncModals();
   }
@@ -329,6 +677,7 @@ export function installPlayPanels(api) {
     if (api.state.settingOpen) {
       api.state.craftOpen = false;
       api.state.genOpen = false;
+      api.state.upgradeOpen = false;
     }
     api.syncModals();
   }
@@ -339,6 +688,7 @@ export function installPlayPanels(api) {
     if (api.state.genOpen) {
       api.state.craftOpen = false;
       api.state.settingOpen = false;
+      api.state.upgradeOpen = false;
     }
     api.syncModals();
   }
@@ -372,17 +722,9 @@ export function installPlayPanels(api) {
     const fl = api.$('Anchor_Left_Bottom_FL');
     if (fl) api.setVisible(fl, true);
     for (let i = 1; i <= 3; i++) api.setVisible(api.$(`BackPack_tyle_${i}`), t === i);
-    for (let i = 7; i <= 12; i++) {
-      const showBag = t > 0;
-      if (!showBag) {
-        api.setVisible(api.$(`Panel_item_${i}`), false);
-        api.setVisible(api.$(`Panel_item_${i}_FL`), false);
-        api.setVisible(api.$(`Panel_item_${i}_FL_FL`), false);
-      }
-    }
-    // Fist skills always on
     api.setVisible(api.$('Skill_Show_1'), true);
     api.ensureIconOverlay(api.$('Skill_Show_1'), FIST_ICON_COLOR, true);
+    api.setVisible(api.$('Skill_Show_2'), true);
   }
   
   api.setInteractiveVisible = function setInteractiveVisible(on) {
@@ -573,6 +915,17 @@ export function installPlayPanels(api) {
     }
   }
   
+  api.syncCraftNotice = function syncCraftNotice(message) {
+    const el = api.$('notification_AlignCenter');
+    if (!el) return;
+    const msg = message || '';
+    api.setTspans(el, [msg]);
+    const spans = api.allTspans(el);
+    for (let i = 0; i < spans.length; i++) spans[i].setAttribute('fill', '#FF0000');
+    api.applyTextColumn(el, 'middle');
+    api.setVisible(el, !!msg);
+  }
+
   api.syncCraftDetail = function syncCraftDetail() {
     const recipe =
       api.state.selectedCraftIndex >= 0
@@ -583,6 +936,9 @@ export function installPlayPanels(api) {
     if (!recipe) {
       if (nameEl) api.setTspans(nameEl, ['']);
       if (detailEl) api.setTspans(detailEl, ['', '']);
+      const notice =
+        (api.state.craftRecipes[0] && api.state.craftRecipes[0]._status) || '';
+      api.syncCraftNotice(notice);
       api.syncRequestItems(null);
       api.syncIconCurrentSlot();
       return;
@@ -600,6 +956,9 @@ export function installPlayPanels(api) {
       api.setTspans(detailEl, [lore, line2]);
       api.applyTextColumn(detailEl, 'middle');
     }
+    const notice =
+      (api.state.craftRecipes[0] && api.state.craftRecipes[0]._status) || '';
+    api.syncCraftNotice(notice);
     api.syncRequestItems(recipe);
     api.syncIconCurrentSlot();
   }
@@ -633,16 +992,26 @@ export function installPlayPanels(api) {
   
     const gun = api.$('GunDetail');
     if (gun) {
-      api.setTspans(gun, [
-        `(${hud.gunName || 'EMPTY'})`,
-        hud.ammoLine || 'AMMO : —',
-      ]);
+      const notice = hud.factoryNotice;
+      const hover = api.state.hoverDetail;
+      api.setTspans(
+        gun,
+        notice
+          ? notice
+          : hover
+            ? hover
+            : [`(${hud.gunName || 'EMPTY'})`, hud.ammoLine || 'AMMO : —']
+      );
     }
   
     api.syncHpFill(hud.playerHp, hud.playerMaxHp, hud.dt || 0.016);
     api.syncDay(hud.simTimeSec || 0, !!hud.enemiesPresent);
-    api.syncHotbarSlots(hud.slots || [], hud.activeHotbar || 0);
+    api.state.wornArmorSlot =
+      hud.wornArmorSlot != null ? hud.wornArmorSlot : -1;
+    api.state.wornShieldSlot =
+      hud.wornShieldSlot != null ? hud.wornShieldSlot : -1;
     if (hud.backpackTier != null) api.setBackpackTier(hud.backpackTier);
+    api.syncHotbarSlots(hud.slots || [], hud.activeHotbar || 0);
     api.syncEffects(hud.effects || []);
     api.syncSkills(hud.skills || []);
     if (hud.interactiveVisible != null) {
@@ -767,57 +1136,87 @@ export function installPlayPanels(api) {
     if (backpackTier != null) api.setBackpackTier(backpackTier);
   }
   
+  const BAG_SLOT_IDS = Object.freeze([
+    Object.freeze([]),
+    Object.freeze(['Mask_Item_7', 'Panel_item_8_FL_FL']),
+    Object.freeze([
+      'Panel_item_7_FL',
+      'Panel_item_8_FL',
+      'Panel_item_9_FL',
+      'Panel_item_10_FL',
+    ]),
+    Object.freeze([
+      'Panel_item_7',
+      'Panel_item_8',
+      'Panel_item_9',
+      'Panel_item_10',
+      'Panel_item_11',
+      'Panel_item_12',
+    ]),
+  ]);
+  const ALL_BAG_SLOT_IDS = Object.freeze([
+    'Mask_Item_7',
+    'Panel_item_8_FL_FL',
+    'Panel_item_7_FL',
+    'Panel_item_8_FL',
+    'Panel_item_9_FL',
+    'Panel_item_10_FL',
+    'Panel_item_7',
+    'Panel_item_8',
+    'Panel_item_9',
+    'Panel_item_10',
+    'Panel_item_11',
+    'Panel_item_12',
+  ]);
+
+  function paintHotbarPanel(el, slot, index, activeHotbar) {
+    if (!el) return;
+    const filled = !!(slot && slot.itemId);
+    api.setVisible(el, true);
+    el.style.opacity = '1';
+    const worn =
+      api.state.wornArmorSlot === index || api.state.wornShieldSlot === index;
+    api.ensureWornFill(el, worn && filled);
+    api.ensureSelectFrame(el, index === activeHotbar);
+    const num = api.findNumberHost(el);
+    if (!filled) {
+      api.setCountOnHost(num, 0, false);
+      api.ensureIconOverlay(el, EMPTY_SLOT_PAD, true, SLOT_ICON, true);
+      return;
+    }
+    const kind = slot.kind || '';
+    const isWeapon = kind === 'WEAPON';
+    const count = slot.count || 0;
+    api.setCountOnHost(num, count, !isWeapon && count > 0);
+    api.ensureIconOverlay(
+      el,
+      slot.color || '#6a7a8a',
+      true,
+      SLOT_ICON,
+      false,
+      getWeaponIconHref(slot.weaponId || slot.itemId),
+      getWeaponIconLayout(slot.weaponId || slot.itemId)
+    );
+  }
+
   api.syncHotbarSlots = function syncHotbarSlots(slots, activeHotbar) {
-    for (let i = 0; i < 12; i++) {
-      const slot = slots[i];
-      const filled = !!(slot && slot.itemId);
-      const panels = [];
-      // Main hotbar 1–6: always show frames (empty = empty frame)
-      if (i < HOTBAR_MAIN) panels.push(api.$(`Panel_item_${i + 1}`));
-      if (i >= 6) {
-        panels.push(api.$(`Panel_item_${i + 1}`));
-        panels.push(api.$(`Panel_item_${i + 1}_FL`));
-      }
-      for (let p = 0; p < panels.length; p++) {
-        const el = panels[p];
-        if (!el) continue;
-        if (i < HOTBAR_MAIN) {
-          api.setVisible(el, true);
-        } else {
-          // Backpack slots: only when filled (tier gate elsewhere)
-          api.setVisible(el, filled);
-          if (!filled) {
-            api.ensureIconOverlay(el, null, false);
-            continue;
-          }
-        }
-        el.style.opacity = '1';
-        api.ensureSelectFrame(el, i === activeHotbar);
-        const num = api.findNumberHost(el);
-        if (!filled) {
-          api.setCountOnHost(num, 0, false);
-          // Empty main slots keep a faint pad for a reliable click target.
-          if (i < HOTBAR_MAIN) {
-            api.ensureIconOverlay(el, EMPTY_SLOT_PAD, true, SLOT_ICON, true);
-          } else {
-            api.ensureIconOverlay(el, null, false);
-          }
-          continue;
-        }
-        const kind = slot.kind || '';
-        const isWeapon = kind === 'WEAPON';
-        const count = slot.count || 0;
-        api.setCountOnHost(num, count, !isWeapon && count > 0);
-        api.ensureIconOverlay(
-          el,
-          slot.color || '#6a7a8a',
-          true,
-          SLOT_ICON,
-          false,
-          getWeaponIconHref(slot.weaponId || slot.itemId),
-          getWeaponIconLayout(slot.weaponId || slot.itemId)
-        );
-      }
+    api.state.hotbarSlots = slots || [];
+    for (let i = 0; i < HOTBAR_MAIN; i++) {
+      paintHotbarPanel(api.$(`Panel_item_${i + 1}`), slots[i], i, activeHotbar);
+    }
+    const tier = api.state.backpackTier || 0;
+    const shown = BAG_SLOT_IDS[tier] || [];
+    for (let n = 0; n < ALL_BAG_SLOT_IDS.length; n++) {
+      const id = ALL_BAG_SLOT_IDS[n];
+      if (shown.indexOf(id) >= 0) continue;
+      const hidden = api.$(id);
+      if (!hidden) continue;
+      api.setVisible(hidden, false);
+      api.ensureIconOverlay(hidden, null, false);
+      api.ensureWornFill(hidden, false);
+    }
+    for (let b = 0; b < shown.length; b++) {
+      paintHotbarPanel(api.$(shown[b]), slots[HOTBAR_MAIN + b], HOTBAR_MAIN + b, activeHotbar);
     }
   }
   
@@ -906,6 +1305,7 @@ export function installPlayPanels(api) {
       ]);
       api.applyTextColumn(hp, 'middle');
     }
+    api.dressTakeButtons();
     const counts = info.counts || { WOOD: 0, STONE: 0, IRON: 0 };
     const map = [
       ['Slot_gen_Wood', 'WOOD', counts.WOOD || 0],

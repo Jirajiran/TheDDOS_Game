@@ -22,8 +22,10 @@ import {
   equipShieldOnUnit,
   ejectBrokenBasicShield,
   isArmorSlot,
+  isBackpackSlot,
   isShieldSlot,
 } from '../player/inventory.js';
+import { tryEquipBackpackFromSlot } from './drops.js';
 import {
   blockProjectileSolid,
   worldToL3,
@@ -187,8 +189,7 @@ export function commitHotbarSlot(match, unit, slotIndex, isPlayer) {
     match.pendingHotbar = -1;
     match.hotbarSwitchT = 0;
     const s = getActiveSlot(match.inventory, match.activeHotbar);
-    if (isArmorSlot(s) && unit) equipArmorOnUnit(unit, s.itemId);
-    if (isShieldSlot(s) && unit) equipShieldOnUnit(unit, s.itemId);
+    if (isBackpackSlot(s)) tryEquipBackpackFromSlot(match, match.activeHotbar);
   } else if (unit && unit.inventory) {
     if ((unit.activeHotbar | 0) !== slot) {
       clearAmmoReload(getActiveSlot(unit.inventory, unit.activeHotbar));

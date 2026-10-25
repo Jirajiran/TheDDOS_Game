@@ -4,7 +4,7 @@
  * Cosmetics mirror sim state only (active hotbar WEAPON/TOOL / armor / shield / swing).
  */
 
-import { GAME_PACK, L3_SIZE, getWeaponDef } from '../config.js';
+import { GAME_PACK, L3_SIZE, getItemDef, getWeaponDef } from '../config.js';
 import { getActiveSlot, isToolSlot, isWeaponSlot } from '../player/inventory.js';
 import {
   getWeaponBtnImage,
@@ -321,6 +321,13 @@ export const UNIT_EQUIP_ART = Object.freeze({
       svgHref: null,
       bitmapSrc: null,
     }),
+    ENERGY_SHIELD: Object.freeze({
+      shape: 'disc',
+      color: '#3dffe0',
+      alpha: 0.55,
+      svgHref: null,
+      bitmapSrc: null,
+    }),
   }),
 });
 
@@ -388,7 +395,7 @@ export function getShieldArt(shieldId) {
  * Optional bitmapSrc entries get one Image each (never recreated on equip).
  */
 export function preloadEquipArtCache() {
-  if (_pathCache) return { pathCount: _pathCache.size, imageCount: _imageCache ? _imageCache.size : 0 };
+  if (_pathCache) return preloadWeaponBtnArt(WEAPON_BTN_ART);
   _pathCache = new Map();
   _imageCache = new Map();
 
@@ -424,8 +431,7 @@ export function preloadEquipArtCache() {
     _imageCache.set(src, img);
   }
 
-  preloadWeaponBtnArt(WEAPON_BTN_ART);
-  return { pathCount: _pathCache.size, imageCount: _imageCache.size };
+  return preloadWeaponBtnArt(WEAPON_BTN_ART);
 }
 
 export function getEquipPathCache() {
@@ -496,8 +502,9 @@ export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
   const rimX = unit.x + cos * r;
   const rimY = unit.y + sin * r;
 
-  // Armor visual deferred: future Asset_Armor on Pivot_Asset_Top (not Path2D plate).
-  // activeArmorId still drives sim mitigation — do not draw placeholder trapezoid.
+  if (unit.activeArmorId) {
+    drawArmorMarker(ctx, unit, facing, r, unit.x, unit.y, zoom, lw, cache);
+  }
 
   const held = resolveHeldVisual(unit, opts);
   if (held) {
@@ -721,13 +728,14 @@ function drawArmorMarker(ctx, unit, aim, r, rimX, rimY, zoom, lw, cache) {
   const path = cache.get('armor:plate');
 
   ctx.save();
-  // Front chest plate toward aim — no full body ring (worn-in-front read).
   ctx.translate(rimX, rimY);
   ctx.rotate(aim);
   const scale = r / 12;
   ctx.scale(scale, scale);
-  ctx.fillStyle = art.color;
-  ctx.strokeStyle = art.color;
+  const worn = getItemDef(unit.activeArmorId);
+  const plate = (worn && worn.color) || art.color;
+  ctx.fillStyle = plate;
+  ctx.strokeStyle = plate;
   ctx.globalAlpha = 0.55;
   ctx.lineWidth = Math.max(1, lw * 2) / scale;
   if (path) {

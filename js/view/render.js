@@ -1,4 +1,4 @@
-import { L1_SIZE, L3_SIZE, TEAM } from '../config.js';
+import { GAME_PACK, L1_SIZE, L3_SIZE, TEAM } from '../config.js';
 import { drawUnitEquipCosmetics } from './cosmetics.js';
 import {
   drawUnitVisualBack,
@@ -6,7 +6,11 @@ import {
   getUnitArm1PivotWorld,
 } from './unitVisual.js';
 import { getNightOverlayStyle } from './dayCycle.js';
-import { getProjectileArt } from './weaponBtnArt.js';
+import {
+  getProjectileArt,
+  getWeaponBtnImage,
+  getWeaponBtnLayout,
+} from './weaponBtnArt.js';
 
 /**
  * World + units + projectiles + blocks + drops + place ghost.
@@ -82,7 +86,9 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
     drawBotAreas(ctx, world);
     if (match.territories && match.territories.length) drawTerritories(ctx, match.territories);
     else drawBaseChunk(ctx, match.baseChunk, zoom);
-    drawBlocks(ctx, match.blocks, zoom);
+    drawBlockBodies(ctx, match.blocks, zoom);
+    drawTurretGuns(ctx, match.blocks);
+    drawBlockHealRanges(ctx, match.blocks);
     drawDrops(ctx, match.pools && match.pools.drops, zoom);
     drawPlaceGhost(ctx, match.placeGhost, zoom);
     drawUnits(ctx, match.pools && match.pools.units, zoom, match);
@@ -90,6 +96,7 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
     drawExplosionVfx(ctx, match.explosionVfx, zoom);
     drawProjectiles(ctx, match.pools && match.pools.projectiles, zoom);
     drawBeams(ctx, match.beams);
+    drawBlockHpBars(ctx, match);
   }
 
   ctx.restore();
@@ -198,7 +205,43 @@ function drawBaseChunk(ctx, zone, zoom) {
   ctx.setLineDash([]);
 }
 
-function drawBlocks(ctx, blocks, zoom) {
+function turretWeaponFrame(weaponId) {
+  const keys = ['rpg-loaded', 'pyro-body', 'base'];
+  for (let i = 0; i < keys.length; i++) {
+    const img = getWeaponBtnImage(weaponId, keys[i]);
+    if (img) return { img, lay: getWeaponBtnLayout(weaponId, keys[i]) };
+  }
+  return { img: null, lay: null };
+}
+
+function drawTurretGun(ctx, block) {
+  const cx = block.x + block.w / 2;
+  const cy = block.y + block.h / 2;
+  const aim = typeof block.turretAimRad === 'number' ? block.turretAimRad : 0;
+  const frame = turretWeaponFrame(block.weaponId);
+  const img = frame.img;
+  const lay = frame.lay;
+  ctx.save();
+  ctx.translate(cx, cy);
+  const packOff =
+    GAME_PACK.unitVisualFacingOffsetRad != null
+      ? GAME_PACK.unitVisualFacingOffsetRad
+      : -Math.PI / 2;
+  ctx.rotate(aim + packOff);
+  if (img && img.width > 0 && lay && lay.w > 0 && lay.h > 0) {
+    // Same local frame as a held gun: SizeView (64) covers the block, gun keeps its SVG offset.
+    const scale = Math.min(block.w, block.h) / 64;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, lay.x * scale, lay.y * scale, lay.w * scale, lay.h * scale);
+  } else {
+    const r = Math.min(block.w, block.h) * 0.22;
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(r * 0.2, -r * 0.35, r * 1.6, r * 0.7);
+  }
+  ctx.restore();
+}
+
+function drawBlockBodies(ctx, blocks, zoom) {
   if (!blocks) return;
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -215,47 +258,83 @@ function drawBlocks(ctx, blocks, zoom) {
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
 
-    // Turret / armed base: layer 2 gun rotates; base rect above stays fixed.
-    const isArmed = b.isTurret || (b.isDefeatCondition && b.weaponId);
-    if (isArmed && b.weaponId) {
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      const aim = typeof b.turretAimRad === 'number' ? b.turretAimRad : 0;
-      const r = Math.min(b.w, b.h) * 0.22;
-      ctx.fillStyle = '#222';
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(aim);
-      ctx.fillStyle = '#3a3a3a';
-      ctx.fillRect(r * 0.2, -r * 0.35, r * 1.6, r * 0.7);
-      ctx.fillStyle = '#111';
-      ctx.fillRect(r * 1.4, -r * 0.18, r * 0.9, r * 0.36);
-      ctx.restore();
-    }
-
     if (b.isGen && b.genStock > 0) {
       ctx.fillStyle = '#fff';
       ctx.font = `${12 / zoom}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText(String(b.genStock), b.x + b.w / 2, b.y + b.h / 2);
     }
-
-    const ratio = b.maxHp > 0 ? Math.max(0, b.hp / b.maxHp) : 0;
-    if (ratio < 0.999) {
-      const barW = b.w;
-      const barH = 8;
-      const bx = b.x;
-      const by = b.y - 14;
-      ctx.fillStyle = '#222';
-      ctx.fillRect(bx, by, barW, barH);
-      ctx.fillStyle = ratio > 0.35 ? '#6dbf7a' : '#c45c5c';
-      ctx.fillRect(bx, by, barW * ratio, barH);
-    }
   }
-  // Heal range overlay after solids — opacity 50%, visual only (units draw above).
+}
+
+function drawTurretGuns(ctx, blocks) {
+  if (!blocks) return;
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (!b || !b.alive || !b.weaponId) continue;
+    const isArmed = b.isTurret || (b.isDefeatCondition && b.weaponId);
+    if (!isArmed) continue;
+    drawTurretGun(ctx, b);
+  }
+}
+
+function localPlayerUnit(match) {
+  const units = match.pools && match.pools.units;
+  if (!units) return null;
+  const id = match.playerUnitId;
+  let fallback = null;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u || !u.active) continue;
+    if (id != null && u.id === id) return u;
+    if (!fallback && u.role === 'player') fallback = u;
+  }
+  return fallback;
+}
+
+function drawBlockHpBars(ctx, match) {
+  const blocks = match.blocks;
+  const player = localPlayerUnit(match);
+  if (!blocks || !player) return;
+  const radiusL3 =
+    GAME_PACK.blockHpBarRadiusL3 > 0 ? GAME_PACK.blockHpBarRadiusL3 : 6;
+  const cap = GAME_PACK.blockHpBarCap > 0 ? GAME_PACK.blockHpBarCap | 0 : 8;
+  const reach = radiusL3 * L3_SIZE;
+  const reach2 = reach * reach;
+  const near = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (!b || !b.alive || !(b.maxHp > 0)) continue;
+    const ratio = Math.max(0, b.hp / b.maxHp);
+    if (ratio >= 0.999) continue;
+    const dx = b.x + b.w / 2 - player.x;
+    const dy = b.y + b.h / 2 - player.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > reach2) continue;
+    near.push({ b: b, d2: d2, ratio: ratio });
+  }
+  if (near.length > cap) {
+    near.sort(function (a, c) {
+      return a.d2 - c.d2;
+    });
+    near.length = cap;
+  }
+  for (let i = 0; i < near.length; i++) {
+    const b = near[i].b;
+    const ratio = near[i].ratio;
+    const barW = b.w;
+    const barH = 8;
+    const bx = b.x;
+    const by = b.y - 14;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(bx, by, barW, barH);
+    ctx.fillStyle = ratio > 0.35 ? '#6dbf7a' : '#c45c5c';
+    ctx.fillRect(bx, by, barW * ratio, barH);
+  }
+}
+
+function drawBlockHealRanges(ctx, blocks) {
+  if (!blocks) return;
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
     if (!b || !b.alive || !b.isHeal || !(b.healRadius > 0)) continue;

@@ -8,6 +8,7 @@ import { installPlayButtons } from './ui/play/buttons.js';
 import { installPlayChat } from './ui/play/chat.js';
 import { installPlayLayout } from './ui/play/layout.js';
 import { installPlayPanels } from './ui/play/panels.js';
+import { installPlayTips } from './ui/play/tips.js';
 import {
   ART_H,
   ART_W,
@@ -75,7 +76,7 @@ export function createPlayerUiGamePlay(opts) {
 api.mountSvg = async function mountSvg() {
   if (!api.mount) return false;
   const stage = api.ensureStage();
-  const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261021b`);
+  const res = await fetch(`${PLAYER_UI_SVG_URL}?v=20261025b`);
   if (!res.ok) throw new Error(`PlayerUI SVG ${res.status}`);
   stage.innerHTML = await res.text();
   api.state.svgRoot =
@@ -136,6 +137,7 @@ api.mountSvg = async function mountSvg() {
   api.state.ready = true;
   api.state._btnArtReady = false;
   api.state.pressOnTpl = null;
+  api.state.pressTrueTpl = null;
   api.state.iconAudioCloseTpl = null;
   api.state.anchorBase = null;
   api.state.hpFillBase = null;
@@ -181,6 +183,7 @@ api.mountSvg = async function mountSvg() {
   api.syncAudioIcon();
   api.syncCatalogVisual('Gun');
   api.wireClicks();
+  installPlayTips(api);
   api.bindExitPressArt(api.$('Btn_Press_false_Exit'));
   api.bindLayoutListeners();
   api.layout();
@@ -218,6 +221,11 @@ api.mountController = async function mountController() {
     setCraftOpen: api.setCraftOpen,
     setSettingOpen: api.setSettingOpen,
     setGenOpen: api.setGenOpen,
+    setUpgradeOpen: api.setUpgradeOpen,
+    isUpgradeOpen: api.isUpgradeOpen,
+    getUpgradeBlockId: api.getUpgradeBlockId,
+    hitUpgradeSlot: api.hitUpgradeSlot,
+    syncUpgrade: api.syncUpgrade,
     setEndOpen: api.setEndOpen,
     setBackpackTier: api.setBackpackTier,
     setInteractiveVisible: api.setInteractiveVisible,

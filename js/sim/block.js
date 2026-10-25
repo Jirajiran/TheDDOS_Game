@@ -325,38 +325,53 @@ export function findBlockById(match, blockId) {
 }
 
 export function interactFactory(match, factory) {
-  // Soft stub UX: if holding upgradable weapon, deposit & start timer.
-  const slot = getActiveSlot(match.inventory, match.activeHotbar);
+  match.pendingUi = { type: 'upgrade', blockId: factory.id };
   if (factory.factoryBusy) {
     match.interactPrompt = `Factory: ${Math.ceil(factory.factoryTimer)}s left`;
-    return;
+  } else if (factory.factoryWeaponId) {
+    match.interactPrompt = 'Factory: upgrade ready';
+  } else {
+    match.interactPrompt = 'Factory: put a weapon in';
   }
-  if (factory.factoryWeaponId) {
-    // Collect finished weapon
-    const leftover = addItemToInventory(match.inventory, factory.factoryWeaponId, 1);
-    if (leftover === 0) {
-      factory.factoryWeaponId = null;
-      match.interactPrompt = 'Upgrade collected';
-    } else {
-      match.interactPrompt = 'Inventory full';
-    }
-    return;
-  }
-  if (!isWeaponSlot(slot)) {
-    match.interactPrompt = 'Factory: hold weapon, press E';
-    return;
-  }
-  const recipe = getUpgradeRecipe(slot.weaponId || slot.itemId);
+}
+
+/** Start an upgrade from one inventory slot. Guns with no recipe stay put. */
+export function depositFactoryWeapon(match, factory, slotIndex) {
+  if (!match || !factory || !factory.alive) return 'closed';
+  if (factory.factoryBusy || factory.factoryWeaponId) return 'busy';
+  const slot = match.inventory && match.inventory[slotIndex];
+  if (!isWeaponSlot(slot)) return 'not-weapon';
+  const weaponId = slot.weaponId || slot.itemId;
+  const recipe = getUpgradeRecipe(weaponId);
   if (!recipe) {
     match.interactPrompt = 'No upgrade recipe';
-    return;
+    return 'no-recipe';
   }
   factory.factoryBusy = true;
+  factory.factoryDuration = recipe.upgradeTimeSec;
   factory.factoryTimer = recipe.upgradeTimeSec;
-  factory.factoryWeaponId = recipe.resultWeaponId;
+  factory.factorySourceId = weaponId;
   factory._pendingResult = recipe.resultWeaponId;
-  consumeSlotItem(match.inventory, match.activeHotbar, 1);
+  factory.factoryWeaponId = null;
+  consumeSlotItem(match.inventory, slotIndex, 1);
   match.interactPrompt = `Upgrading → ${recipe.resultWeaponId}`;
+  return 'ok';
+}
+
+/** Put the finished weapon into the first empty inventory slot. */
+export function collectFactoryWeapon(match, factory) {
+  if (!match || !factory || factory.factoryBusy || !factory.factoryWeaponId) return 'empty';
+  const leftover = addItemToInventory(match.inventory, factory.factoryWeaponId, 1);
+  if (leftover !== 0) {
+    match.interactPrompt = 'Inventory full';
+    return 'full';
+  }
+  factory.factoryWeaponId = null;
+  factory.factorySourceId = null;
+  factory.factoryDuration = 0;
+  factory._pendingResult = null;
+  match.interactPrompt = 'Upgrade collected';
+  return 'ok';
 }
 
 export function updateFactory(match, dt) {

@@ -208,6 +208,13 @@ export function tickUnitSkills(match, unit, dt) {
     }
   }
 
+  if (unit.role === 'player') {
+    const heal = unit.skills.SELF_HEAL;
+    if (heal && heal.phase === SkillPhase.READY) {
+      tryBeginCastSkill(unit, { skillId: 'SELF_HEAL' });
+    }
+  }
+
   if (unit._pendingTauntPulse && match) {
     const pulse = unit._pendingTauntPulse;
     unit._pendingTauntPulse = null;

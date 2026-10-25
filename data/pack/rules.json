@@ -1,8 +1,8 @@
 {
   "version": "1",
-  "targetWaveToWin": 7,
-  "setupPhaseDurationSec": 60,
-  "waveCountdownSec": 20,
+  "targetWaveToWin": 10,
+  "setupPhaseDurationSec": 144,
+  "waveCountdownSec": 144,
   "enemiesPerWaveBase": 3,
   "enemiesPerWaveScale": 1,
   "waveGroupCount": 3,

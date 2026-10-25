@@ -408,6 +408,17 @@
       }
     },
     {
+      "id": "craft_energy_shield",
+      "itemId": "ENERGY_SHIELD",
+      "category": "Other",
+      "resultCount": 1,
+      "cost": {
+        "IRON": 8,
+        "STONE": 6,
+        "WOOD": 2
+      }
+    },
+    {
       "id": "craft_backpack_t1",
       "itemId": "BACKPACK_T1",
       "category": "Other",

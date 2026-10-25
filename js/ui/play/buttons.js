@@ -89,9 +89,6 @@ export function installPlayButtons(api) {
       'Btn_Audio',
       'Btn_Panel_objective',
       'btn_interactive',
-      'Btn_Press_false_TakeWood',
-      'Btn_Press_false_TakeStone',
-      'Btn_Press_false_TakeIron',
       'Btn_Press_false_Exit',
       'Btn_Panel_objective_FL',
     ];
@@ -141,6 +138,10 @@ export function installPlayButtons(api) {
       [
         'Btn_Press_false_TakeIron',
         () => api.opts.onGenTake && api.opts.onGenTake('IRON'),
+      ],
+      [
+        'Btn_Press_false_TakeWeapon',
+        () => api.opts.onFactoryTake && api.opts.onFactoryTake(),
       ],
       [
         'Btn_Panel_objective_FL',
@@ -227,6 +228,33 @@ export function installPlayButtons(api) {
       api.wireHotbarPanel(api.$(`Panel_item_${i}_FL`), i - 1);
       api.wireHotbarPanel(api.$(`Panel_item_${i}_FL_FL`), i - 1);
     }
+    api.wireHotbarPanel(api.$('Mask_Item_7'), 6);
+
+    const closeUpgrade = api.$('Btn_Panel_objective_FL_FL');
+    if (closeUpgrade) {
+      api.makeHitTarget(closeUpgrade);
+      closeUpgrade.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        playSfx('ui.click');
+        if (api.opts.onUpgradeClose) api.opts.onUpgradeClose();
+        else api.setUpgradeOpen(false);
+      });
+    }
+    const upgradeSlot = api.$('Slot_CurrentWeapon');
+    const doneSlot = api.$('Slot_Done_Upgrate');
+    const takeSlot = (el, role) => {
+      if (!el) return;
+      api.makeHitTarget(el);
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        playSfx('ui.click');
+        if (api.opts.onFactoryTake) api.opts.onFactoryTake(role);
+      });
+    };
+    takeSlot(upgradeSlot, 'deposit');
+    takeSlot(doneSlot, 'collect');
   
     const skill1 = api.$('Skill_Show_1');
     if (skill1) {
@@ -247,9 +275,6 @@ export function installPlayButtons(api) {
       skill2.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        playSfx('ui.click');
-        if (api.opts.onCastHeal) api.opts.onCastHeal();
-        else if (api.opts.onCastSkill) api.opts.onCastSkill('SELF_HEAL');
       });
     }
   
@@ -277,6 +302,11 @@ export function installPlayButtons(api) {
         playSfx('ui.click');
       if (api.opts.onHotbarDown) api.opts.onHotbarDown(slotIndex, e);
       else if (api.opts.onHotbarSelect) api.opts.onHotbarSelect(slotIndex);
+    });
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (api.opts.onHotbarDouble) api.opts.onHotbarDouble(slotIndex);
     });
   }
 }

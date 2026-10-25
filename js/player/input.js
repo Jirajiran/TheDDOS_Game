@@ -6,6 +6,8 @@ import {
   makePlaceAction,
   makeCancelReloadAction,
   makeReloadAction,
+  makeCastSkillAction,
+  makeEquipWornAction,
   makeSelectHotbarAction,
 } from './actions.js';
 import { GAME_PACK, L3_SIZE } from '../config.js';
@@ -13,6 +15,7 @@ import {
   getActiveSlot,
   isArmorSlot,
   isPlaceableSlot,
+  isShieldSlot,
   isToolSlot,
   isWeaponSlot,
 } from './inventory.js';
@@ -138,7 +141,6 @@ export function createInput(canvas, hooks = {}) {
       e.preventDefault();
     }
     if (e.code === 'KeyC') {
-      healSkillPressed = true;
       e.preventDefault();
     }
     const digit = digitFromCode(e.code);
@@ -441,9 +443,13 @@ export function createInput(canvas, hooks = {}) {
       if (firePressed || fireHeld) {
         actions.push(makeFireAction(playerUnitId));
       }
-    } else if (isArmorSlot(slot)) {
+    } else if (isArmorSlot(slot) || isShieldSlot(slot)) {
       if (firePressed) {
-        actions.push(makeSelectHotbarAction(playerUnitId, effectiveHotbar));
+        actions.push(makeEquipWornAction(playerUnitId));
+      }
+    } else if (!slot || !slot.itemId) {
+      if (firePressed) {
+        actions.push(makeCastSkillAction(playerUnitId, 'FIST'));
       }
     }
   }

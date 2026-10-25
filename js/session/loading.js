@@ -44,8 +44,8 @@ export async function runLoading(onProgress) {
       },
       {
         id: 'equip_art_cache',
-        required: false,
-        timeoutMs: 2000,
+        required: true,
+        timeoutMs: 60000,
         run: () => preloadEquipArtCache(),
       },
       {

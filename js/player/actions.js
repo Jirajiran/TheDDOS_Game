@@ -14,11 +14,15 @@ export const ActionType = Object.freeze({
   TAKE_GEN: 'TAKE_GEN',
   /** Take from base inherent storage into inventory (sim mutates). */
   TAKE_BASE: 'TAKE_BASE',
+  /** Deposit the given slot into a weapon factory, or collect when a result is ready. */
+  TAKE_FACTORY: 'TAKE_FACTORY',
   /**
    * Active skill cast — payload: skillId, targetPosVec2?, targetEntityId?
    * AI Stages emit this Action; they do not resolve skill names/effects.
    */
   CAST_SKILL: 'CAST_SKILL',
+  /** Wear the armor or shield in the active slot. Same kind replaces the worn piece. */
+  EQUIP_WORN: 'EQUIP_WORN',
 });
 
 export function makeMoveAction(unitId, dx, dy) {
@@ -68,12 +72,21 @@ export function makeTakeBaseAction(unitId, itemId, amount = Infinity) {
   return { type: ActionType.TAKE_BASE, unitId, itemId, amount };
 }
 
+/** TAKE_FACTORY — role is deposit, collect, or take. */
+export function makeTakeFactoryAction(unitId, blockId, slotIndex, role) {
+  return { type: ActionType.TAKE_FACTORY, unitId, blockId, slotIndex, role: role || 'take' };
+}
+
 /**
  * CAST_SKILL — Unified Input skill cast.
  * @param {number} unitId
  * @param {string} skillId
  * @param {{ targetPosVec2?: {x:number,y:number}, targetEntityId?: string|number }} [opts]
  */
+export function makeEquipWornAction(unitId) {
+  return { type: ActionType.EQUIP_WORN, unitId };
+}
+
 export function makeCastSkillAction(unitId, skillId, opts = {}) {
   return {
     type: ActionType.CAST_SKILL,

@@ -11,6 +11,7 @@ import {
   equipBackpack,
   unequipBackpack,
   isBackpackSlot,
+  releaseWornSlot,
 } from '../player/inventory.js';
 import {
   resolveUnitVsOccupancy,
@@ -105,6 +106,7 @@ export function throwHotbarSlot(match, slotIndex, _worldX, _worldY) {
   const x = player.x + cos * off;
   const y = player.y + sin * off;
   spawnDrop(match, x, y, itemId, count, cos * speed, sin * speed);
+  releaseWornSlot(match, player, slotIndex);
   match.inventory[slotIndex] = emptySlot();
   match.interactPrompt = `Dropped ${itemId}`;
   return { ok: true };
@@ -161,6 +163,22 @@ export function tryEquipBackpackFromDrop(match, drop) {
   }
   match.interactPrompt = `Equipped ${itemId}`;
   return { ok: true };
+}
+
+/** Craft result worn immediately. A lower tier is refused and stays out of the bag. */
+
+export function equipCraftedBackpack(match, itemId) {
+  const res = equipBackpack(match, itemId);
+  if (!res.ok) return res;
+  spillOverflowAsDrops(match, res.overflow);
+  if (res.replacedId && res.replacedId !== itemId) {
+    const player = getPlayerUnit(match);
+    if (player) {
+      spawnDrop(match, player.x, player.y + 20, res.replacedId, 1, 0, 40);
+    }
+  }
+  match.interactPrompt = `Equipped ${itemId}`;
+  return res;
 }
 
 /** Equip backpack from hotbar slot (same rules as drop). */

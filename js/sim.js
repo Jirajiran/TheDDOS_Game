@@ -21,6 +21,7 @@ import {
   emptySlot,
   equipArmorOnUnit,
   equipShieldOnUnit,
+  tryEquipWornFromActive,
   makeSlotFromItem,
 } from './player/inventory.js';
 import { generateWorldObjects } from './world/mapgen.js';
@@ -63,6 +64,8 @@ import {
   registerBlock,
   takeBaseResources,
   takeGenResources,
+  collectFactoryWeapon,
+  depositFactoryWeapon,
   tryInteract,
   updateBlockSystems,
   updateFactory,
@@ -121,12 +124,15 @@ export {
   takeGenResources,
   getBaseReceiveState,
   takeBaseResources,
+  depositFactoryWeapon,
+  collectFactoryWeapon,
 } from './sim/block.js';
 export {
   throwHotbarSlot,
   findNearbyBackpackDrop,
   tryEquipBackpackFromDrop,
   tryEquipBackpackFromSlot,
+  equipCraftedBackpack,
   tryUnequipBackpackToDrop,
   getEquippedBackpackTier,
 } from './sim/drops.js';
@@ -175,6 +181,8 @@ export function initMatchGameplay(match, options = {}) {
   match.enemiesAlive = 0;
   match.outcome = null;
   match.activeHotbar = 0;
+  match.wornArmorSlot = -1;
+  match.wornShieldSlot = -1;
   match.pendingHotbar = -1;
   match.hotbarSwitchT = 0;
   match.hotbarFireLockT = 0;
@@ -275,6 +283,59 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   return match.outcome;
 }
 
+function noteFactory(match, lines) {
+  const dwell = GAME_PACK.gunDetailDwellSec != null ? GAME_PACK.gunDetailDwellSec : 0.9;
+  match.factoryNotice = {
+    lines,
+    until: (match.simTime || 0) + dwell,
+  };
+}
+
+function applyFactoryTake(match, blockId, slotIndex, role) {
+  if (!match || !match.blocks || blockId == null) return;
+  let factory = null;
+  for (let i = 0; i < match.blocks.length; i++) {
+    const block = match.blocks[i];
+    if (block && block.id === blockId) {
+      factory = block;
+      break;
+    }
+  }
+  const want = role || 'take';
+  if (!factory || !factory.alive) {
+    noteFactory(match, ['Cannot insert', 'Factory is closed']);
+    return;
+  }
+  if (factory.factoryBusy) {
+    noteFactory(match, [
+      want === 'collect' ? 'Cannot take' : 'Cannot insert',
+      'Factory is working',
+    ]);
+    return;
+  }
+  if (want === 'collect' || (want === 'take' && factory.factoryWeaponId)) {
+    if (!factory.factoryWeaponId) {
+      noteFactory(match, ['Cannot take', 'Nothing to return']);
+      return;
+    }
+    const id = factory.factoryWeaponId;
+    const code = collectFactoryWeapon(match, factory);
+    if (code === 'ok') noteFactory(match, ['Returned', id]);
+    else if (code === 'full') noteFactory(match, ['Cannot take', 'Inventory full']);
+    else noteFactory(match, ['Cannot take', 'Nothing to return']);
+    return;
+  }
+  if (factory.factoryWeaponId) {
+    noteFactory(match, ['Cannot insert', 'Take the finished gun first']);
+    return;
+  }
+  const code = depositFactoryWeapon(match, factory, slotIndex);
+  if (code === 'ok') noteFactory(match, ['Accepted', factory._pendingResult || '']);
+  else if (code === 'no-recipe') noteFactory(match, ['Cannot insert', 'No upgrade recipe']);
+  else if (code === 'not-weapon') noteFactory(match, ['Cannot insert', 'Not a weapon']);
+  else noteFactory(match, ['Cannot insert', 'Factory is working']);
+}
+
 function applyActions(match, actions, mouseWorld, dt) {
   const player = getPlayerUnit(match);
   const moveIntent = Object.create(null);
@@ -351,9 +412,16 @@ function applyActions(match, actions, mouseWorld, dt) {
           ...takeBaseResources(match, a.itemId, a.amount),
         };
       }
+    } else if (a.type === ActionType.TAKE_FACTORY) {
+      if (unit.role === 'player') {
+        applyFactoryTake(match, a.blockId, a.slotIndex, a.role);
+      }
     } else if (a.type === ActionType.PLACE) {
       tryPlaceFromAction(match, unit, a);
+    } else if (a.type === ActionType.EQUIP_WORN) {
+      if (unit.role === 'player') tryEquipWornFromActive(match, unit);
     } else if (a.type === ActionType.CAST_SKILL) {
+      if (a.skillId === 'SELF_HEAL') continue;
       tryBeginCastSkill(unit, {
         skillId: a.skillId,
         targetPosVec2: a.targetPosVec2,
@@ -411,6 +479,8 @@ export function restoreMatchFromSnapshot(match, snap) {
   match.enemiesAlive = 0;
   match.outcome = snap.outcome || null;
   match.activeHotbar = snap.activeHotbar || 0;
+  match.wornArmorSlot = snap.wornArmorSlot != null ? snap.wornArmorSlot : -1;
+  match.wornShieldSlot = snap.wornShieldSlot != null ? snap.wornShieldSlot : -1;
   match.playerDead = !!snap.playerDead;
   match.respawnTimer = snap.respawnTimer || 0;
   match.cameraZoom = snap.cameraZoom || GAME_PACK.cameraFollowZoom;
@@ -499,7 +569,10 @@ export function restoreMatchFromSnapshot(match, snap) {
       }
       block.factoryBusy = !!sb.factoryBusy;
       block.factoryTimer = sb.factoryTimer || 0;
+      block.factoryDuration = sb.factoryDuration || 0;
       block.factoryWeaponId = sb.factoryWeaponId || null;
+      block._pendingResult = sb.factoryPendingId || null;
+      block.factorySourceId = sb.factorySourceId || null;
       registerBlock(match, block);
       if (block.isDefeatCondition) {
         match.base = block;

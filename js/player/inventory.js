@@ -182,6 +182,55 @@ export function isShieldSlot(slot) {
  * Single active armor slot — equipping a new armor deactivates the previous
  * in the same assignment (never two activeArmorId values).
  */
+function shiftWornIndex(idx, from, to, mode) {
+  const i = typeof idx === 'number' ? idx : -1;
+  if (i < 0) return -1;
+  if (mode === 'move') return i === from ? to : i;
+  if (i === from) return to;
+  if (i === to) return from;
+  return i;
+}
+
+/** Click the active armor or shield slot. The same slot again takes that piece off. */
+export function tryEquipWornFromActive(match, unit) {
+  if (!match || !unit) return false;
+  const index = match.activeHotbar | 0;
+  const slot = getActiveSlot(match.inventory, index);
+  if (isArmorSlot(slot)) {
+    if (match.wornArmorSlot === index) {
+      match.wornArmorSlot = -1;
+      return equipArmorOnUnit(unit, null);
+    }
+    if (!equipArmorOnUnit(unit, slot.itemId)) return false;
+    match.wornArmorSlot = index;
+    return true;
+  }
+  if (isShieldSlot(slot)) {
+    if (match.wornShieldSlot === index) {
+      match.wornShieldSlot = -1;
+      return equipShieldOnUnit(unit, null);
+    }
+    if (!equipShieldOnUnit(unit, slot.itemId)) return false;
+    match.wornShieldSlot = index;
+    return true;
+  }
+  return false;
+}
+
+/** The worn piece left this slot. The other kind stays. */
+export function releaseWornSlot(match, unit, slotIndex) {
+  if (!match) return;
+  const index = slotIndex | 0;
+  if (match.wornArmorSlot === index) {
+    match.wornArmorSlot = -1;
+    if (unit) equipArmorOnUnit(unit, null);
+  }
+  if (match.wornShieldSlot === index) {
+    match.wornShieldSlot = -1;
+    if (unit) equipShieldOnUnit(unit, null);
+  }
+}
+
 export function equipArmorOnUnit(unit, itemId) {
   if (!unit) return false;
   if (!itemId) {
@@ -234,7 +283,10 @@ export function equipShieldOnUnit(unit, itemId) {
 export function ejectBrokenBasicShield(match, unit) {
   if (!unit || unit.activeShieldId !== 'SHIELD_BASIC') return;
   if (!unit.shield || !unit.shield.broken) return;
-  if (unit.role === 'player' && match) clearBasicShieldSlots(match.inventory);
+  if (unit.role === 'player' && match) {
+    clearBasicShieldSlots(match.inventory);
+    match.wornShieldSlot = -1;
+  }
   clearBasicShieldSlots(unit.inventory);
   equipShieldOnUnit(unit, null);
 }
@@ -312,7 +364,7 @@ export function swapInventorySlots(inventory, a, b) {
 }
 
 /** Move stack from → to empty, or swap if destination occupied. */
-export function moveOrSwapInventorySlots(inventory, from, to) {
+export function moveOrSwapInventorySlots(inventory, from, to, match) {
   if (!inventory || from === to) return false;
   if (from < 0 || to < 0 || from >= inventory.length || to >= inventory.length) {
     return false;
@@ -323,6 +375,10 @@ export function moveOrSwapInventorySlots(inventory, from, to) {
   if (!dst || !dst.itemId || dst.kind === ItemKind.EMPTY) {
     inventory[to] = src;
     inventory[from] = emptySlot();
+    if (match) {
+      match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'move');
+      match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'move');
+    }
     return true;
   }
   // Same item + stackable → merge
@@ -334,11 +390,22 @@ export function moveOrSwapInventorySlots(inventory, from, to) {
       const take = Math.min(space, src.count);
       dst.count += take;
       src.count -= take;
-      if (src.count <= 0) inventory[from] = emptySlot();
+      if (src.count <= 0) {
+        inventory[from] = emptySlot();
+        if (match) {
+          match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'move');
+          match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'move');
+        }
+      }
       return true;
     }
   }
-  return swapInventorySlots(inventory, from, to);
+  const swapped = swapInventorySlots(inventory, from, to);
+  if (swapped && match) {
+    match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'swap');
+    match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'swap');
+  }
+  return swapped;
 }
 
 export function findWeaponSlotIndex(inventory, preferIndex) {
@@ -427,16 +494,24 @@ export function tryCraftBuy(inventory, recipe, opts = {}) {
   if (!freeCraft && !canAfford(inventory, recipe.cost)) {
     return { ok: false, reason: 'Not enough resources' };
   }
-  // Space check: ensure result fits even after cost free-up is optimistic;
-  // deduct first only if result would fit in current free space OR after free.
-  // Strict: check fit as if cost not yet freed (conservative) — ADR #4.
-  if (!canFitCraftResult(inventory, recipe.itemId, resultCount)) {
+  const expandsBag =
+    isBackpackItemId(recipe.itemId) &&
+    getBackpackTier(recipe.itemId) > getBackpackTier(opts.equippedBackpackId);
+  // A higher backpack is worn immediately, so a full bar does not block it.
+  // Tier 3 already worn does not grow the bar and stays on the normal check.
+  if (
+    !expandsBag &&
+    !canFitCraftResult(inventory, recipe.itemId, resultCount)
+  ) {
     return { ok: false, reason: 'Inventory full' };
   }
   if (!freeCraft) {
     if (!deductCost(inventory, recipe.cost)) {
       return { ok: false, reason: 'Not enough resources' };
     }
+  }
+  if (expandsBag) {
+    return { ok: true, equipNow: true };
   }
   const leftover = addItemToInventory(inventory, recipe.itemId, resultCount);
   if (leftover > 0) {

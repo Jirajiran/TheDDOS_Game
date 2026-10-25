@@ -40,8 +40,11 @@ export const TEXT_COL_MIDDLE = Object.freeze([
   'Objective_Text',
   'Detail_Item',
   'Name_Item',
+  'notification_AlignCenter',
   'NameGen',
   'HpGen',
+  'NameGen_FL',
+  'HpUpgrate',
 ]);
 export const TEXT_COL_END = Object.freeze([
   'Number_Wave',

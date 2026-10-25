@@ -1,9 +1,9 @@
 /**
- * Raster Weapon_* groups from Btn.svg onto the gun mount.
+ * Raster Weapon_* groups from Unit_Template.svg onto the gun mount.
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Ui/Btn.svg?v=20261021b';
+const BTN_SVG_URL = 'Asset/AssetSVG/Unit/Unit_Template.svg?v=20261025a';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -75,7 +75,7 @@ function readActionArmPoses(doc) {
   return out;
 }
 
-/** Arm matrices from Btn.svg Action_* groups, or null until the file loads. */
+/** Arm matrices from Unit_Template Action_* groups, or null until the file loads. */
 export function getBtnActionArmPoses() {
   return _armPoses;
 }
@@ -404,9 +404,14 @@ export function getProjectileArt(artId) {
   return _images.get('proj:' + artId) || null;
 }
 
+/** Raster of a mapped Icon_* group, or null until preload finishes. */
+export function getWeaponIconImage(weaponOrItemId) {
+  return _images.get('icon:' + artKey(weaponOrItemId)) || null;
+}
+
 /** Data URL for a mapped Icon_* group, or null. */
 export function getWeaponIconHref(weaponOrItemId) {
-  const img = _images.get('icon:' + artKey(weaponOrItemId));
+  const img = getWeaponIconImage(weaponOrItemId);
   return img && img.src ? img.src : null;
 }
 

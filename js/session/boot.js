@@ -76,18 +76,24 @@ export async function runBootPreload(onProgress, options = {}) {
   }));
   stages.push({
     id: 'equip_art_cache',
-    timeoutMs: 2000,
-    required: false,
+    timeoutMs: 60000,
+    required: true,
     run: () => preloadEquipArtCache(),
   });
 
-  const { results, warnings } = await runParallelStages(stages, {
+  const { results, warnings, failedRequired } = await runParallelStages(stages, {
     defaultTimeoutMs: ASSET_TIMEOUT_MS + 500,
     onProgress: ({ done, total, id, ok, error }) => {
       const pct = 20 + Math.round((done / total) * 70);
       report(pct, ok ? `OK ${id} (${done}/${total})` : `SKIP ${id}: ${error}`);
     },
   });
+
+  if (failedRequired.length) {
+    throw new Error(
+      `Boot failed: ${failedRequired.join(', ')} — ${warnings.join(' | ')}`
+    );
+  }
 
   const assets = Object.create(null);
   for (const entry of BOOT_ASSETS) {

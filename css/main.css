@@ -540,6 +540,8 @@ body.is-playing-lock #app {
   height: 100%;
   pointer-events: none;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .player-ui-stage {
@@ -574,6 +576,8 @@ body.is-playing-lock #app {
 
 .player-ui-chat-input {
   pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
   border: none;
   outline: none;
   background: transparent;
@@ -615,6 +619,35 @@ body.is-playing-lock #app {
 .play-debug-tray .btn,
 .play-debug-tray .hud-chip {
   pointer-events: auto;
+}
+
+.play-perf-debug {
+  position: absolute;
+  z-index: 6;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  max-width: min(40rem, calc(100% - 1rem));
+  max-height: 38vh;
+  overflow: auto;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  font: 12px/1.35 ui-monospace, Consolas, monospace;
+  color: #e8f0e8;
+  background: rgba(8, 12, 10, 0.82);
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+#play-ui-tip {
+  position: fixed;
+  z-index: 8;
+  max-width: 16rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  font: 13px/1.35 system-ui, sans-serif;
+  color: #f4f7f4;
+  background: rgba(8, 12, 10, 0.9);
+  pointer-events: none;
 }
 
 .play-hud {

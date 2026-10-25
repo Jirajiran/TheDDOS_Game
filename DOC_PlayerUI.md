@@ -1,6 +1,6 @@
 # DOC_PlayerUI — สัญญา Visual / Input
 
-ที่มาอาร์ต: `Asset/AssetSVG/Ui/PlayerUIGamePlay.svg` · คลังปุ่ม `Asset/AssetSVG/Ui/Btn.svg`  
+ที่มาอาร์ต: `Asset/AssetSVG/Ui/PlayerUIGamePlay.svg` · คลังปุ่ม `Asset/AssetSVG/Ui/Btn.svg` · รูปปืนอยู่ `Asset/AssetSVG/Unit/Unit_Template.svg` (พูลครั้งเดียว · `Doc/03_domains/weapon-item/`)  
 Runtime: `js/playerUiGamePlay.js` (visual only) · Intent: `dispatchUi` ใน `js/app.js` · กฎเกมอยู่ที่ `sim`
 
 ## หลัก (locked)
@@ -26,6 +26,7 @@ Runtime: `js/playerUiGamePlay.js` (visual only) · Intent: `dispatchUi` ใน `
 | `Skill_Show_1`…`3` | สกิล · Fist ที่ช่อง 1 · **ไม่ผูกกระเป๋า** |
 | `btn_Audio` True/False | mute state idle |
 | `Anchor_Center_3` / Exit | จบเกม · press จาก pool ใน defs |
+| `Anchor_Top_Left_3` / `Panel_Upgrate` | แผงอัปเกรดโรงงาน · เปิดจาก `pendingUi` ชนิด `upgrade` · รายละเอียดใน `Doc/03_domains/ui/` |
 
 Icon overlay เกือบทุกช่อง ~**60×60** ในกรอบ 72 · ยกเว้น `Icon_Current_slot` (ขนาดใหญ่ตามอาร์ต)
 
@@ -34,7 +35,7 @@ Icon overlay เกือบทุกช่อง ~**60×60** ในกรอบ
 | แหล่ง | Intent |
 |---|---|
 | F / `btn_Craft` | `craftToggle` (หลัง backpack equip logic ของ F) |
-| E / `btn_interactive` | `interact` (ถ้า Gen เปิดอยู่แล้ว → `genClose`) |
+| E / `btn_interactive` | `interact` → คิว `INTERACT` (แผงเจนหรือฐานเปิดอยู่แล้ว → ปิด · ถืออาวุธไม่เปิดปุ่มนี้) |
 | Q / `Skill_Show_1` | `castFist` |
 | Setting / Audio / Exit / Gen take | `settingOpen` / `audioToggle` / `leaveGame` / `genTake` |
 | Enter / click `InputChat` | `chatToggle` (open) · open แล้ว Enter = send+close |
