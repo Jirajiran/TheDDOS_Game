@@ -35,14 +35,16 @@ export async function loadDefinitionPack(opts = {}) {
       blocks: PACK_BASE + (files.blocks || 'blocks.json'),
       items: PACK_BASE + (files.items || 'items.json'),
       skills: PACK_BASE + (files.skills || 'skills.json'),
-      archetypes: PACK_BASE + (files.archetypes || 'archetypes.json'),
       weaponUpgrades:
         PACK_BASE + (files.weaponUpgrades || 'weapon_upgrades.json'),
       craft: PACK_BASE + (files.craft || 'craft.json'),
-      actors: PACK_BASE + (files.actors || 'actors.json'),
+      units: PACK_BASE + (files.units || 'units.json'),
       day: PACK_BASE + (files.day || 'day.json'),
       rules: PACK_BASE + (files.rules || 'rules.json'),
       gamePack: PACK_BASE + (files.gamePack || 'game_pack.json'),
+      presentation: PACK_BASE + (files.presentation || 'presentation.json'),
+      areas: PACK_BASE + (files.areas || 'areas.json'),
+      spawns: PACK_BASE + (files.spawns || 'spawns.json'),
       ai: PACK_BASE + (files.ai || 'ai.json'),
       audio: PACK_BASE + (files.audio || 'audio.json'),
     };
@@ -81,17 +83,21 @@ export async function loadDefinitionPack(opts = {}) {
       blocks: byKey.blocks,
       items: byKey.items,
       skills: byKey.skills,
-      archetypes: byKey.archetypes,
       weaponUpgrades: byKey.weaponUpgrades,
       craft: byKey.craft,
-      actors: byKey.actors,
+      units: byKey.units,
       day: byKey.day,
       rules: byKey.rules,
     };
 
     installDamageMatrix(byKey.damageMatrix);
     installPackData(pack);
-    installGamePack(byKey.gamePack, byKey.rules);
+    installGamePack(byKey.gamePack, byKey.rules, {
+      presentation: byKey.presentation,
+      units: byKey.units,
+      areas: byKey.areas,
+      spawns: byKey.spawns,
+    });
     installAiPack(byKey.ai);
     installAudioPack(byKey.audio);
 

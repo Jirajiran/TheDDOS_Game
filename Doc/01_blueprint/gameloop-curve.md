@@ -1,14 +1,14 @@
 # GameLoop curve — เฟสแมตช์ · คลื่น · อ้าง pack JSON
 
-**ความจริงตัวเลข = pack JSON** (`data/pack/`). เอกสารนี้ = คาดเดา timeline + threat สำหรับออกแบบ  
+(ความจริงตัวเลข = pack JSON) (`data/pack/`). เอกสารนี้ = คาดเดา timeline + threat สำหรับออกแบบ  
 อย่าคัดลอกทั้ง `weapons.json` มาไว้ที่นี่ — อัปเมื่อบาลานซ์เปลี่ยน
 
 ## Hub นอก repo (กราฟ / เขียนยาว)
 
 - Google Doc (เรื่องราว + แปะกราฟจาก Sheet):  
   https://docs.google.com/document/d/143kRF3GL2rUaVlI8EGQ4Z8XtC1Hr-DQwRnmXs0lHbgE/edit?hl=th  
-- แนะนำคู่: **Google Sheet** แกน X = คลื่นหรือนาที · Y = จำนวนศัตรู / threat score → Insert chart เข้า Doc  
-- Doc **ไม่ sync** กับ JSON อัตโนมัติ — เปลี่ยน pack แล้วอัปตารางใน Sheet/Doc ด้วยมือ
+- แนะนำคู่: (Google Sheet) แกน X = คลื่นหรือนาที · Y = จำนวนศัตรู / threat score → Insert chart เข้า Doc  
+- Doc (ไม่ sync) กับ JSON อัตโนมัติ — เปลี่ยน pack แล้วอัปตารางใน Sheet/Doc ด้วยมือ
 
 ## อ้างอิง pack (แหล่งความจริง)
 
@@ -16,20 +16,20 @@
 |--------|------|
 | setup / countdown / นับศัตรู / HP ผู้เล่น | `data/pack/rules.json` |
 | ความยาววัน (5 นาที = 1 วัน) | `data/pack/day.json` → `dayLengthSec` |
-| องค์ประกอบคลื่น | `data/pack/archetypes.json` → `waveComposition` / `waveTable` |
+| องค์ประกอบคลื่น | `data/pack/units.json` → `waveComposition` / `waveTable` |
 | Gen interval บนฐาน | `data/pack/blocks.json` → `BASE_CORE_3X3.generatorList` |
 | กระสุนไกล vs unit กดยิง | `weapons.json` → `maxDistancePath` / `aiFireRangePath` |
 | กระสุน vs เกราะฐาน | `damage_matrix.json` → `BULLET.DEFAULT` |
 
 ค่าล็อกปัจจุบัน (อ่านจาก pack ตอนเขียนเอกสาร):
 
-- `dayLengthSec` = **300** → แมตช์เป้า ~**900 s (15 นาที) = 3 วัน**
-- `setupPhaseDurationSec` = **60** (หลังวางฐาน)
-- `waveCountdownSec` = **20** (ระหว่างคลื่น; countdown ไม่รอเคลียร์หมด)
-- `enemiesPerWaveBase` = **3**, `enemiesPerWaveScale` = **1**  
-  → นับโดยประมาณ `3 + (waveIndex - 1)` = **3…9** ในคลื่น 1…7
-- `targetWaveToWin` = **7**
-- Base Gen: WOOD **30s** · STONE **45s** · IRON **90s**
+- `dayLengthSec` = (300) → แมตช์เป้า ~(900 s (15 นาที) = 3 วัน)
+- `setupPhaseDurationSec` = (60) (หลังวางฐาน)
+- `waveCountdownSec` = (20) (ระหว่างคลื่น; countdown ไม่รอเคลียร์หมด)
+- `enemiesPerWaveBase` = (3), `enemiesPerWaveScale` = (1)  
+  → นับโดยประมาณ `3 + (waveIndex - 1)` = (3…9) ในคลื่น 1…7
+- `targetWaveToWin` = (7)
+- Base Gen: WOOD (30s) · STONE (45s) · IRON (90s)
 
 ## Timeline ผู้เล่น (คาดเดา)
 
@@ -76,7 +76,7 @@ Threat คร่าวๆ: `threat ≈ count × weightMix` (1.0 = grunt-only · 
 
 \*เวลาจริงของแต่ละคลื่น = setup/ระหว่างคลื่น + เวลาฆ่า — ใช้ Sheet ปรับคอลัมน์ “นาทีจริง” หลังเพลย์เทส
 
-### Sheet starter (คัดลอกไป Google Sheet)
+Sheet starter (คัดลอกไป Google Sheet)
 
 แถวหัว:
 

@@ -1,9 +1,13 @@
 /**
- * GAME_PACK shell. Camera / place / hotbar fields come from data/pack/game_pack.json.
- * Wave timing and player HP/speed/skills come from data/pack/rules.json only.
+ * GAME_PACK shell. The map file, presentation file, and unit bodies
+ * are merged here so existing readers keep one object.
+ * Wave timing stays in rules.json. Body HP, speed, and skills stay on the unit.
  */
 
 import { getRulesConfig } from './registry.js';
+import { closedModelGroupId } from '../assets/closedCatalog.js';
+
+const MAX_LOCAL_TEAMS = 6;
 
 function cloneFreeze(value) {
   if (Array.isArray(value)) {
@@ -29,15 +33,29 @@ export let WAVE_COUNTDOWN_STUB_SEC = 0;
 
 /**
  * @param {object} doc game_pack.json
- * @param {object} rulesDoc rules.json (source for the overlaid balance fields)
+ * @param {object} rulesDoc rules.json (wave timing and match rules)
+ * @param {{ presentation?: object, units?: object }} [extras]
  */
-export function installGamePack(doc, rulesDoc) {
+export function installGamePack(doc, rulesDoc, extras) {
   const src = (doc && doc.pack) || {};
   const r = rulesDoc || {};
-  const skills = Array.isArray(r.playerActiveSkills)
-    ? Object.freeze(r.playerActiveSkills.slice())
+  const extra = extras || {};
+  const presentation =
+    (extra.presentation && extra.presentation.presentation) || {};
+  const units = (extra.units && extra.units.units) || {};
+  const player = units.PLAYER || {};
+  const enemy = units.ENEMY_DEFAULT || {};
+  const teams = Array.isArray(src.teams) ? src.teams : [];
+  if (teams.length < 1 || teams.length > MAX_LOCAL_TEAMS) {
+    throw new Error(
+      `map teams must be 1 to ${MAX_LOCAL_TEAMS} (got ${teams.length})`
+    );
+  }
+  const skills = Array.isArray(player.skills)
+    ? Object.freeze(player.skills.slice())
     : Object.freeze([]);
   const merged = {
+    ...presentation,
     ...src,
     targetWaveToWin: r.targetWaveToWin,
     setupPhaseDurationSec: r.setupPhaseDurationSec,
@@ -50,16 +68,36 @@ export function installGamePack(doc, rulesDoc) {
     dodgeQuota: r.dodgeQuota != null ? r.dodgeQuota : 4,
     area: r.area || null,
     territory: r.territory || null,
-    playerMaxHp: r.playerMaxHp,
-    playerSpeed: r.playerSpeed,
+    playerMaxHp: player.maxHp,
+    playerSpeed: player.speed,
+    playerRadius: player.radius,
+    playerArmorType: player.armorType || 'DEFAULT',
     playerActiveSkills: skills,
+    enemyDefaultSkinGroupId:
+      closedModelGroupId(enemy.model) || 'Default_skin_2',
+    playerDefaultSkinGroupId:
+      closedModelGroupId(player.model) || 'Default_skin_1',
+    seatCap: src.seatCap != null ? src.seatCap : 12,
+    startingLoadout: Array.isArray(player.startingLoadout)
+      ? player.startingLoadout
+      : [],
+    currentSlot: player.currentSlot | 0,
+    areas: Array.isArray(extra.areas && extra.areas.areas)
+      ? extra.areas.areas
+      : [],
+    spawns: Array.isArray(extra.spawns && extra.spawns.spawns)
+      ? extra.spawns.spawns
+      : [],
   };
+  delete merged.startingArmorId;
+  delete merged.startingShieldId;
   GAME_PACK = cloneFreeze(merged);
   WAVE_COUNTDOWN_STUB_SEC = GAME_PACK.waveCountdownSec;
 }
 
 /**
- * GAME_PACK with rules.json winning on wave timing and player HP/speed/skills.
+ * GAME_PACK with rules.json winning on wave timing.
+ * Player body fields stay on the merged unit values unless rules still override them.
  */
 export function getBalancePack() {
   const g = GAME_PACK;

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Map editor</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="css/editor.css" />
+  </head>
+  <body>
+    <section id="screen-loading" class="editor-screen" hidden>
+      <div class="editor-card">
+        <h1>Loading</h1>
+        <p id="editor-load-label">Reading pack…</p>
+        <p id="editor-load-error" class="editor-error"></p>
+      </div>
+    </section>
+
+    <section id="screen-create" class="editor-screen" hidden>
+      <form class="editor-card" id="editor-create-form">
+        <h1>New map</h1>
+        <p class="editor-note">The path grid is locked after this step. Each side is 1 to 8.</p>
+        <label>
+          File name
+          <input id="editor-name" value="untitled_map" />
+        </label>
+        <label>
+          Columns
+          <input id="editor-cols" type="number" min="1" max="8" value="3" />
+        </label>
+        <label>
+          Rows
+          <input id="editor-rows" type="number" min="1" max="8" value="3" />
+        </label>
+        <button id="editor-create" type="submit">Create</button>
+        <p id="editor-create-error" class="editor-error"></p>
+      </form>
+    </section>
+
+    <section id="screen-work" class="editor-work" hidden>
+      <header class="editor-bar">
+        <h1 id="editor-title">untitled_map</h1>
+        <button id="editor-new" type="button">New map</button>
+        <label>
+          Import
+          <input id="editor-import" type="file" accept="application/json,.json" />
+        </label>
+        <button id="editor-export" type="button">Export</button>
+        <p id="editor-copy" class="editor-note"></p>
+      </header>
+      <div class="editor-body">
+        <div class="editor-map">
+          <svg id="editor-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <aside id="editor-panel" class="editor-panel"></aside>
+      </div>
+    </section>
+    <div id="editor-notice" class="editor-notice" hidden>
+      <div class="editor-card">
+        <p id="editor-notice-text"></p>
+        <button id="editor-notice-ok" type="button">Clear</button>
+        <button id="editor-notice-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+    <script type="module" src="js/editor/main.js"></script>
+  </body>
+</html>

@@ -1,13 +1,13 @@
 import {
   AI_LOCAL_PATH,
+  GAME_PACK,
   getBalancePack,
   TEAM,
   deriveCollisionLayer,
   getArchetypeForWave,
   getUnitArchetype,
-  pickArchetypeIdForWaveSlot,
 } from '../config.js';
-import { pickEdgeSpawnPosition } from '../defs/spawnPolicy.js';
+import { pickEdgeSpawnPosition, pointInArea } from '../defs/spawnPolicy.js';
 import { edgeSpawnAnchor } from '../world/world.js';
 import {
   attachUnitToGroup,
@@ -44,11 +44,19 @@ import {
 import {
   createAmmoState,
 } from '../combat/weapons.js';
+import {
+  equipArmorOnUnit,
+  equipShieldOnUnit,
+  readLoadoutOrders,
+} from '../player/inventory.js';
+import { claimAreaOrder } from './areaOrders.js';
 export function updateWaves(match, dt) {
   const pack = getBalancePack();
   if (!match.basePlaced || !match.base) return;
   if (!match.base.alive && !pack.lastStand) return;
   if (match.outcome) return;
+
+  tickPendingSpawns(match);
 
   // Win: cleared target wave (all enemies dead after wave N spawned).
   if (
@@ -82,29 +90,114 @@ export function updateWaves(match, dt) {
   }
 }
 
-export function spawnWave(match, waveIndex) {
-  const pack = getBalancePack();
-  const count =
-    pack.enemiesPerWaveBase + Math.max(0, waveIndex - 1) * pack.enemiesPerWaveScale;
+function parseUnitSpec(spec) {
+  const text = String(spec || '');
+  const cut = text.lastIndexOf(':');
+  if (cut < 0) return { id: text.trim(), count: 1 };
+  return {
+    id: text.slice(0, cut).trim(),
+    count: Math.max(0, parseInt(text.slice(cut + 1), 10) || 0),
+  };
+}
 
+function areaById(id) {
+  const areas = GAME_PACK.areas || [];
+  for (let i = 0; i < areas.length; i++) {
+    if (areas[i] && areas[i].id === id) return areas[i];
+  }
+  return null;
+}
+
+function rowsForWave(waveIndex) {
+  const rows = GAME_PACK.spawns || [];
+  const next = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i] && rows[i].wave === waveIndex) next.push(rows[i]);
+  }
+  return next;
+}
+
+export function spawnWave(match, waveIndex) {
+  const rows = rowsForWave(waveIndex);
+  const now = [];
+  if (!match.pendingSpawns) match.pendingSpawns = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const delay = row.timeStart || 0;
+    if (delay > 0) {
+      match.pendingSpawns.push({
+        due: (match.simTime || 0) + delay,
+        row,
+      });
+    } else now.push(row);
+  }
+  if (now.length) spawnRows(match, now);
+}
+
+export function tickPendingSpawns(match) {
+  const pending = match.pendingSpawns;
+  if (!pending || !pending.length) return;
+  const time = match.simTime || 0;
+  const due = [];
+  const wait = [];
+  for (let i = 0; i < pending.length; i++) {
+    if (pending[i].due <= time) due.push(pending[i].row);
+    else wait.push(pending[i]);
+  }
+  match.pendingSpawns = wait;
+  if (due.length) spawnRows(match, due);
+}
+
+function expandSpawnSlots(rows) {
+  const slots = [];
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    const specs = Array.isArray(row.units) ? row.units : [];
+    const flat = [];
+    for (let s = 0; s < specs.length; s++) {
+      const spec = parseUnitSpec(specs[s]);
+      for (let n = 0; n < spec.count; n++) flat.push(spec.id);
+    }
+    const area = areaById(row.areaId);
+    for (let i = 0; i < flat.length; i++) {
+      const point = area
+        ? pointInArea(area, i, flat.length)
+        : { x: 0, y: 0 };
+      slots.push({
+        archId: flat[i],
+        team: row.team,
+        x: point.x,
+        y: point.y,
+      });
+    }
+  }
+  return slots;
+}
+
+function spawnRows(match, rows) {
+  const pack = getBalancePack();
+  const slots = expandSpawnSlots(rows);
+  if (!slots.length || !match.base) return;
   const positions = [];
-  for (let i = 0; i < count; i++) {
-    positions.push(pickSpawnOutsideBaseChunk(match, i, count));
+  for (let i = 0; i < slots.length; i++) {
+    positions.push({
+      x: slots[i].x,
+      y: slots[i].y,
+      archId: slots[i].archId,
+      team: slots[i].team,
+    });
   }
 
   const base = match.base;
   const tx = base.x + base.w / 2;
   const ty = base.y + base.h / 2;
 
-  // Next wave: clear old group pattern, recompute paths group-by-group, then deploy.
   resetGeneral(match);
   const groupCount = Math.max(1, pack.waveGroupCount || 3);
   const groupLists = partitionSpawnGroups(positions, groupCount, tx, ty);
   const prepared = prepareGroupPathsSequential(match, groupLists, tx, ty);
-  // Apply/Deploy only when all group paths are ready.
   const groups = deployPreparedGroups(match, prepared, tx, ty);
 
-  // Phase 3 — per-slot archetype from WAVE_ARCHETYPE_COMPOSITION (mixed types).
   let unitSeq = 0;
   for (let gi = 0; gi < prepared.length; gi++) {
     const prep = prepared[gi];
@@ -114,26 +207,25 @@ export function spawnWave(match, waveIndex) {
       const u = acquireUnit(match.pools);
       if (!u) break;
       const pos = prep.positions[i];
-      const archId = pickArchetypeIdForWaveSlot(waveIndex, unitSeq);
-      const archetype =
-        getUnitArchetype(archId) || getArchetypeForWave(waveIndex);
-      const weaponId =
-        (archetype && archetype.defaultWeapon) ||
-        pack.enemyWeaponByWave[
-          Math.min(waveIndex, pack.enemyWeaponByWave.length - 1)
-        ] ||
-        null;
+      const archId = pos.archId;
+      const archetype = getUnitArchetype(archId) || getArchetypeForWave(0);
+      const orders = readLoadoutOrders(
+        archetype && archetype.startingLoadout,
+        archetype && archetype.currentSlot
+      );
+      const weaponId = orders.weaponId;
       const hpLo = archetype ? archetype.hpRange[0] : pack.enemyMaxHp;
-      const hpHi = archetype ? archetype.hpRange[1] : pack.enemyMaxHp + waveIndex * 4;
+      const hpHi = archetype ? archetype.hpRange[1] : pack.enemyMaxHp + 4;
       const t = (unitSeq % 5) / 4;
       const maxHp = Math.round(hpLo + (hpHi - hpLo) * t);
       const sizeScale =
         archetype && (archetype.sizeScale || (archetype.isBoss ? 1.5 : 1));
+      const team = pos.team != null ? pos.team : TEAM.ENEMY;
       u.active = true;
       u.typeId = 2;
-      u.team = TEAM.ENEMY;
+      u.team = team;
       u.role = 'enemy';
-      u.collisionLayer = deriveCollisionLayer({ team: TEAM.ENEMY, role: 'enemy' });
+      u.collisionLayer = deriveCollisionLayer({ team, role: 'enemy' });
       u.pierceCost = 1;
       u.skinGroupId = enemySkinGroupId();
       u.visualAction = UNIT_VISUAL_ACTIONS.idle;
@@ -198,18 +290,22 @@ export function spawnWave(match, waveIndex) {
       u.tauntedById = -1;
       u.activeArmorId = null;
       u.activeShieldId = null;
+      if (orders.armorId) equipArmorOnUnit(u, orders.armorId);
+      if (orders.shieldId) equipShieldOnUnit(u, orders.shieldId);
       u.hasPlacementSkill = !!(archetype && archetype.hasPlacementSkill);
       u.inventory = null;
-      u.activeHotbar = 0;
+      u.activeHotbar = orders.currentSlot || 0;
+      u.areaOrder = null;
       u._burstTimer = 0;
       u._flankTimer = 0;
       u._archetypePhaseKey = null;
-      // Compose Goals+Stages from archetype data (allowedGoals / flags / phase).
       const effective = resolveEffectiveArchetype(u, u.archetypeId);
       if (effective) {
         applyEffectiveArchetypeToUnit(u, effective, { syncWeapon: false });
         ensureUnitSkills(u);
       }
+      u.weaponId = weaponId;
+      claimAreaOrder(u);
       attachUnitToGroup(group, u);
       match.enemiesAlive += 1;
       unitSeq += 1;

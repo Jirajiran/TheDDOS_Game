@@ -46,9 +46,7 @@ import {
   clearMuzzleQueue,
   deactivateUnit,
 } from '../world/pools.js';
-import {
-  UNIT_VISUAL_ACTIONS,
-} from '../view/unitVisual.js';
+import { pickPlayerSpawnPoint } from '../defs/spawnPolicy.js';
 import {
   absorbDamageWithShield,
 } from '../combat/shield.js';
@@ -90,10 +88,14 @@ export function spawnPlayerNearWorldCenter(match) {
     match.playerUnitId = u.id;
   }
 
-  resetPlayerStats(u, pack);
-  u.skinGroupId = match.playerSkinGroupId || 'Default_skin_1';
-  u.x = world.worldW * 0.5;
-  u.y = world.worldH * 0.5;
+  resetPlayerStats(u, pack, match);
+  u.skinGroupId =
+    match.playerSkinGroupId ||
+    (pack && pack.playerDefaultSkinGroupId) ||
+    'Default_skin_1';
+  const start = pickPlayerSpawnPoint(world);
+  u.x = start.x;
+  u.y = start.y;
   match.playerDead = false;
   match.cameraFreeFly = false;
   match.respawnTimer = 0;
@@ -101,7 +103,7 @@ export function spawnPlayerNearWorldCenter(match) {
   return u;
 }
 
-export function resetPlayerStats(u, pack) {
+export function resetPlayerStats(u, pack, match) {
   const bal = pack || getBalancePack();
   u.active = true;
   u.typeId = 1;
@@ -114,7 +116,8 @@ export function resetPlayerStats(u, pack) {
   u.speed = bal.playerSpeed;
   u.radius = bal.playerRadius;
   u.armorType = bal.playerArmorType;
-  u.weaponId = 'M1991';
+  const weaponId = match && match.startingWeaponId;
+  u.weaponId = weaponId || null;
   u.vx = 0;
   u.vy = 0;
   u.facingRad = 0;
@@ -127,7 +130,7 @@ export function resetPlayerStats(u, pack) {
   u.groupId = -1;
   u.pivotIndex = 0;
   u.attackBlockId = -1;
-  Object.assign(u, createAmmoState('M1991'));
+  if (weaponId) Object.assign(u, createAmmoState(weaponId));
   ensureUnitMorale(u);
   ensureBlackboardStub(u);
   u.skillIds = Array.isArray(bal.playerActiveSkills)
@@ -139,16 +142,21 @@ export function resetPlayerStats(u, pack) {
   u.shield = null;
   u.tauntTimer = 0;
   u.tauntedById = -1;
-  if (pack.startingArmorId) {
-    equipArmorOnUnit(u, pack.startingArmorId);
-  } else {
-    u.activeArmorId = null;
-  }
-  if (pack.startingShieldId) {
-    equipShieldOnUnit(u, pack.startingShieldId);
-  } else {
-    u.activeShieldId = null;
-  }
+  const armorSlot = match && match.wornArmorSlot >= 0 ? match.wornArmorSlot : -1;
+  const armorItem =
+    armorSlot >= 0 && match.inventory && match.inventory[armorSlot]
+      ? match.inventory[armorSlot].itemId
+      : null;
+  if (armorItem) equipArmorOnUnit(u, armorItem);
+  else u.activeArmorId = null;
+  const shieldSlot =
+    match && match.wornShieldSlot >= 0 ? match.wornShieldSlot : -1;
+  const shieldItem =
+    shieldSlot >= 0 && match.inventory && match.inventory[shieldSlot]
+      ? match.inventory[shieldSlot].itemId
+      : null;
+  if (shieldItem) equipShieldOnUnit(u, shieldItem);
+  else u.activeShieldId = null;
   u.skinGroupId = null; // filled by spawn after match.playerSkinGroupId exists
   u.visualAction = UNIT_VISUAL_ACTIONS.idle;
   u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
@@ -174,8 +182,11 @@ export function spawnPlayer(match) {
     match.playerUnitId = u.id;
   }
 
-  resetPlayerStats(u, pack);
-  u.skinGroupId = match.playerSkinGroupId || 'Default_skin_1';
+  resetPlayerStats(u, pack, match);
+  u.skinGroupId =
+    match.playerSkinGroupId ||
+    (pack && pack.playerDefaultSkinGroupId) ||
+    'Default_skin_1';
   const angle = (match.waveIndex * 1.7 + u.id) % (Math.PI * 2);
   const dist = base.w * 0.55 + L3_SIZE * 0.5;
   u.x = clamp(

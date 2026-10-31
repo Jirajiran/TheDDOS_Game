@@ -8,6 +8,11 @@
 
 import { GAME_PACK, L3_SIZE, ReloadType, getWeaponDef } from '../config.js';
 import {
+  UNIT_TEMPLATE_FILE,
+  closedModelGroupId,
+  listClosedModelGroupIds,
+} from '../assets/closedCatalog.js';
+import {
   resolveHeldVisual,
   tickWeaponCoreVisual,
   WEAPON_POSE_FAMILY,
@@ -17,7 +22,7 @@ import { getActiveSlot, isWeaponSlot } from '../player/inventory.js';
 import { isMeleeSwingOpen } from '../combat/meleeTools.js';
 import { getBtnActionArmPoses } from './weaponBtnArt.js';
 
-export const UNIT_TEMPLATE_URL = 'Asset/AssetSVG/Unit/Unit_Template.svg';
+export const UNIT_TEMPLATE_URL = UNIT_TEMPLATE_FILE;
 
 /** @typedef {'idle'|'hold_Gun'|'hold_Gun_2'|'Fist'|'PlaceBlock'|'Shoting'|'Shoting_2'|'Reload_Mag'|'Reload_Mag_2'|'Reload_Shotgun'} UnitVisualAction */
 
@@ -159,7 +164,8 @@ export function clampPlayableMenuSkinId(menuSkinId) {
 
 export function enemySkinGroupId() {
   const pack = GAME_PACK;
-  return (pack && pack.enemyDefaultSkinGroupId) || 'Default_skin_2';
+  if (pack && pack.enemyDefaultSkinGroupId) return pack.enemyDefaultSkinGroupId;
+  return closedModelGroupId('model.unit.default_2') || 'Default_skin_2';
 }
 
 function parseMatrixAttr(el) {
@@ -459,7 +465,7 @@ export async function initUnitVisualFromSvgText(svgText) {
   _defsHtml = defs ? defs.innerHTML : '';
   loadArmPoses(doc);
 
-  const skins = ['Default_skin_1', 'Default_skin_2'];
+  const skins = listClosedModelGroupIds();
   const jobs = [];
   for (let i = 0; i < skins.length; i++) {
     const s = skins[i];

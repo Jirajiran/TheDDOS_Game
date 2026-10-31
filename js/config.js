@@ -322,7 +322,7 @@ export const FEATURE_SNAPSHOT = true;
 
 /**
  * Awareness / engage sense in world px.
- * Player → PLAYER actor; enemy → archetype.senseRadiusPath or ENEMY_DEFAULT.
+ * Player and default enemy sense live on data/pack/units.json.
  */
 export function getSenseRadiusPx(unit) {
   if (!unit) {

@@ -139,16 +139,69 @@ export function makeSlotFromItem(itemId, count = 1) {
   return slot;
 }
 
-/** Apply starting loadout from pack into inventory. */
-export function applyStartingLoadout(inventory, loadout = GAME_PACK.startingLoadout) {
+/** Worn gear from a unit loadout. active applies to armor and shield only. */
+export function readLoadoutOrders(loadout, currentSlot = 0) {
+  const rows = Array.isArray(loadout) ? loadout : [];
+  const seen = Object.create(null);
+  let armorId = null;
+  let shieldId = null;
+  for (let i = 0; i < rows.length; i++) {
+    const entry = rows[i];
+    if (!entry || !entry.active) continue;
+    const def = getItemDef(entry.itemId);
+    const kind = def && def.kind;
+    if (kind !== ItemKind.ARMOR && kind !== ItemKind.SHIELD) continue;
+    if (seen[kind]) {
+      console.warn(`[loadout] ignored second active ${kind}: ${entry.itemId}`);
+      continue;
+    }
+    seen[kind] = true;
+    if (kind === ItemKind.ARMOR) armorId = def.id;
+    else shieldId = def.id;
+  }
+  const slot = currentSlot | 0;
+  let weaponId = null;
+  const current = slot >= 0 && slot < rows.length ? rows[slot] : null;
+  if (current) {
+    const def = getItemDef(current.itemId);
+    if (def && def.kind === ItemKind.WEAPON) {
+      weaponId = def.weaponId || def.id;
+    }
+  }
+  return { armorId, shieldId, weaponId, currentSlot: slot };
+}
+
+/** Apply a unit startingLoadout into inventory slots. */
+export function applyStartingLoadout(
+  inventory,
+  loadout = GAME_PACK.startingLoadout,
+  currentSlot = GAME_PACK.currentSlot || 0
+) {
   for (let i = 0; i < inventory.length; i++) {
     inventory[i] = emptySlot();
   }
-  for (let i = 0; i < loadout.length && i < inventory.length; i++) {
-    const entry = loadout[i];
+  const rows = Array.isArray(loadout) ? loadout : [];
+  for (let i = 0; i < rows.length && i < inventory.length; i++) {
+    const entry = rows[i];
     inventory[i] = makeSlotFromItem(entry.itemId, entry.count);
   }
-  return inventory;
+  const orders = readLoadoutOrders(rows, currentSlot);
+  let wornArmorSlot = -1;
+  let wornShieldSlot = -1;
+  for (let i = 0; i < rows.length && i < inventory.length; i++) {
+    if (orders.armorId && rows[i].itemId === orders.armorId && wornArmorSlot < 0) {
+      wornArmorSlot = i;
+    }
+    if (orders.shieldId && rows[i].itemId === orders.shieldId && wornShieldSlot < 0) {
+      wornShieldSlot = i;
+    }
+  }
+  return {
+    wornArmorSlot,
+    wornShieldSlot,
+    activeHotbar: orders.currentSlot,
+    activeWeaponId: orders.weaponId,
+  };
 }
 
 export function getActiveSlot(inventory, activeIndex) {

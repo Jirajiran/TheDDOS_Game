@@ -1,4 +1,5 @@
 {
+  "description": "Closed sound tier. Creators add files under Asset/AudioV2. Objects use these ids.",
   "sounds": {
     "ui.click": "UiClick.mp3",
     "ui.select": "UiSelect.mp3",

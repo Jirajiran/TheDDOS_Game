@@ -92,8 +92,43 @@ export function buildBaseSpawnMask(match) {
   };
 }
 
+function triggerAreas() {
+  const areas = GAME_PACK.areas;
+  if (!Array.isArray(areas)) return [];
+  const next = [];
+  for (let i = 0; i < areas.length; i++) {
+    const area = areas[i];
+    if (area && area.condition === 'EnterArea') next.push(area);
+  }
+  return next;
+}
+
+/** Center of player_start, or the world center. */
+export function pickPlayerSpawnPoint(world) {
+  const areas = GAME_PACK.areas || [];
+  for (let i = 0; i < areas.length; i++) {
+    const area = areas[i];
+    if (!area || area.id !== 'player_start') continue;
+    return {
+      x: Math.max(0, Math.min(world.worldW, area.x + area.w * 0.5)),
+      y: Math.max(0, Math.min(world.worldH, area.y + area.h * 0.5)),
+    };
+  }
+  return { x: world.worldW * 0.5, y: world.worldH * 0.5 };
+}
+
+/** A stable point inside an area rect. */
+export function pointInArea(area, slot, steps) {
+  const u = (slot + 0.5) / Math.max(1, steps);
+  if (!area) return { x: 0, y: 0 };
+  if ((area.w || 0) >= (area.h || 0)) {
+    return { x: area.x + u * area.w, y: area.y + area.h * 0.5 };
+  }
+  return { x: area.x + area.w * 0.5, y: area.y + u * area.h };
+}
+
 /**
- * Edge spawn only + baseChunk mask. Returns world position.
+ * Enemy spawn inside the map's fixed team areas, then outside the base mask.
  * @param {object} match
  * @param {number} index
  * @param {number} total
@@ -101,7 +136,21 @@ export function buildBaseSpawnMask(match) {
 export function pickEdgeSpawnPosition(match, index, total) {
   const world = match.world;
   const margin = 40;
-  let { x, y } = perimeterPoint(world, index, total, margin);
+  const areas = triggerAreas();
+  let x;
+  let y;
+  if (areas.length) {
+    const area = areas[index % areas.length];
+    const steps = Math.max(1, Math.ceil(total / areas.length));
+    const slot = Math.floor(index / areas.length);
+    const point = pointInArea(area, slot, steps);
+    x = point.x;
+    y = point.y;
+  } else {
+    const edge = perimeterPoint(world, index, total, margin);
+    x = edge.x;
+    y = edge.y;
+  }
   const mask = buildBaseSpawnMask(match);
   if (mask) {
     const pushed = pushOutsideMask(x, y, mask);

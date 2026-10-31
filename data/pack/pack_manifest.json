@@ -9,13 +9,15 @@
     "blocks": "blocks.json",
     "items": "items.json",
     "skills": "skills.json",
-    "archetypes": "archetypes.json",
     "weaponUpgrades": "weapon_upgrades.json",
     "craft": "craft.json",
-    "actors": "actors.json",
+    "units": "units.json",
     "day": "day.json",
     "rules": "rules.json",
     "gamePack": "game_pack.json",
+    "presentation": "presentation.json",
+    "areas": "areas.json",
+    "spawns": "spawns.json",
     "ai": "ai.json",
     "audio": "audio.json"
   }

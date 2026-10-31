@@ -1,7 +1,6 @@
 import { ActionType } from './player/actions.js';
-import {
-  tickAreaTriggers,
-} from './combat/areaTriggers.js';
+import { tickAreaTriggers } from './combat/areaTriggers.js';
+import { claimAreaOrder, steerAreaOrder } from './sim/areaOrders.js';
 import {
   GAME_PACK,
   getBalancePack,
@@ -190,7 +189,11 @@ export function initMatchGameplay(match, options = {}) {
   match.inventory = createEmptyInventory(
     pack.hotbarBaseSlots || pack.hotbarSlots
   );
-  applyStartingLoadout(match.inventory);
+  const worn = applyStartingLoadout(match.inventory);
+  match.wornArmorSlot = worn.wornArmorSlot;
+  match.wornShieldSlot = worn.wornShieldSlot;
+  match.activeHotbar = worn.activeHotbar;
+  match.startingWeaponId = worn.activeWeaponId;
   match.hotbar = match.inventory;
   match.playerUnitId = -1;
   match.respawnTimer = 0;
@@ -437,6 +440,13 @@ function applyActions(match, actions, mouseWorld, dt) {
     if (!u.active) continue;
     const intent = moveIntent[u.id];
     const speedMult = getEffectiveSpeedMult(u);
+    if (u.role !== 'player') claimAreaOrder(u);
+    const order = steerAreaOrder(u);
+    if (order) {
+      u.vx = order.dx * u.speed * speedMult;
+      u.vy = order.dy * u.speed * speedMult;
+      continue;
+    }
     if (intent) {
       u.vx = intent.dx * u.speed * speedMult;
       u.vy = intent.dy * u.speed * speedMult;

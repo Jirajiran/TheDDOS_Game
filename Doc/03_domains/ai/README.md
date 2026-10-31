@@ -1,6 +1,6 @@
 # ai — Stage / Goal / Mediator
 
-สถานะโค้ด: **Phase 1 ✓ · 2a ✓ · 2b ✓ · 2c PLACE ✓ · 3 archetypes ✓**  
+สถานะโค้ด: (Phase 1 ✓ · 2a ✓ · 2b ✓ · 2c PLACE ✓ · 3 archetypes ✓)  
 `decideEnemyActions` = General pivots → Local path layer → Mediator (allowedGoals filter) → Unified Input  
 ดู AskKeep «NextPlan delivery» ข้อ 3
 
@@ -15,7 +15,7 @@
 
 โค้ด runtime: `js/ai/blackboard.js` · `mediator.js` · `events.js` · `archetypes.js` · `local_group_manager.js` · `place_kit.js` · `stages/*` · `js/ai/general.js` · `js/config.js` (`UNIT_ARCHETYPE_REGISTRY`)
 
-### Phase 3 (สั้น)
+Phase 3 (สั้น)
 - Archetype data: `allowedGoals` · `targetPriorityList` · `behaviorFlags`
 - Mediator คะแนนเฉพาะ Goal ที่อนุญาต · Stages ไม่รู้จัก archetype
 - Spawn ผสมจาก `WAVE_ARCHETYPE_COMPOSITION` · Boss `DYNAMIC_PHASE_BOSS` สลับเฟสตาม hpRatio

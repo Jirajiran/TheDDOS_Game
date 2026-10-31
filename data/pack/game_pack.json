@@ -1,14 +1,12 @@
 {
   "version": "1",
-  "description": "Flat/world pack fields. Wave and player balance live in rules.json.",
+  "description": "One map. Local teams (max 6). seatCap 12 is the player-vs-player seat ceiling. Areas live in areas.json. The spawn schedule lives in spawns.json.",
   "pack": {
     "baseFootprintL3": 3,
     "baseMaxHp": 1000,
     "baseZonePaddingL3": 4,
     "baseSpawnExclusionL3": 4,
     "baseArmorType": "DEFAULT",
-    "playerRadius": 28,
-    "playerArmorType": "DEFAULT",
     "enemyMaxHp": 60,
     "enemySpeed": 90,
     "enemyRadius": 24,
@@ -25,66 +23,21 @@
     "blockHpBarCap": 8,
     "meleeReach": 86,
     "meleeHalfWidth": 35,
-    "aimTurnRateRadPerSec": 10.053096491487338,
-    "facingTurnRateRadPerSec": 12.566370614359172,
-    "turretTurnRateRadPerSec": 7.5398223686155035,
-    "unitVisualFacingOffsetRad": -1.5707963267948966,
-  "uiTipDwellSec": 1.2,
-  "gunDetailDwellSec": 0.9,
-    "unitVisualArmTweenSec": 0.1,
-    "unitVisualPlaceBlockSec": 0.1,
-    "unitVisualShotingSec": 0.12,
-    "unitVisualRecoilPx": 7,
-    "hotbarSwitchDelaySec": 0.1,
-    "enemyDefaultSkinGroupId": "Default_skin_2",
     "hotbarBaseSlots": 6,
     "hotbarSlots": 6,
     "unitPushSeparation": 0.85,
-    "cameraFollowZoom": 1,
-    "cameraLeadFrac": 0.55,
-    "cameraLeadTweenSec": 0.5,
-    "cameraZoomMin": 0.25,
-    "cameraZoomMax": 2,
-    "cameraZoomStep": 0.1,
-    "cameraFreeFlySpeed": 520,
     "placeMaxCells": 3,
-    "controllerDoubleTapSec": 0.45,
     "respawnBaseSec": 10,
     "respawnExtraPerWave": 5,
-    "dropExpireSec": 180,
-    "dropThrowSpeed": 220,
-    "dropThrowOffset": 28,
-    "dropRadius": 10,
-    "dropEjectMargin": 26,
-    "dropMagnetRange": 18,
-    "dropFriction": 6.5,
-    "dropStopSpeed": 8,
     "worldGenPerPath": {
       "trees": 10,
       "stones": 6,
       "ores": 2
     },
-    "startingLoadout": [
-      {
-        "itemId": "BASE_CORE_3X3",
-        "count": 1
-      },
-      {
-        "itemId": "M1991",
-        "count": 1
-      }
-    ],
-    "startingArmorId": "ARMOR_VEST",
-    "startingShieldId": null,
-    "enemyWeaponByWave": [
-      null,
-      "SMG",
-      "SMG",
-      "SHOTGUN_SHELL",
-      "AK47",
-      "KAR98",
-      "LAZER",
-      "AK47"
+    "seatCap": 12,
+    "teams": [
+      { "id": 1, "role": "player", "hostileTo": [2] },
+      { "id": 2, "role": "enemy", "hostileTo": [1] }
     ]
   }
 }

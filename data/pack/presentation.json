@@ -1,0 +1,33 @@
+{
+  "version": "1",
+  "description": "Shared presentation for every map. Camera, visual angles, and drops.",
+  "presentation": {
+    "aimTurnRateRadPerSec": 10.0531,
+    "facingTurnRateRadPerSec": 12.56637,
+    "turretTurnRateRadPerSec": 7.539823,
+    "unitVisualFacingOffsetRad": -1.570796,
+    "uiTipDwellSec": 1.2,
+    "gunDetailDwellSec": 0.9,
+    "unitVisualArmTweenSec": 0.1,
+    "unitVisualPlaceBlockSec": 0.1,
+    "unitVisualShotingSec": 0.12,
+    "unitVisualRecoilPx": 7,
+    "hotbarSwitchDelaySec": 0.1,
+    "cameraFollowZoom": 1,
+    "cameraLeadFrac": 0.55,
+    "cameraLeadTweenSec": 0.5,
+    "cameraZoomMin": 0.25,
+    "cameraZoomMax": 2,
+    "cameraZoomStep": 0.05,
+    "cameraFreeFlySpeed": 520,
+    "controllerDoubleTapSec": 0.45,
+    "dropExpireSec": 180,
+    "dropThrowSpeed": 220,
+    "dropThrowOffset": 28,
+    "dropRadius": 10,
+    "dropEjectMargin": 26,
+    "dropMagnetRange": 18,
+    "dropFriction": 6.5,
+    "dropStopSpeed": 8
+  }
+}

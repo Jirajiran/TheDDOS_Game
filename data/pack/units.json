@@ -1,6 +1,7 @@
 {
-  "version": "1.0.0",
-  "archetypes": {
+  "version": "1",
+  "description": "One unit sheet. Each id is one record. aliases, waveComposition, and waveTable are wave tables, not units.",
+  "units": {
     "GRUNT_BASIC": {
       "id": "GRUNT_BASIC",
       "description": "1. Basic grunt — full decision cycle",
@@ -28,7 +29,14 @@
         "retreatHpRatio": 0.25,
         "canRegroup": true,
         "preferredRange": "MEDIUM"
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SMG",
+          "count": 1
+        }
+      ]
     },
     "SUICIDE_BERSERKER": {
       "id": "SUICIDE_BERSERKER",
@@ -56,7 +64,14 @@
         "canRegroup": false,
         "relentless": true,
         "preferredRange": "EXTREME_CLOSE"
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SHOTGUN_SHELL",
+          "count": 1
+        }
+      ]
     },
     "STEALTH_SNIPER": {
       "id": "STEALTH_SNIPER",
@@ -80,7 +95,14 @@
         "retreatHpRatio": 0.5,
         "fleeOnApproach": true,
         "preferredRange": "LONG_RANGE"
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "KAR98",
+          "count": 1
+        }
+      ]
     },
     "STEALTH_SHADOW_MELEE": {
       "id": "STEALTH_SHADOW_MELEE",
@@ -107,7 +129,14 @@
         "preferredRange": "MELEE",
         "retreatHpRatio": 0,
         "relentless": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SHOTGUN_SHELL",
+          "count": 1
+        }
+      ]
     },
     "STEALTH_ASSAULT_HEAVY": {
       "id": "STEALTH_ASSAULT_HEAVY",
@@ -134,7 +163,14 @@
         "canRegroup": false,
         "preferredRange": "CLOSE",
         "retreatHpRatio": 0.1
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "AK47",
+          "count": 1
+        }
+      ]
     },
     "STEALTH_DEMOLITION_SIEGE": {
       "id": "STEALTH_DEMOLITION_SIEGE",
@@ -161,7 +197,14 @@
         "canRegroup": false,
         "preferredRange": "LONG_RANGE",
         "retreatHpRatio": 0.15
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "LAZER",
+          "count": 1
+        }
+      ]
     },
     "SUPPORT_MEDIC": {
       "id": "SUPPORT_MEDIC",
@@ -189,7 +232,14 @@
         "preferredRange": "LONG_SUPPORT",
         "retreatHpRatio": 0.4,
         "canRegroup": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "MEDIC_GUN",
+          "count": 1
+        }
+      ]
     },
     "COWARD_UNIT": {
       "id": "COWARD_UNIT",
@@ -220,7 +270,14 @@
         "preferredRange": "MAX_WEAPON_RANGE",
         "retreatHpRatio": 0.35,
         "canRegroup": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SMG",
+          "count": 1
+        }
+      ]
     },
     "COMMANDER_LEADER": {
       "id": "COMMANDER_LEADER",
@@ -249,7 +306,14 @@
         "preferredRange": "MEDIUM",
         "retreatHpRatio": 0.2,
         "canRegroup": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "AK47",
+          "count": 1
+        }
+      ]
     },
     "COMBAT_ENGINEER": {
       "id": "COMBAT_ENGINEER",
@@ -281,7 +345,14 @@
         "preferredRange": "CLOSE",
         "retreatHpRatio": 0.3,
         "canRegroup": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SMG",
+          "count": 1
+        }
+      ]
     },
     "SHIELD_VANGUARD": {
       "id": "SHIELD_VANGUARD",
@@ -315,7 +386,14 @@
         "retreatHpRatio": 0.05,
         "preferredRange": "EXTREME_CLOSE",
         "canRegroup": true
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SHOTGUN_SHELL",
+          "count": 1
+        }
+      ]
     },
     "FLANK_SKIRMISHER": {
       "id": "FLANK_SKIRMISHER",
@@ -345,7 +423,14 @@
         "canRegroup": true,
         "lowHpSpeedBuff": 1.25,
         "lowHpSpeedThreshold": 0.5
-      }
+      },
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "SMG",
+          "count": 1
+        }
+      ]
     },
     "DYNAMIC_PHASE_BOSS": {
       "id": "DYNAMIC_PHASE_BOSS",
@@ -412,7 +497,48 @@
             "canRegroup": false
           }
         }
+      ],
+      "currentSlot": 0,
+      "startingLoadout": [
+        {
+          "itemId": "LAZER",
+          "count": 1
+        }
       ]
+    },
+    "PLAYER": {
+      "id": "PLAYER",
+      "maxHp": 850,
+      "speed": 200,
+      "radius": 28,
+      "armorType": "DEFAULT",
+      "senseRadiusPath": 1,
+      "skills": [
+        "FIST",
+        "SELF_HEAL"
+      ],
+      "model": "model.unit.default_1",
+      "currentSlot": 1,
+      "startingLoadout": [
+        {
+          "itemId": "BASE_CORE_3X3",
+          "count": 1
+        },
+        {
+          "itemId": "M1991",
+          "count": 1
+        },
+        {
+          "itemId": "ARMOR_VEST",
+          "count": 1,
+          "active": true
+        }
+      ]
+    },
+    "ENEMY_DEFAULT": {
+      "id": "ENEMY_DEFAULT",
+      "senseRadiusPath": 0.7,
+      "model": "model.unit.default_2"
     }
   },
   "aliases": {

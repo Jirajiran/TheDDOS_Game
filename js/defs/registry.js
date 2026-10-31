@@ -96,20 +96,24 @@ export function installPackData(pack) {
   if (pack.skills && pack.skills.skills) {
     SKILL_REGISTRY = freezeMap(pack.skills.skills);
   }
-  if (pack.archetypes) {
-    if (pack.archetypes.archetypes) {
-      UNIT_ARCHETYPE_REGISTRY = freezeMap(pack.archetypes.archetypes);
-    }
-    if (pack.archetypes.aliases) {
-      ARCHETYPE_ALIASES = freezeMap(pack.archetypes.aliases);
-    }
-    if (pack.archetypes.waveComposition) {
-      WAVE_ARCHETYPE_COMPOSITION = freezeArray(pack.archetypes.waveComposition);
-    }
-    if (pack.archetypes.waveTable) {
-      WAVE_ARCHETYPE_TABLE = Object.freeze(pack.archetypes.waveTable.slice());
-    }
+  const unitDoc = pack.units || {};
+  const legacyArch = pack.archetypes || {};
+  const unitSheet = Object.assign(
+    {},
+    legacyArch.archetypes || {},
+    unitDoc.units || {}
+  );
+  if (Object.keys(unitSheet).length) {
+    const frozenUnits = freezeMap(unitSheet);
+    ACTOR_REGISTRY = frozenUnits;
+    UNIT_ARCHETYPE_REGISTRY = frozenUnits;
   }
+  const aliases = unitDoc.aliases || legacyArch.aliases;
+  const waveComposition = unitDoc.waveComposition || legacyArch.waveComposition;
+  const waveTable = unitDoc.waveTable || legacyArch.waveTable;
+  if (aliases) ARCHETYPE_ALIASES = freezeMap(aliases);
+  if (waveComposition) WAVE_ARCHETYPE_COMPOSITION = freezeArray(waveComposition);
+  if (waveTable) WAVE_ARCHETYPE_TABLE = Object.freeze(waveTable.slice());
   if (pack.weaponUpgrades && pack.weaponUpgrades.upgrades) {
     WEAPON_UPGRADES = freezeMap(pack.weaponUpgrades.upgrades);
   }
@@ -119,20 +123,15 @@ export function installPackData(pack) {
       CRAFT_CATEGORIES = Object.freeze(pack.craft.categories.slice());
     }
   }
-  if (pack.actors && pack.actors.actors) {
-    ACTOR_REGISTRY = freezeMap(pack.actors.actors);
-  }
   if (pack.day && typeof pack.day === 'object') {
     _day = Object.freeze({ ...pack.day });
   }
   if (pack.rules && typeof pack.rules === 'object') {
-    const skills = Array.isArray(pack.rules.playerActiveSkills)
-      ? Object.freeze(pack.rules.playerActiveSkills.slice())
-      : Object.freeze([]);
-    _rules = Object.freeze({
-      ...pack.rules,
-      playerActiveSkills: skills,
-    });
+    const next = { ...pack.rules };
+    if (Array.isArray(pack.rules.playerActiveSkills)) {
+      next.playerActiveSkills = Object.freeze(pack.rules.playerActiveSkills.slice());
+    }
+    _rules = Object.freeze(next);
   }
 
   const asrc = pack.armor || {};
@@ -240,7 +239,7 @@ export function getDayConfig() {
   return _day;
 }
 
-/** Gameloop / player balance from data/pack/rules.json. */
+/** Match rules from data/pack/rules.json. Unit bodies live in units.json. */
 export function getRulesConfig() {
   if (!_rules) {
     throw new Error('Rules pack not loaded (data/pack/rules.json)');
