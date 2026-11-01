@@ -281,6 +281,7 @@ export function createMapDoc(opts) {
     pathRows,
     pathLocked: true,
     areas: [],
+    placedObjects: Array.isArray(opts.placedObjects) ? opts.placedObjects : [],
     spawns: [],
     playerSpawns: [],
     playerFriendlyFire: false,
@@ -309,6 +310,7 @@ export function parseMapFile(text) {
   doc.pathCols = pathCols;
   doc.pathRows = pathRows;
   if (!Array.isArray(doc.areas)) doc.areas = [];
+  if (!Array.isArray(doc.placedObjects)) doc.placedObjects = [];
   if (!Array.isArray(doc.spawns)) doc.spawns = [];
   if (!doc.units || typeof doc.units !== 'object') doc.units = {};
   if (doc.archetypes && typeof doc.archetypes === 'object') {

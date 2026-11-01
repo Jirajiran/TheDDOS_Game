@@ -1,20 +1,8 @@
-# Agent skill packs / local agent clutter (not game runtime)
-.agents/
-.claude/
-.cursor/skills/
-
-# Scratch / chat plans at repo root
-Plan.txt
-
-# OOP agent skill dumps under Doc log (not game design docs)
-Doc/99_log/oop-*.md
-
-# OS / editor
-Thumbs.db
-Desktop.ini
+node_modules/
+build/
+dist/
+coverage/
 .DS_Store
 *.log
-*~
-
-# Optional local dumps
-.git/cursor/
+.env*
+!.env.example

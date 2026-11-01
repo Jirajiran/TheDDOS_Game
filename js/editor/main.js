@@ -31,6 +31,10 @@ const state = {
   spawnKey: '',
   rulesKey: 'rule',
   sheetIds: { unitId: 'PLAYER', weaponId: '', itemId: '', skillId: '' },
+  toolMode: 'area', // 'area' | 'place-obj' | 'place-unit' | 'select'
+  selectedPlacedId: '',
+  toolObjTemplate: '',
+  toolUnitTemplate: '',
 };
 
 const screens = {};
@@ -110,6 +114,22 @@ function api() {
     setSheetId: (key, id) => {
       state.sheetIds[key] = id;
     },
+    getToolMode: () => state.toolMode || 'area',
+    setToolMode: (mode) => {
+      state.toolMode = mode || 'area';
+    },
+    getSelectedPlacedId: () => state.selectedPlacedId || '',
+    setSelectedPlacedId: (id) => {
+      state.selectedPlacedId = id || '';
+    },
+    getToolObjTemplate: () => state.toolObjTemplate || '',
+    setToolObjTemplate: (id) => {
+      state.toolObjTemplate = id || '';
+    },
+    getToolUnitTemplate: () => state.toolUnitTemplate || '',
+    setToolUnitTemplate: (id) => {
+      state.toolUnitTemplate = id || '';
+    },
     panelRoot: () => document.getElementById('editor-panel'),
     touch: () => {
       if (state.doc) ensurePlayerSpawns(state.doc);
@@ -159,15 +179,96 @@ function askNotice(message) {
 function askClear() {
   return askNotice('Clear the map in this tab? The page cache will be removed.');
 }
+function updateToolUi() {
+  const mode = state.toolMode || 'area';
+  const btnArea = document.getElementById('tool-mode-area');
+  const btnObj = document.getElementById('tool-mode-place-obj');
+  const btnUnit = document.getElementById('tool-mode-place-unit');
+  const btnSelect = document.getElementById('tool-mode-select');
+  const wrapObj = document.getElementById('tool-obj-select-wrap');
+  const wrapUnit = document.getElementById('tool-unit-select-wrap');
+
+  if (btnArea) btnArea.classList.toggle('is-active', mode === 'area');
+  if (btnObj) btnObj.classList.toggle('is-active', mode === 'place-obj');
+  if (btnUnit) btnUnit.classList.toggle('is-active', mode === 'place-unit');
+  if (btnSelect) btnSelect.classList.toggle('is-active', mode === 'select');
+
+  if (wrapObj) wrapObj.hidden = mode !== 'place-obj';
+  if (wrapUnit) wrapUnit.hidden = mode !== 'place-unit';
+}
+
+function syncToolDropdowns() {
+  if (!state.doc) return;
+  const objSelect = document.getElementById('tool-obj-select');
+  const unitSelect = document.getElementById('tool-unit-select');
+
+  if (objSelect) {
+    objSelect.replaceChildren();
+    const itemIds = Object.keys(state.doc.items || {});
+    for (let i = 0; i < itemIds.length; i++) {
+      const opt = document.createElement('option');
+      opt.value = itemIds[i];
+      opt.textContent = itemIds[i];
+      objSelect.appendChild(opt);
+    }
+    if (!state.toolObjTemplate && itemIds.length) state.toolObjTemplate = itemIds[0];
+    if (state.toolObjTemplate) objSelect.value = state.toolObjTemplate;
+  }
+
+  if (unitSelect) {
+    unitSelect.replaceChildren();
+    const unitIds = Object.keys(state.doc.units || {});
+    for (let i = 0; i < unitIds.length; i++) {
+      const opt = document.createElement('option');
+      opt.value = unitIds[i];
+      opt.textContent = unitIds[i];
+      unitSelect.appendChild(opt);
+    }
+    if (!state.toolUnitTemplate && unitIds.length) state.toolUnitTemplate = unitIds[0];
+    if (state.toolUnitTemplate) unitSelect.value = state.toolUnitTemplate;
+  }
+}
+
 function openWork() {
   document.getElementById('editor-title').textContent =
     state.doc.name + ' · ' + state.doc.pathCols + '×' + state.doc.pathRows;
+  syncToolDropdowns();
+  updateToolUi();
   show('work');
   view.paint();
   renderPanel(document.getElementById('editor-panel'), api());
 }
 
 function bindWork() {
+  const btnArea = document.getElementById('tool-mode-area');
+  const btnObj = document.getElementById('tool-mode-place-obj');
+  const btnUnit = document.getElementById('tool-mode-place-unit');
+  const btnSelect = document.getElementById('tool-mode-select');
+  const objSelect = document.getElementById('tool-obj-select');
+  const unitSelect = document.getElementById('tool-unit-select');
+
+  const switchTool = (mode) => {
+    state.toolMode = mode;
+    updateToolUi();
+    view.paint();
+  };
+
+  if (btnArea) btnArea.addEventListener('click', () => switchTool('area'));
+  if (btnObj) btnObj.addEventListener('click', () => switchTool('place-obj'));
+  if (btnUnit) btnUnit.addEventListener('click', () => switchTool('place-unit'));
+  if (btnSelect) btnSelect.addEventListener('click', () => switchTool('select'));
+
+  if (objSelect) {
+    objSelect.addEventListener('change', () => {
+      state.toolObjTemplate = objSelect.value;
+    });
+  }
+  if (unitSelect) {
+    unitSelect.addEventListener('change', () => {
+      state.toolUnitTemplate = unitSelect.value;
+    });
+  }
+
   document.getElementById('editor-export').addEventListener('click', () => {
     const blob = new Blob([exportMapText(state.doc)], {
       type: 'application/json',

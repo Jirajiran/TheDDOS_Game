@@ -1,0 +1,6 @@
+{
+  "name": "TheDDOS Game",
+  "description": "Tactical base defense survival game featuring hierarchical grid maps, wave defense, crafting, and multi-tier AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

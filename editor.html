@@ -49,8 +49,25 @@
         <p id="editor-copy" class="editor-note"></p>
       </header>
       <div class="editor-body">
-        <div class="editor-map">
-          <svg id="editor-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="editor-map-wrap">
+          <div id="editor-map-tools" class="editor-map-tools">
+            <div class="tool-group">
+              <button id="tool-mode-area" type="button" class="tool-btn is-active" title="Draw and resize trigger/event areas">📐 Area Tool</button>
+              <button id="tool-mode-place-obj" type="button" class="tool-btn" title="Place blocks, turrets, and objects on 64x64 grid">🧱 Place Object</button>
+              <button id="tool-mode-place-unit" type="button" class="tool-btn" title="Place unit instances on 64x64 grid">👤 Place Unit</button>
+              <button id="tool-mode-select" type="button" class="tool-btn" title="Select and inspect placed instances">✋ Select / Move</button>
+            </div>
+            <div id="tool-obj-select-wrap" class="tool-select-wrap" hidden>
+              <label>Object: <select id="tool-obj-select"></select></label>
+            </div>
+            <div id="tool-unit-select-wrap" class="tool-select-wrap" hidden>
+              <label>Unit: <select id="tool-unit-select"></select></label>
+            </div>
+            <span class="tool-grid-badge">Grid: 64×64 (L3 Snap)</span>
+          </div>
+          <div class="editor-map">
+            <svg id="editor-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+          </div>
         </div>
         <aside id="editor-panel" class="editor-panel"></aside>
       </div>
@@ -60,6 +77,19 @@
         <p id="editor-notice-text"></p>
         <button id="editor-notice-ok" type="button">Clear</button>
         <button id="editor-notice-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+    <!-- Centered Damage & Armor Matrix Modal -->
+    <div id="editor-matrix-modal" class="editor-matrix-modal-backdrop" hidden>
+      <div class="editor-matrix-modal-dialog">
+        <header class="editor-matrix-modal-header">
+          <h2>Damage &amp; Armor Multiplier Matrix</h2>
+          <button id="editor-matrix-close" class="editor-matrix-modal-close" type="button">&times;</button>
+        </header>
+        <div id="editor-matrix-body" class="editor-matrix-modal-body"></div>
+        <footer class="editor-matrix-modal-footer">
+          <button id="editor-matrix-done" type="button">Close &amp; Apply</button>
+        </footer>
       </div>
     </div>
     <script type="module" src="js/editor/main.js"></script>

@@ -947,6 +947,51 @@
       "maxStack": 1,
       "backpackTier": 3,
       "backpackBonusSlots": 6
+    },
+    "AMMO_RPG": {
+      "id": "AMMO_RPG",
+      "label": "RPG Rocket",
+      "color": "#e05234",
+      "kind": "RESOURCE",
+      "typeId": "RESOURCE",
+      "maxStack": 30,
+      "weaponId": "WEAPON_RPG",
+      "craft": {
+        "requires": [
+          {
+            "itemId": "IRON",
+            "count": 2
+          },
+          {
+            "itemId": "WOOD",
+            "count": 1
+          }
+        ],
+        "produces": 1,
+        "timeSec": 2
+      }
+    },
+    "WEAPON_RPG": {
+      "id": "WEAPON_RPG",
+      "label": "RPG-7 Rocket Launcher",
+      "color": "#bf4a34",
+      "kind": "WEAPON",
+      "weaponId": "WEAPON_RPG",
+      "maxStack": 1,
+      "craft": {
+        "requires": [
+          {
+            "itemId": "IRON",
+            "count": 6
+          },
+          {
+            "itemId": "WOOD",
+            "count": 3
+          }
+        ],
+        "produces": 1,
+        "timeSec": 5
+      }
     }
   }
 }

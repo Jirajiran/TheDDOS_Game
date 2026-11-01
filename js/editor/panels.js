@@ -11,6 +11,7 @@ import {
   renderRecord,
   shownUnitModel,
   unionShape,
+  toReadableLabel,
 } from './recordForm.js';
 import {
   blankFor,
@@ -304,7 +305,10 @@ export function renderPanel(root, api) {
   bench.appendChild(renderRail(api, doc, tab));
   const settings = document.createElement('div');
   settings.className = 'editor-settings';
-  if (tab === 'area') renderArea(settings, api, doc);
+  const placedId = api.getSelectedPlacedId ? api.getSelectedPlacedId() : '';
+  const placedItem = placedId && doc.placedObjects ? doc.placedObjects.find((p) => p.id === placedId) : null;
+  if (placedItem) renderPlacedInspector(settings, api, doc, placedItem);
+  else if (tab === 'area') renderArea(settings, api, doc);
   else if (tab === 'spawn') renderSpawns(settings, api, doc);
   else if (tab === 'unit') renderSheet(settings, api, doc, doc.units, 'unitId', 'UNIT');
   else if (tab === 'weapon') renderGear(settings, api, doc);
@@ -317,6 +321,175 @@ export function renderPanel(root, api) {
   if (rail) rail.scrollTop = railScroll;
   settings.scrollTop = settingsScroll;
   fitPreviewArt(root);
+}
+
+function renderPlacedInspector(parent, api, doc, item) {
+  parent.replaceChildren();
+
+  const card = document.createElement('div');
+  card.className = 'editor-instance-inspector';
+
+  const badge = document.createElement('div');
+  badge.className = 'editor-instance-badge';
+  badge.textContent = `📍 Placed ${item.kind === 'unit' ? 'Unit' : 'Object'} Instance`;
+  card.appendChild(badge);
+
+  const heading = document.createElement('h2');
+  heading.style.margin = '0';
+  heading.style.fontSize = '16px';
+  heading.style.color = '#ffffff';
+  heading.textContent = item.templateId || item.id;
+  card.appendChild(heading);
+
+  const note = document.createElement('p');
+  note.className = 'editor-note';
+  note.style.fontSize = '12px';
+  note.textContent = '📌 ปรับสถานะเฉพาะตัวนี้บนแมป (Instance Override) โดยไม่ย้อนไปแก้ค่าต้นทางของ Template';
+  card.appendChild(note);
+
+  // Readonly Instance ID
+  const idWrap = document.createElement('label');
+  idWrap.textContent = 'Instance ID';
+  const idInput = document.createElement('input');
+  idInput.value = item.id;
+  idInput.disabled = true;
+  idWrap.appendChild(idInput);
+  card.appendChild(idWrap);
+
+  // Readonly Template ID
+  const tWrap = document.createElement('label');
+  tWrap.textContent = 'Original Template';
+  const tInput = document.createElement('input');
+  tInput.value = item.templateId;
+  tInput.disabled = true;
+  tWrap.appendChild(tInput);
+  card.appendChild(tWrap);
+
+  // Team Selector
+  const teamWrap = document.createElement('label');
+  teamWrap.textContent = 'Team (ทีม)';
+  const teamSelect = document.createElement('select');
+  const teamOpts = [
+    { value: '1', label: 'Team 1 (Player / Friendly)' },
+    { value: '2', label: 'Team 2 (Enemy / Hostile)' },
+    { value: '3', label: 'Team 3' },
+    { value: '4', label: 'Team 4' },
+    { value: '5', label: 'Team 5' },
+    { value: '6', label: 'Team 6' },
+    { value: '0', label: 'Nature / Neutral (ทีม 0)' },
+  ];
+  for (let i = 0; i < teamOpts.length; i++) {
+    const opt = document.createElement('option');
+    opt.value = teamOpts[i].value;
+    opt.textContent = teamOpts[i].label;
+    teamSelect.appendChild(opt);
+  }
+  teamSelect.value = String(item.team != null ? item.team : 1);
+  teamSelect.addEventListener('change', () => {
+    item.team = Number(teamSelect.value) || 0;
+    api.touch();
+    api.paint();
+  });
+  teamWrap.appendChild(teamSelect);
+  card.appendChild(teamWrap);
+
+  // Current HP
+  const hpWrap = document.createElement('label');
+  hpWrap.textContent = 'Current HP (เลือดปัจจุบัน)';
+  const hpInput = document.createElement('input');
+  hpInput.type = 'number';
+  hpInput.value = String(item.currentHp != null ? item.currentHp : 100);
+  hpInput.addEventListener('change', () => {
+    item.currentHp = Math.max(1, Number(hpInput.value) || 1);
+    api.touch();
+    api.paint();
+  });
+  hpWrap.appendChild(hpInput);
+  card.appendChild(hpWrap);
+
+  // Max HP
+  const maxHpWrap = document.createElement('label');
+  maxHpWrap.textContent = 'Max HP (เลือดสูงสุด)';
+  const maxHpInput = document.createElement('input');
+  maxHpInput.type = 'number';
+  maxHpInput.value = String(item.maxHp != null ? item.maxHp : item.currentHp || 100);
+  maxHpInput.addEventListener('change', () => {
+    item.maxHp = Math.max(1, Number(maxHpInput.value) || 1);
+    api.touch();
+    api.paint();
+  });
+  maxHpWrap.appendChild(maxHpInput);
+  card.appendChild(maxHpWrap);
+
+  // Position X & Y
+  const posRow = document.createElement('div');
+  posRow.style.display = 'grid';
+  posRow.style.gridTemplateColumns = '1fr 1fr';
+  posRow.style.gap = '8px';
+
+  const xWrap = document.createElement('label');
+  xWrap.textContent = 'Grid X (px)';
+  const xInput = document.createElement('input');
+  xInput.type = 'number';
+  xInput.step = '64';
+  xInput.value = String(item.x);
+  xInput.addEventListener('change', () => {
+    item.x = Math.floor(Number(xInput.value) / 64) * 64;
+    api.touch();
+    api.paint();
+  });
+  xWrap.appendChild(xInput);
+  posRow.appendChild(xWrap);
+
+  const yWrap = document.createElement('label');
+  yWrap.textContent = 'Grid Y (px)';
+  const yInput = document.createElement('input');
+  yInput.type = 'number';
+  yInput.step = '64';
+  yInput.value = String(item.y);
+  yInput.addEventListener('change', () => {
+    item.y = Math.floor(Number(yInput.value) / 64) * 64;
+    api.touch();
+    api.paint();
+  });
+  yWrap.appendChild(yInput);
+  posRow.appendChild(yWrap);
+  card.appendChild(posRow);
+
+  // Delete & Close buttons
+  const btnRow = document.createElement('div');
+  btnRow.style.display = 'flex';
+  btnRow.style.gap = '8px';
+  btnRow.style.marginTop = '12px';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.textContent = '🗑️ Delete from Map (ลบออกจากฉาก)';
+  delBtn.style.color = '#ff6b6b';
+  delBtn.style.flex = '1';
+  delBtn.addEventListener('click', () => {
+    const idx = doc.placedObjects.indexOf(item);
+    if (idx >= 0) doc.placedObjects.splice(idx, 1);
+    if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
+    api.touch();
+    api.paint();
+    renderPanel(api.panelRoot(), api);
+  });
+  btnRow.appendChild(delBtn);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕ Close';
+  closeBtn.style.flex = '0 0 auto';
+  closeBtn.addEventListener('click', () => {
+    if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
+    api.paint();
+    renderPanel(api.panelRoot(), api);
+  });
+  btnRow.appendChild(closeBtn);
+
+  card.appendChild(btnRow);
+  parent.appendChild(card);
 }
 
 function railButton(label, on, onClick, hint) {
@@ -338,12 +511,35 @@ function renderRail(api, doc, tab) {
     for (let i = 0; i < doc.areas.length; i++) {
       const id = doc.areas[i].id;
       rail.appendChild(
-        railButton(id, api.getSelectedAreaId() === id, () => {
+        railButton(id, api.getSelectedAreaId() === id && (!api.getSelectedPlacedId || !api.getSelectedPlacedId()), () => {
+          if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
           api.selectArea(id);
           api.paint();
           renderPanel(api.panelRoot(), api);
         })
       );
+    }
+    if (doc.placedObjects && doc.placedObjects.length) {
+      const sep = document.createElement('div');
+      sep.className = 'editor-line is-head';
+      sep.style.padding = '8px 4px 4px';
+      sep.style.fontSize = '12px';
+      sep.style.color = '#8b949e';
+      sep.textContent = 'Placed (' + doc.placedObjects.length + ')';
+      rail.appendChild(sep);
+
+      for (let i = 0; i < doc.placedObjects.length; i++) {
+        const item = doc.placedObjects[i];
+        const isSel = api.getSelectedPlacedId && api.getSelectedPlacedId() === item.id;
+        const icon = item.kind === 'unit' ? '👤 ' : '🧱 ';
+        rail.appendChild(
+          railButton(icon + (item.templateId || item.id), isSel, () => {
+            if (api.setSelectedPlacedId) api.setSelectedPlacedId(item.id);
+            api.paint();
+            renderPanel(api.panelRoot(), api);
+          })
+        );
+      }
     }
     return rail;
   }
@@ -2109,12 +2305,63 @@ function renderArmorTypeTable(body, api, doc) {
   if (!stored) return;
   const rows = damageTypeNames(doc);
   const cols = armorTypeNames(doc);
+
+  const card = document.createElement('div');
+  card.className = 'editor-fields';
+
+  const title = document.createElement('h3');
+  title.style.margin = '0 0 6px 0';
+  title.style.fontSize = '15px';
+  title.style.color = '#ffffff';
+  title.textContent = 'Damage & Armor Matrix Multipliers';
+  card.appendChild(title);
+
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.textContent = 'Rows are damageType. Columns are armorType.';
+  note.textContent = `2D multiplier table (${rows.length} Damage Types × ${cols.length} Armor Types). Controls damage calculations across factions and weapons.`;
+  card.appendChild(note);
+
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'tool-btn';
+  openBtn.style.padding = '10px 16px';
+  openBtn.style.fontSize = '14px';
+  openBtn.style.marginTop = '10px';
+  openBtn.style.background = '#238636';
+  openBtn.style.borderColor = '#2ea043';
+  openBtn.style.color = '#ffffff';
+  openBtn.style.width = '100%';
+  openBtn.style.justifyContent = 'center';
+  openBtn.textContent = '📊 Open Matrix Table in Center Screen (เปิดตารางตรงกลาง)';
+  openBtn.addEventListener('click', () => {
+    openDamageMatrixModal(api, doc);
+  });
+  card.appendChild(openBtn);
+
+  body.appendChild(card);
+}
+
+function openDamageMatrixModal(api, doc) {
+  const modal = document.getElementById('editor-matrix-modal');
+  const body = document.getElementById('editor-matrix-body');
+  if (!modal || !body) return;
+
+  const stored = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!stored) return;
+  const rows = damageTypeNames(doc);
+  const cols = armorTypeNames(doc);
+
+  body.replaceChildren();
+
+  const note = document.createElement('p');
+  note.className = 'editor-note';
+  note.style.fontSize = '14px';
+  note.textContent = 'Rows are Damage Types (Attacker) · Columns are Armor Types (Defender). Values are multiplier factors (e.g. 1.0 = normal, 1.25 = +25% damage, 0.75 = -25% damage).';
   body.appendChild(note);
+
   const table = document.createElement('table');
   table.className = 'editor-matrix';
+
   const thead = document.createElement('thead');
   const group = document.createElement('tr');
   const blank = document.createElement('th');
@@ -2122,26 +2369,28 @@ function renderArmorTypeTable(body, api, doc) {
   group.appendChild(blank);
   const span = document.createElement('th');
   span.colSpan = cols.length || 1;
-  span.textContent = 'armorType';
+  span.textContent = 'Armor Types (Defender)';
   group.appendChild(span);
   thead.appendChild(group);
+
   const head = document.createElement('tr');
   const corner = document.createElement('th');
-  corner.textContent = 'damageType';
+  corner.textContent = 'Damage Type (Attacker)';
   head.appendChild(corner);
   for (let c = 0; c < cols.length; c++) {
     const th = document.createElement('th');
-    th.textContent = cols[c];
+    th.textContent = toReadableLabel ? toReadableLabel(cols[c]) : cols[c];
     head.appendChild(th);
   }
   thead.appendChild(head);
   table.appendChild(thead);
+
   const tbody = document.createElement('tbody');
   for (let r = 0; r < rows.length; r++) {
     const tr = document.createElement('tr');
     const rowName = rows[r];
     const th = document.createElement('th');
-    th.textContent = rowName;
+    th.textContent = toReadableLabel ? toReadableLabel(rowName) : rowName;
     tr.appendChild(th);
     const row = stored[rowName] && typeof stored[rowName] === 'object' ? stored[rowName] : {};
     for (let c = 0; c < cols.length; c++) {
@@ -2168,6 +2417,20 @@ function renderArmorTypeTable(body, api, doc) {
   }
   table.appendChild(tbody);
   body.appendChild(table);
+
+  modal.hidden = false;
+
+  const closeBtn = document.getElementById('editor-matrix-close');
+  const doneBtn = document.getElementById('editor-matrix-done');
+  const closeModal = () => {
+    modal.hidden = true;
+  };
+
+  if (closeBtn) closeBtn.onclick = closeModal;
+  if (doneBtn) doneBtn.onclick = closeModal;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeModal();
+  };
 }
 
 function matchNumbers(body, api, rules) {

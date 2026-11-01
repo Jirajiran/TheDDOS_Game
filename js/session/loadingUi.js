@@ -57,8 +57,13 @@ export function createLoadingUi(opts) {
 
   function setProgress(pct) {
     state.progress = Math.max(0, Math.min(100, Number(pct) || 0));
-    if (state.variant === 'gameplay') setFill(gpFill, state.progress);
-    else setFill(mainFill, state.progress);
+    if (state.variant === 'gameplay') {
+      setFill(gpFill, state.progress);
+    } else {
+      setFill(mainFill, state.progress);
+      const ls = document.getElementById('loadingStatus');
+      if (ls) ls.textContent = `Loading ${Math.round(state.progress)}%`;
+    }
   }
 
   function syncPlayers() {

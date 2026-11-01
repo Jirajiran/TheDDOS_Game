@@ -7,6 +7,7 @@ import { stopAmbience } from '../audio/sfx.js';
 import { generateRoomCode, hostSetLocalName } from '../session/host.js';
 import { hasLocalSnapshot, loadLocalSnapshotRaw } from '../session/memento.js';
 import { resetPools } from '../world/pools.js';
+import { syncUrlRoute, parseRouteFromUrl } from './router.js';
 
 export function createScreen(hub) {
   const { state } = hub;
@@ -89,6 +90,7 @@ export function createScreen(hub) {
     const prev = state.appState;
     state.appState = next;
     showScreen(next);
+    syncUrlRoute(hub);
     if (next !== AppState.PLAYING && next !== AppState.RESULT && state.panels) {
       state.panels.close();
     }
@@ -174,8 +176,8 @@ export function createScreen(hub) {
       else if (playerUi.closeChat) playerUi.closeChat();
     }
     if (state.input && state.input.setChatMode) state.input.setChatMode(false);
-    if (state.panels) state.panels.close();
-    state.host.roomCode = generateRoomCode();
+    const urlRoute = parseRouteFromUrl();
+    state.host.roomCode = urlRoute.roomCode || state.host.roomCode || generateRoomCode();
     const mainMenuUi = hub.mainMenuUi;
     const hostName =
       (mainMenuUi && mainMenuUi.getPlayerName()) ||

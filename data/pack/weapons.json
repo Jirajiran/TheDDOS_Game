@@ -470,6 +470,35 @@
       "explosionDamage": 70,
       "burstIntervalSec": 0.06,
       "muzzleLeadSec": 0.02
+    },
+    "WEAPON_RPG": {
+      "id": "WEAPON_RPG",
+      "label": "RPG-7 Rocket Launcher",
+      "color": "#bf4a34",
+      "projectileMode": "PROJECTILE_RAYCAST",
+      "projectileRadius": 14,
+      "pierceUnits": 0,
+      "pierceConfig": null,
+      "burstCount": 1,
+      "pelletCount": 1,
+      "reloadSec": 2.2,
+      "infiniteAmmo": false,
+      "ammoTypeId": "AMMO_RPG",
+      "targetFaction": "ENEMY",
+      "beamDurationSec": 0,
+      "baseDamage": 95,
+      "cooldownSec": 2.4,
+      "spreadDeg": 3,
+      "magCapacity": 1,
+      "maxMags": 4,
+      "maxDistancePath": 1.6,
+      "bulletSpeedPxSec": 1200,
+      "damageType": "EXPLOSION",
+      "reloadType": "INDIVIDUAL_SHELL",
+      "explosionRadius": 180,
+      "explosionDamage": 110,
+      "burstIntervalSec": 0.08,
+      "muzzleLeadSec": 0.03
     }
   }
 }

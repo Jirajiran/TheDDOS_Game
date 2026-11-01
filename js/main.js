@@ -6,13 +6,22 @@
 const CACHE_BUST = '20261023k';
 
 function setBootUi(pct, _label) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
   const fill = document.getElementById('loading-main-fill');
   if (fill) {
-    fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    fill.style.width = `${p}%`;
+  }
+  const statusEl = document.getElementById('loadingStatus');
+  if (statusEl) {
+    statusEl.textContent = `Loading ${p}%`;
+  }
+  const tipEl = document.getElementById('tipText');
+  if (tipEl && _label) {
+    tipEl.textContent = _label;
   }
   // Keep legacy stubs in sync for fail path
   const legacy = document.getElementById('progress-fill');
-  if (legacy) legacy.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  if (legacy) legacy.style.width = `${p}%`;
   const text = document.getElementById('progress-label');
   if (text && _label) text.textContent = _label;
 }
@@ -98,7 +107,7 @@ setBootUi(2, '2% — Importing app modules…');
     window.__theDdosPhase = 'import-app';
     setBootUi(4, '4% — Loading app.js (+ sim/config)…');
 
-    const mod = await import(`./app.js?v=${CACHE_BUST}`);
+    const mod = await import('./app.js');
     if (!mod || typeof mod.createApp !== 'function') {
       throw new Error('app.js loaded but createApp missing');
     }

@@ -1,56 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </linearGradient>
+    <filter id="logoGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ffffff" flood-opacity="0.25" />
+    </filter>
+    <filter id="redGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#FF2F14" flood-opacity="0.7" />
+    </filter>
+  </defs>
 
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="none" x="0px" y="0px" width="1280px" height="720px" viewBox="0 0 1280 720">
-<defs>
-<linearGradient id="Gradient_1" gradientUnits="userSpaceOnUse" x1="640" y1="519.8" x2="640" y2="200.3" spreadMethod="pad">
-<stop  offset="0%" stop-color="#000000"/>
+  <!-- Background 1280x720 -->
+  <rect width="1280" height="720" fill="#201010" />
+  <rect width="1280" height="720" fill="url(#bgGrad)" />
 
-<stop  offset="100%" stop-color="#000000" stop-opacity="0"/>
-</linearGradient>
+  <g id="Loading_Main">
+    <!-- Brand Logo THE DDOS (centered around x=640, y=280) -->
+    <g id="NameLogo" transform="translate(480, 255) scale(1.0)" filter="url(#logoGlow)">
+      <path d="M 77.40 0.70 L 68.40 0.70 L 68.40 18.30 L 50.60 18.30 L 50.60 0.70 L 41.60 0.70 L 41.60 45.50 L 50.60 45.50 L 50.60 25.90 L 68.40 25.90 L 68.40 45.50 L 77.40 45.50 L 77.40 0.70 Z M 95.80 8.30 L 120.10 8.30 L 120.10 0.70 L 86.80 0.70 L 86.80 45.50 L 120.90 45.50 L 120.90 38.00 L 95.80 38.00 L 95.80 25.70 L 118.40 25.70 L 118.40 18.20 L 95.80 18.20 L 95.80 8.30 Z M 0.00 0.70 L 0.00 8.30 L 13.30 8.30 L 13.30 45.50 L 22.40 45.50 L 22.40 8.30 L 35.70 8.30 L 35.70 0.70 L 0.00 0.70 Z M 219.10 2.60 C 216.20 1.30, 212.40 0.70, 207.80 0.70 L 191.20 0.70 L 191.20 45.50 L 208.20 45.50 C 222.00 45.50, 228.80 38.20, 228.80 23.50 C 228.80 18.10, 227.90 13.60, 226.10 9.90 C 224.40 6.30, 222.00 3.90, 219.10 2.60 Z M 200.30 8.30 L 204.30 8.30 C 208.60 8.30, 211.70 8.60, 213.40 9.20 C 215.20 9.80, 216.60 11.20, 217.80 13.30 C 218.90 15.50, 219.40 18.70, 219.40 23.10 C 219.40 29.00, 218.50 33.00, 216.70 35.00 C 214.90 37.00, 211.70 38.00, 207.00 38.00 L 200.30 38.00 L 200.30 8.30 Z M 173.90 2.60 C 171.00 1.30, 167.20 0.70, 162.50 0.70 L 146.00 0.70 L 146.00 45.50 L 163.00 45.50 C 176.70 45.50, 183.60 38.20, 183.60 23.50 C 183.60 18.10, 182.70 13.60, 180.90 9.90 C 179.10 6.30, 176.80 3.90, 173.90 2.60 Z M 168.20 9.20 C 169.90 9.80, 171.40 11.20, 172.50 13.30 C 173.60 15.50, 174.20 18.70, 174.20 23.10 C 174.20 29.00, 173.30 33.00, 171.50 35.00 C 169.60 37.00, 166.40 38.00, 161.80 38.00 L 155.00 38.00 L 155.00 8.30 L 159.10 8.30 C 163.40 8.30, 166.40 8.60, 168.20 9.20 Z M 300.90 0.00 C 296.00 0.00, 292.10 1.10, 289.10 3.20 C 286.10 5.40, 284.60 8.50, 284.60 12.50 C 284.60 19.00, 289.40 23.50, 298.90 25.90 C 304.00 27.20, 307.20 28.20, 308.40 29.00 C 309.70 29.80, 310.30 31.00, 310.30 32.50 C 310.30 36.60, 307.40 38.70, 301.50 38.70 C 296.00 38.70, 292.80 35.80, 291.70 30.10 L 282.90 30.90 C 284.20 41.20, 290.30 46.30, 301.40 46.30 C 313.40 46.30, 319.40 41.70, 319.40 32.40 C 319.40 29.30, 318.50 26.50, 316.90 24.20 C 315.10 21.80, 310.50 19.70, 303.00 17.70 C 298.30 16.50, 295.50 15.50, 294.60 14.60 C 293.70 13.70, 293.20 12.80, 293.20 11.80 C 293.20 8.90, 295.80 7.50, 300.80 7.50 C 305.60 7.50, 308.40 9.60, 309.10 13.90 L 318.10 13.60 C 317.80 4.50, 312.10 0.00, 300.90 0.00 Z M 273.00 6.90 C 269.60 2.30, 264.10 0.00, 256.30 0.00 C 249.50 0.00, 244.20 2.10, 240.40 6.20 C 236.60 10.40, 234.60 16.10, 234.60 23.40 C 234.60 30.50, 236.60 36.00, 240.50 40.10 C 244.30 44.20, 249.70 46.20, 256.50 46.20 C 263.20 46.20, 268.50 44.20, 272.40 40.00 C 276.20 35.90, 278.10 30.30, 278.10 23.20 C 278.10 16.90, 276.40 11.40, 273.00 6.90 Z M 268.80 22.90 C 268.80 27.40, 267.80 31.10, 265.70 34.00 C 263.70 37.00, 260.60 38.50, 256.40 38.50 C 252.50 38.50, 249.40 37.10, 247.30 34.30 C 245.10 31.50, 244.00 27.80, 244.00 23.10 C 244.00 12.80, 248.20 7.70, 256.40 7.70 C 264.70 7.70, 268.80 12.80, 268.80 22.90 Z" fill="#FFFFFF"/>
+    </g>
 
-<g id="Ui_ColorBg_0_Layer1_0_FILL">
-<path fill="#101820" stroke="none" d="
-M 1280 720.05
-L 1280 0 0 0 0 720.05 1280 720.05 Z"/>
-</g>
+    <!-- Status Info -->
+    <g id="StatusInfo" transform="translate(327, 345)">
+      <text id="tipText" x="0" y="0" font-family="'Browallia New', 'Trebuchet MS', sans-serif" font-weight="bold" font-size="28" fill="#FF2F14">No_Step_back.You</text>
+      <text id="loadingStatus" x="626" y="0" text-anchor="end" font-family="'Browallia New', 'Trebuchet MS', sans-serif" font-weight="bold" font-size="28" fill="#FF2F14">Loading 0%</text>
+    </g>
 
-<g id="Ui_ColorBg_0_Layer0_0_FILL">
-<path fill="url(#Gradient_1)" stroke="none" d="
-M 1280 720.05
-L 1280 0 0 0 0 720.05 1280 720.05 Z"/>
-</g>
-
-<g id="UiLoad_0_Layer0_0_FILL">
-<path fill="#3B9EFF" stroke="none" d="
-M -309.9 -20.5
-L -309.9 20.45 309.95 20.45 309.95 -20.5 -309.9 -20.5 Z"/>
-</g>
-</defs>
-
-<g id="Loading_Main" transform="matrix( 1, 0, 0, 1, 640,360) ">
-<g id="Color" transform="matrix( 1, 0, 0, 1, 0,0) ">
-<g transform="matrix( 1, 0, 0, 1, -640,-360) ">
-<use xlink:href="#Ui_ColorBg_0_Layer1_0_FILL"/>
-</g>
-
-<g transform="matrix( 1, 0, 0, 1, -640,-360) ">
-<use xlink:href="#Ui_ColorBg_0_Layer0_0_FILL"/>
-</g>
-</g>
-
-<g id="Anchor_Center" transform="matrix( 1, 0, 0, 1, 0,0) ">
-<g id="Fill_LoadingBar" transform="matrix( 1, 0, 0, 1, 0,93.95) ">
-<g transform="matrix( 1, 0, 0, 1, 0,0) ">
-<use xlink:href="#UiLoad_0_Layer0_0_FILL"/>
-</g>
-</g>
-
-<g id="NameMap" transform="matrix( 1, 0, 0, 1, -284.35,-107.05) ">
-<clipPath id="Mask_Mask_1">
-<rect x="-353.5" y="-2" width="1272.35" height="129.2" fill="#FFFFFF" stroke="none"/>
-</clipPath>
-
-<text clip-path="url(#Mask_Mask_1)" writing-mode="lr"><tspan x="120.75" y="83.7" baseline-shift="0%" font-family="Browallia New" font-weight="bold" font-size="96" fill="#FFFFFF" xml:space="preserve">THE DDOS</tspan></text>
-</g>
-</g>
-</g>
+    <!-- Sci-Fi Loading Bar Frame & Track at (327, 360) width 626 height 47 -->
+    <g id="LoadingBar" transform="translate(327, 360)">
+      <!-- Fill Track Background -->
+      <rect x="6" y="6" width="614" height="35" fill="#000000" />
+      <!-- Fill Progress (Dynamic) -->
+      <rect id="fillProgress" x="6" y="6" width="0" height="35" fill="#FF2F14" />
+      <!-- Sci-Fi Border Frame -->
+      <path filter="url(#redGlow)" d="M 625.80 46.90 L 625.80 0.00 L 0.00 0.00 L 0.00 46.90 L 625.80 46.90 Z M 619.80 6.00 L 619.80 40.90 L 6.00 40.90 L 6.00 6.00 L 619.80 6.00 Z" fill="#FF2F14"/>
+    </g>
+  </g>
 </svg>

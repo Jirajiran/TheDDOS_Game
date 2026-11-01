@@ -657,3 +657,225 @@ select {
   background: #3a414c;
   border: 2px solid #121418;
 }
+
+/* Map Tools Toolbar */
+.editor-map-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.editor-map-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #161b22;
+  border-bottom: 1px solid #3a414c;
+  flex-wrap: wrap;
+  z-index: 3;
+}
+
+.tool-group {
+  display: flex;
+  gap: 4px;
+}
+
+.tool-btn {
+  padding: 5px 12px;
+  font-size: 13px;
+  background: #0e1116;
+  border: 1px solid #4a5568;
+  color: #c9d1d9;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tool-btn:hover {
+  background: #21262d;
+  color: #ffffff;
+}
+
+.tool-btn.is-active {
+  background: #238636;
+  border-color: #2ea043;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 0 8px rgba(46, 160, 67, 0.4);
+}
+
+.tool-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #b7c0cc;
+}
+
+.tool-select-wrap select {
+  padding: 4px 8px;
+  font-size: 13px;
+  background: #0e1116;
+  border: 1px solid #4a5568;
+  color: #ffffff;
+}
+
+.tool-grid-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8b949e;
+  background: #0e1116;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid #30363d;
+}
+
+/* Centered Damage & Armor Matrix Modal */
+.editor-matrix-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  padding: 24px;
+}
+
+.editor-matrix-modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.editor-matrix-modal-dialog {
+  background: #1c2128;
+  border: 1px solid #4a5568;
+  border-radius: 6px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.9);
+  width: min(840px, 95vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #e6e1d6;
+}
+
+.editor-matrix-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: #161b22;
+  border-bottom: 1px solid #3a414c;
+}
+
+.editor-matrix-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.editor-matrix-modal-close {
+  background: none;
+  border: none;
+  color: #b7c0cc;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 2px 8px;
+  line-height: 1;
+}
+
+.editor-matrix-modal-close:hover {
+  color: #ff6b6b;
+}
+
+.editor-matrix-modal-body {
+  padding: 20px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.editor-matrix-modal-footer {
+  padding: 12px 20px;
+  background: #161b22;
+  border-top: 1px solid #3a414c;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.editor-matrix-modal-body table.editor-matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.editor-matrix-modal-body table.editor-matrix th,
+.editor-matrix-modal-body table.editor-matrix td {
+  padding: 8px 12px;
+  border: 1px solid #3a414c;
+  text-align: center;
+}
+
+.editor-matrix-modal-body table.editor-matrix th {
+  background: #161b22;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.editor-matrix-modal-body table.editor-matrix input {
+  width: 5.5rem;
+  padding: 6px 8px;
+  text-align: center;
+  font-weight: 600;
+  border-radius: 3px;
+}
+
+/* Placed Instance Inspector & Map Markers */
+.editor-instance-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: #1c2128;
+  border: 1px solid #3a414c;
+  border-radius: 4px;
+}
+
+.editor-instance-badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: #21262d;
+  color: #58a6ff;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.map-grid-sub {
+  stroke: rgba(255, 255, 255, 0.04);
+  stroke-width: 1;
+}
+
+.map-placed-obj {
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.map-placed-obj:hover {
+  filter: brightness(1.2);
+}
+
+.map-placed-obj.is-selected {
+  outline: 3px solid #ffd700;
+  filter: drop-shadow(0 0 6px #ffd700);
+}
+

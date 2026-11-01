@@ -1,9 +1,12 @@
 /**
  * Map visual. Path cells are the grid. Areas are rectangles drawn on top.
+ * Placed objects and units snap to the L3 grid (64x64).
  * The camera zooms and pans inside the page. The page itself does not scroll.
  */
 
 import { PATH_SIZE, clampRect, nextAreaId, worldSize } from './mapDoc.js';
+
+const L3_GRID_SIZE = 64;
 
 const EDGE = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const CURSOR = {
@@ -15,6 +18,16 @@ const CURSOR = {
   sw: 'nesw-resize',
   nw: 'nwse-resize',
   se: 'nwse-resize',
+};
+
+const TEAM_COLORS = {
+  0: '#8b949e', // Neutral grey
+  1: '#388bfd', // Player / friendly blue
+  2: '#f85149', // Enemy / hostile red
+  3: '#a371f7', // Purple
+  4: '#d29922', // Orange
+  5: '#2ea043', // Green
+  6: '#f0883e', // Orange-red
 };
 
 function el(name, attrs) {
@@ -40,6 +53,17 @@ function hitArea(doc, x, y) {
     const area = areas[i];
     if (x >= area.x && y >= area.y && x <= area.x + area.w && y <= area.y + area.h) {
       return area;
+    }
+  }
+  return null;
+}
+
+function hitPlacedObject(doc, x, y) {
+  const list = doc.placedObjects || [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const item = list[i];
+    if (x >= item.x && x <= item.x + L3_GRID_SIZE && y >= item.y && y <= item.y + L3_GRID_SIZE) {
+      return item;
     }
   }
   return null;
@@ -84,6 +108,7 @@ export function mountMapView(svg, api) {
   let drag = null;
   let camera = null;
   let spaceDown = false;
+  let hoverPos = null;
 
   function ensureCamera(world) {
     if (!camera || camera.boundW !== world.w || camera.boundH !== world.h) {
@@ -99,14 +124,49 @@ export function mountMapView(svg, api) {
     ensureCamera(world);
     const selectedId = api.getSelectedAreaId();
     const highlightId = api.getHighlightAreaId();
+    const selectedPlacedId = api.getSelectedPlacedId ? api.getSelectedPlacedId() : '';
+    const toolMode = api.getToolMode ? api.getToolMode() : 'area';
+
     svg.setAttribute(
       'viewBox',
       camera.x + ' ' + camera.y + ' ' + camera.w + ' ' + camera.h
     );
     svg.replaceChildren();
+
+    // 1. Ground background
     svg.appendChild(
       el('rect', { x: 0, y: 0, width: world.w, height: world.h, class: 'map-ground' })
     );
+
+    // 2. Faint 64x64 L3 subgrid lines
+    const totalCols = (world.w / L3_GRID_SIZE) | 0;
+    const totalRows = (world.h / L3_GRID_SIZE) | 0;
+    for (let c = 1; c < totalCols; c++) {
+      if ((c * L3_GRID_SIZE) % PATH_SIZE === 0) continue;
+      svg.appendChild(
+        el('line', {
+          x1: c * L3_GRID_SIZE,
+          y1: 0,
+          x2: c * L3_GRID_SIZE,
+          y2: world.h,
+          class: 'map-grid-sub',
+        })
+      );
+    }
+    for (let r = 1; r < totalRows; r++) {
+      if ((r * L3_GRID_SIZE) % PATH_SIZE === 0) continue;
+      svg.appendChild(
+        el('line', {
+          x1: 0,
+          y1: r * L3_GRID_SIZE,
+          x2: world.w,
+          y2: r * L3_GRID_SIZE,
+          class: 'map-grid-sub',
+        })
+      );
+    }
+
+    // 3. Path cells grid lines (1024x1024)
     for (let col = 0; col <= doc.pathCols; col++) {
       svg.appendChild(
         el('line', {
@@ -129,6 +189,8 @@ export function mountMapView(svg, api) {
         })
       );
     }
+
+    // 4. Trigger/Spawn Areas
     for (let i = 0; i < doc.areas.length; i++) {
       const area = doc.areas[i];
       const selected = area.id === selectedId;
@@ -154,6 +216,132 @@ export function mountMapView(svg, api) {
       label.textContent = area.id;
       svg.appendChild(label);
     }
+
+    // 5. Placed Objects & Units (64x64 Snap)
+    const placedList = doc.placedObjects || [];
+    for (let i = 0; i < placedList.length; i++) {
+      const item = placedList[i];
+      const isSelected = item.id === selectedPlacedId;
+      const teamColor = TEAM_COLORS[item.team != null ? item.team : 1] || '#388bfd';
+
+      const group = el('g', {
+        class: 'map-placed-obj' + (isSelected ? ' is-selected' : ''),
+        'data-id': item.id,
+      });
+
+      if (item.kind === 'unit') {
+        // Unit circle representation
+        const circle = el('circle', {
+          cx: item.x + 32,
+          cy: item.y + 32,
+          r: 26,
+          fill: '#161b22',
+          stroke: isSelected ? '#ffd700' : teamColor,
+          'stroke-width': isSelected ? 3.5 : 2,
+        });
+        group.appendChild(circle);
+
+        // Unit label
+        const label = el('text', {
+          x: item.x + 32,
+          y: item.y + 30,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'middle',
+          fill: '#f0f6fc',
+          'font-size': '10',
+          'font-weight': 'bold',
+        });
+        label.textContent = (item.templateId || 'UNIT').slice(0, 7);
+        group.appendChild(label);
+
+        // Team indicator dot
+        const dot = el('circle', {
+          cx: item.x + 32,
+          cy: item.y + 14,
+          r: 3.5,
+          fill: teamColor,
+        });
+        group.appendChild(dot);
+
+        // HP bar underneath
+        const hpBarBg = el('rect', {
+          x: item.x + 10,
+          y: item.y + 45,
+          width: 44,
+          height: 5,
+          rx: 2,
+          fill: '#0d1117',
+        });
+        group.appendChild(hpBarBg);
+
+        const curHp = Math.max(0, item.currentHp != null ? item.currentHp : 100);
+        const maxHp = Math.max(1, item.maxHp != null ? item.maxHp : curHp);
+        const hpRatio = Math.min(1, curHp / maxHp);
+        const hpBarFill = el('rect', {
+          x: item.x + 10,
+          y: item.y + 45,
+          width: Math.max(2, 44 * hpRatio),
+          height: 5,
+          rx: 2,
+          fill: hpRatio > 0.5 ? '#2ea043' : hpRatio > 0.25 ? '#d29922' : '#f85149',
+        });
+        group.appendChild(hpBarFill);
+      } else {
+        // Object / Block rect representation
+        const rect = el('rect', {
+          x: item.x + 4,
+          y: item.y + 4,
+          width: 56,
+          height: 56,
+          rx: 6,
+          fill: '#21262d',
+          stroke: isSelected ? '#ffd700' : teamColor,
+          'stroke-width': isSelected ? 3.5 : 2,
+        });
+        group.appendChild(rect);
+
+        // Object label
+        const label = el('text', {
+          x: item.x + 32,
+          y: item.y + 28,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'middle',
+          fill: '#e6edf3',
+          'font-size': '10',
+          'font-weight': 'bold',
+        });
+        label.textContent = (item.templateId || 'OBJ').slice(0, 7);
+        group.appendChild(label);
+
+        // HP bar
+        const hpBarBg = el('rect', {
+          x: item.x + 8,
+          y: item.y + 44,
+          width: 48,
+          height: 5,
+          rx: 2,
+          fill: '#0d1117',
+        });
+        group.appendChild(hpBarBg);
+
+        const curHp = Math.max(0, item.currentHp != null ? item.currentHp : 100);
+        const maxHp = Math.max(1, item.maxHp != null ? item.maxHp : curHp);
+        const hpRatio = Math.min(1, curHp / maxHp);
+        const hpBarFill = el('rect', {
+          x: item.x + 8,
+          y: item.y + 44,
+          width: Math.max(2, 48 * hpRatio),
+          height: 5,
+          rx: 2,
+          fill: hpRatio > 0.5 ? '#2ea043' : hpRatio > 0.25 ? '#d29922' : '#f85149',
+        });
+        group.appendChild(hpBarFill);
+      }
+
+      svg.appendChild(group);
+    }
+
+    // 6. Spawn mark
     const mark = api.getSpawnMark ? api.getSpawnMark() : null;
     if (mark) {
       svg.appendChild(
@@ -165,6 +353,8 @@ export function mountMapView(svg, api) {
         })
       );
     }
+
+    // 7. Area draft
     if (drag && drag.mode === 'draw' && drag.draft) {
       svg.appendChild(
         el('rect', {
@@ -175,6 +365,24 @@ export function mountMapView(svg, api) {
           class: 'map-area is-selected',
         })
       );
+    }
+
+    // 8. Ghost preview for active placement mode
+    if (!drag && (toolMode === 'place-obj' || toolMode === 'place-unit') && hoverPos) {
+      const gx = Math.max(0, Math.min(world.w - L3_GRID_SIZE, Math.floor(hoverPos.x / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const gy = Math.max(0, Math.min(world.h - L3_GRID_SIZE, Math.floor(hoverPos.y / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const isUnit = toolMode === 'place-unit';
+      const ghost = el('rect', {
+        x: gx,
+        y: gy,
+        width: L3_GRID_SIZE,
+        height: L3_GRID_SIZE,
+        fill: isUnit ? 'rgba(88, 166, 255, 0.2)' : 'rgba(46, 160, 67, 0.2)',
+        stroke: isUnit ? '#58a6ff' : '#3fb950',
+        'stroke-dasharray': '4 2',
+        'stroke-width': 2,
+      });
+      svg.appendChild(ghost);
     }
   }
 
@@ -206,6 +414,8 @@ export function mountMapView(svg, api) {
     const world = worldSize(doc);
     ensureCamera(world);
     const p = clientToWorld(svg, event.clientX, event.clientY);
+
+    // Pan with middle click or space key
     if (event.button === 1 || spaceDown) {
       drag = { mode: 'pan', x: event.clientX, y: event.clientY, camX: camera.x, camY: camera.y };
       svg.style.cursor = 'grabbing';
@@ -216,6 +426,100 @@ export function mountMapView(svg, api) {
       return;
     }
     if (event.button !== 0) return;
+
+    const toolMode = api.getToolMode ? api.getToolMode() : 'area';
+
+    // 1. Check if clicking on an existing placed object/unit
+    const hitPlaced = hitPlacedObject(doc, p.x, p.y);
+    if (hitPlaced) {
+      api.setSelectedPlacedId(hitPlaced.id);
+      api.selectArea('');
+      drag = {
+        mode: 'move-placed',
+        item: hitPlaced,
+        startX: hitPlaced.x,
+        startY: hitPlaced.y,
+        offsetX: p.x - hitPlaced.x,
+        offsetY: p.y - hitPlaced.y,
+      };
+      try {
+        svg.setPointerCapture(event.pointerId);
+      } catch (_) {}
+      event.preventDefault();
+      paint();
+      api.refreshPanel();
+      return;
+    }
+
+    // 2. Place Object Tool Mode
+    if (toolMode === 'place-obj') {
+      const gx = Math.max(0, Math.min(world.w - L3_GRID_SIZE, Math.floor(p.x / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const gy = Math.max(0, Math.min(world.h - L3_GRID_SIZE, Math.floor(p.y / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const tId = api.getToolObjTemplate() || Object.keys(doc.items || {})[0] || 'CRATE';
+      const defaultHp = (doc.items && doc.items[tId] && doc.items[tId].hp != null) ? doc.items[tId].hp : 100;
+      if (!doc.placedObjects) doc.placedObjects = [];
+      const newInst = {
+        id: 'obj_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        kind: 'object',
+        templateId: tId,
+        x: gx,
+        y: gy,
+        team: 1,
+        currentHp: defaultHp,
+        maxHp: defaultHp,
+      };
+      doc.placedObjects.push(newInst);
+      api.setSelectedPlacedId(newInst.id);
+      api.selectArea('');
+      api.touch();
+      paint();
+      api.refreshPanel();
+      return;
+    }
+
+    // 3. Place Unit Tool Mode
+    if (toolMode === 'place-unit') {
+      const gx = Math.max(0, Math.min(world.w - L3_GRID_SIZE, Math.floor(p.x / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const gy = Math.max(0, Math.min(world.h - L3_GRID_SIZE, Math.floor(p.y / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const tId = api.getToolUnitTemplate() || Object.keys(doc.units || {})[0] || 'PLAYER';
+      const defaultHp = (doc.units && doc.units[tId] && doc.units[tId].hpRange && doc.units[tId].hpRange[1]) || 100;
+      if (!doc.placedObjects) doc.placedObjects = [];
+      const newInst = {
+        id: 'unit_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        kind: 'unit',
+        templateId: tId,
+        x: gx,
+        y: gy,
+        team: 2, // Default enemy team
+        currentHp: defaultHp,
+        maxHp: defaultHp,
+      };
+      doc.placedObjects.push(newInst);
+      api.setSelectedPlacedId(newInst.id);
+      api.selectArea('');
+      api.touch();
+      paint();
+      api.refreshPanel();
+      return;
+    }
+
+    // 4. Select Mode
+    if (toolMode === 'select') {
+      api.setSelectedPlacedId('');
+      const hit = hitArea(doc, p.x, p.y);
+      if (hit) {
+        api.selectArea(hit.id);
+        drag = { mode: 'move', id: hit.id, dx: p.x - hit.x, dy: p.y - hit.y };
+      } else {
+        api.selectArea('');
+      }
+      paint();
+      api.refreshPanel();
+      return;
+    }
+
+    // 5. Area Mode (Default)
+    api.setSelectedPlacedId('');
     const tol = tolerance(svg, camera);
     for (let i = doc.areas.length - 1; i >= 0; i--) {
       const edge = edgeAt(doc.areas[i], p.x, p.y, tol);
@@ -257,7 +561,27 @@ export function mountMapView(svg, api) {
     const world = worldSize(doc);
     ensureCamera(world);
     const p = clientToWorld(svg, event.clientX, event.clientY);
+    hoverPos = p;
+
     if (!drag) {
+      const toolMode = api.getToolMode ? api.getToolMode() : 'area';
+      if (spaceDown) {
+        svg.style.cursor = 'grab';
+        return;
+      }
+      if (hitPlacedObject(doc, p.x, p.y)) {
+        svg.style.cursor = 'pointer';
+        return;
+      }
+      if (toolMode === 'place-obj' || toolMode === 'place-unit') {
+        svg.style.cursor = 'cell';
+        paint();
+        return;
+      }
+      if (toolMode === 'select') {
+        svg.style.cursor = hitArea(doc, p.x, p.y) ? 'move' : 'default';
+        return;
+      }
       const tol = tolerance(svg, camera);
       let cursor = 'crosshair';
       for (let i = doc.areas.length - 1; i >= 0; i--) {
@@ -268,10 +592,10 @@ export function mountMapView(svg, api) {
         }
         if (hitArea(doc, p.x, p.y)) cursor = 'move';
       }
-      if (spaceDown) cursor = 'grab';
       svg.style.cursor = cursor;
       return;
     }
+
     if (drag.mode === 'pan') {
       const rect = svg.getBoundingClientRect();
       const dx = ((event.clientX - drag.x) / Math.max(1, rect.width)) * camera.w;
@@ -282,6 +606,19 @@ export function mountMapView(svg, api) {
       paint();
       return;
     }
+
+    if (drag.mode === 'move-placed') {
+      const nx = Math.max(0, Math.min(world.w - L3_GRID_SIZE, Math.round((p.x - drag.offsetX) / L3_GRID_SIZE) * L3_GRID_SIZE));
+      const ny = Math.max(0, Math.min(world.h - L3_GRID_SIZE, Math.round((p.y - drag.offsetY) / L3_GRID_SIZE) * L3_GRID_SIZE));
+      if (drag.item.x !== nx || drag.item.y !== ny) {
+        drag.item.x = nx;
+        drag.item.y = ny;
+        api.touch();
+        paint();
+      }
+      return;
+    }
+
     if (drag.mode === 'draw') {
       const x = Math.max(0, Math.min(drag.x, p.x));
       const y = Math.max(0, Math.min(drag.y, p.y));
@@ -291,6 +628,7 @@ export function mountMapView(svg, api) {
       paint();
       return;
     }
+
     const area = doc.areas.find((row) => row.id === drag.id);
     if (!area) return;
     if (drag.mode === 'move') {
@@ -310,6 +648,13 @@ export function mountMapView(svg, api) {
   function endDrag() {
     if (!drag) return;
     const mode = drag.mode;
+    if (mode === 'move-placed') {
+      drag = null;
+      svg.style.cursor = 'pointer';
+      paint();
+      api.refreshPanel();
+      return;
+    }
     if (mode === 'draw' && drag.draft && drag.draft.w >= 64 && drag.draft.h >= 64) {
       const doc = api.getDoc();
       const fitted = clampRect(drag.draft, worldSize(doc));
@@ -332,6 +677,11 @@ export function mountMapView(svg, api) {
 
   svg.addEventListener('pointerup', endDrag);
   svg.addEventListener('pointercancel', endDrag);
+  svg.addEventListener('pointerleave', () => {
+    hoverPos = null;
+    paint();
+  });
+
   svg.addEventListener(
     'wheel',
     (event) => {
@@ -351,6 +701,7 @@ export function mountMapView(svg, api) {
     },
     { passive: false }
   );
+
   window.addEventListener('keydown', (event) => {
     if (event.code !== 'Space') return;
     const tag = event.target && event.target.tagName;
@@ -359,6 +710,7 @@ export function mountMapView(svg, api) {
     svg.style.cursor = 'grab';
     event.preventDefault();
   });
+
   window.addEventListener('keyup', (event) => {
     if (event.code !== 'Space') return;
     spaceDown = false;

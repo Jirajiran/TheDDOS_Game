@@ -41,8 +41,14 @@ import {
   initMatchGameplay,
   restoreMatchFromSnapshot,
 } from './sim.js';
+import {
+  parseRouteFromUrl,
+  initRouteListener,
+  syncUrlRoute,
+} from './app/router.js';
 
 export function createApp(dom) {
+  const initialRoute = parseRouteFromUrl();
   const state = {
     appState: AppState.BOOT,
     match: null,
@@ -55,7 +61,10 @@ export function createApp(dom) {
     bootReady: false,
     boot: null,
     input: null,
-    host: createHostSession({ gameMode: GameMode.FLAT_SURVIVAL }),
+    host: createHostSession({
+      gameMode: GameMode.FLAT_SURVIVAL,
+      roomCode: initialRoute.roomCode || undefined,
+    }),
     panels: null,
     /** Elapsed since last throttled autosave while PLAYING. */
     autosaveAcc: 0,
@@ -195,6 +204,8 @@ export function createApp(dom) {
   const playLoop = createPlayLoop(hub);
   const screen = createScreen(hub);
   Object.assign(hub, hotbar, saveFlow, cheat, playLoop, screen);
+  initRouteListener(hub);
+  syncUrlRoute(hub);
 
   function dispatchUi(intent, payload) {
     switch (intent) {

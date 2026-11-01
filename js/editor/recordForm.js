@@ -71,10 +71,77 @@ function mergeShape(a, b) {
   return a === undefined ? b : a;
 }
 
+export function toReadableLabel(str) {
+  if (!str) return '';
+  const s = String(str);
+  const dict = {
+    DESTROY_BASE: 'Destroy Base',
+    ELIMINATE_PLAYER: 'Eliminate Player',
+    SURVIVE_RETREAT: 'Survive / Retreat',
+    SEEK_HEAL_POINT: 'Seek Heal Point',
+    REGROUP_ALLIES: 'Regroup Allies',
+    BLOCK_TURRET: 'Block: Turret',
+    BLOCK_BASE: 'Block: Base',
+    MAGAZINE: 'Magazine',
+    INDIVIDUAL_SHELL: 'Individual Shell',
+    PROJECTILE_RAYCAST: 'Raycast Projectile',
+    MELEE_OBJECT: 'Melee Object',
+    EXPLOSION: 'Explosion',
+    BULLET: 'Bullet',
+    LAZER: 'Laser',
+    DEFAULT: 'Default',
+    MEDIUM: 'Medium',
+    CLOSE: 'Close',
+    LONG: 'Long',
+    ENEMY: 'Enemy',
+    FRIENDLY: 'Friendly',
+    id: 'ID',
+    model: 'Unit Model',
+    hpRange: 'HP Range (Min / Max)',
+    startingLoadout: 'Starting Loadout',
+    skills: 'Skills',
+    currentSlot: 'Active Slot',
+    armorType: 'Armor Type',
+    speed: 'Movement Speed',
+    behaviorFlags: 'Behavior Settings',
+    allowedGoals: 'Allowed Goals',
+    targetPriorityList: 'Target Priorities',
+    retreatHpRatio: 'Retreat HP Ratio',
+    preferredRange: 'Preferred Range',
+    canRegroup: 'Can Regroup',
+    damageType: 'Damage Type',
+    reloadType: 'Reload Type',
+    targetFaction: 'Target Faction',
+    ammoTypeId: 'Ammo Type',
+    baseDamage: 'Base Damage',
+    cooldownSec: 'Cooldown (sec)',
+    bulletSpeedPxSec: 'Bullet Speed (px/s)',
+    explosionRadius: 'Explosion Radius',
+    explosionDamage: 'Explosion Damage',
+    magCapacity: 'Mag Capacity',
+    maxMags: 'Max Mags',
+    reloadSec: 'Reload Time (sec)',
+    spreadDeg: 'Spread (deg)',
+    maxDistancePath: 'Max Range (Path)',
+  };
+  if (dict[s]) return dict[s];
+
+  if (/^[A-Z0-9_]+$/.test(s) && s.includes('_')) {
+    return s
+      .split('_')
+      .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+      .join(' ');
+  }
+  return s
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (c) => c.toUpperCase())
+    .trim();
+}
+
 function field(label, control, kind) {
   const wrap = document.createElement('label');
   if (kind) wrap.className = kind;
-  wrap.textContent = label;
+  wrap.textContent = toReadableLabel(label);
   wrap.appendChild(control);
   return wrap;
 }
@@ -98,30 +165,29 @@ function orderedKeys(record, shape) {
 }
 
 function unitFieldKeys(record, shape) {
-  const seen = {};
-  const names = [];
-  function addName(key) {
-    if (key == null || seen[key] || UNIT_HIDDEN[key]) return;
-    seen[key] = true;
-    names.push(key);
-  }
-  const shapeKeys = Object.keys(shape || {});
-  const recordKeys = Object.keys(record || {});
-  for (let i = 0; i < shapeKeys.length; i++) addName(shapeKeys[i]);
-  for (let i = 0; i < recordKeys.length; i++) addName(recordKeys[i]);
-  const used = {};
+  const allowed = [
+    'id',
+    'model',
+    'hpRange',
+    'startingLoadout',
+    'skills',
+    'currentSlot',
+    'armorType',
+    'speed',
+    'behaviorFlags',
+    'allowedGoals',
+    'targetPriorityList',
+  ];
   const keys = [];
-  function take(key) {
-    if (!seen[key] || used[key]) return;
-    used[key] = true;
-    keys.push(key);
+  for (let i = 0; i < allowed.length; i++) {
+    const k = allowed[i];
+    if (
+      (record && Object.prototype.hasOwnProperty.call(record, k)) ||
+      (shape && Object.prototype.hasOwnProperty.call(shape, k))
+    ) {
+      keys.push(k);
+    }
   }
-  for (let i = 0; i < UNIT_FRONT.length; i++) take(UNIT_FRONT[i]);
-  for (let i = 0; i < names.length; i++) {
-    if (UNIT_TAIL.indexOf(names[i]) >= 0) continue;
-    take(names[i]);
-  }
-  for (let i = 0; i < UNIT_TAIL.length; i++) take(UNIT_TAIL[i]);
   return keys;
 }
 
@@ -153,13 +219,13 @@ function fillSelect(select, options, value) {
     seen[options[i]] = true;
     const option = document.createElement('option');
     option.value = options[i];
-    option.textContent = options[i];
+    option.textContent = toReadableLabel(options[i]);
     select.appendChild(option);
   }
   if (value && !seen[value]) {
     const option = document.createElement('option');
     option.value = value;
-    option.textContent = value;
+    option.textContent = toReadableLabel(value);
     select.appendChild(option);
   }
   select.value = value == null ? '' : value;
@@ -482,7 +548,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     block.className = 'editor-fields';
     const title = document.createElement('p');
     title.className = 'editor-note';
-    title.textContent = key;
+    title.textContent = toReadableLabel(key);
     block.appendChild(title);
     const itemSample = Array.isArray(sample) && sample.length ? sample[0] : list[0];
     const itemList = key === 'startingLoadout' || key === 'generatorList' || isItemRow(itemSample) || (list[0] && isItemRow(list[0]));
@@ -559,7 +625,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     }
     const add = document.createElement('button');
     add.type = 'button';
-    add.textContent = 'Add ' + key;
+    add.textContent = 'Add ' + toReadableLabel(key);
     add.addEventListener('click', () => {
       if (skillList && list.length >= 3) return;
       if (kind === 'string') {
@@ -596,7 +662,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     block.className = 'editor-fields';
     const title = document.createElement('p');
     title.className = 'editor-note';
-    title.textContent = key;
+    title.textContent = toReadableLabel(key);
     block.appendChild(title);
     renderObject(block, target, sample && typeof sample === 'object' ? sample : {}, childCtx, false);
     parent.appendChild(block);

@@ -75,6 +75,9 @@ import {
 import {
   tryPlace,
 } from './place.js';
+import {
+  UNIT_VISUAL_ACTIONS,
+} from '../view/unitVisual.js';
 export function spawnPlayerNearWorldCenter(match) {
   const pack = getBalancePack();
   const { world, pools } = match;
