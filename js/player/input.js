@@ -95,7 +95,18 @@ export function createInput(canvas, hooks = {}) {
     }
   }
 
+  function isTypingTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (target.isContentEditable) return true;
+    return false;
+  }
+
   function onKeyDown(e) {
+    if (isTypingTarget(e.target)) return;
+    if (typeof hooks.isActive === 'function' && !hooks.isActive()) return;
+
     if (e.code === 'Escape') {
       escapePressed = true;
       if (uiBlocked || chatMode) e.preventDefault();
@@ -148,6 +159,8 @@ export function createInput(canvas, hooks = {}) {
   }
 
   function onKeyUp(e) {
+    if (isTypingTarget(e.target)) return;
+    if (typeof hooks.isActive === 'function' && !hooks.isActive()) return;
     keys[e.code] = false;
     if (e.code === 'Space') fireHeld = false;
   }

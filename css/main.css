@@ -340,13 +340,15 @@ body.is-playing-lock #app {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
   font-weight: bold;
   font-size: clamp(20px, 2.8vw, 38px);
+  line-height: 1.1;
   color: #FF2F14;
   letter-spacing: 0.5px;
   text-shadow: 0 0 12px rgba(255, 47, 20, 0.6);
   font-family: 'Browallia New', 'Trebuchet MS', sans-serif;
+  margin-bottom: -14px;
 }
 
 .tip-text,
@@ -394,6 +396,7 @@ body.is-playing-lock #app {
   }
   .status-info {
     font-size: 18px;
+    margin-bottom: -8px;
   }
   .fill-track {
     top: 4px;

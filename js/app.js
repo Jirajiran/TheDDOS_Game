@@ -141,6 +141,7 @@ export function createApp(dom) {
     throw new Error('Canvas 2D context unavailable');
   }
   state.input = createInput(canvas, {
+    isActive: () => state.appState === AppState.PLAYING,
     onChatPointerDismiss: () => {
       const playerUi = hub.playerUi;
       if (playerUi && playerUi.isChatOpen && playerUi.isChatOpen()) {
