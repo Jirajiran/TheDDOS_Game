@@ -1,4 +1,4 @@
-﻿---
+---
 name: "equals-hashcode-reviewer"
 description: "Review equality, identity, hashing, and value-object semantics so objects behave predictably in collections and comparisons."
 pack: "oop-code-structure-pack"

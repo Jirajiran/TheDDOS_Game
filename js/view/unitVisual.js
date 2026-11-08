@@ -414,7 +414,7 @@ async function ensureArmImage(skinGroupId, which) {
 }
 
 /** Idle composite for menu preview (bottom + arms + body + top). */
-async function ensureIdleComposite(skinGroupId) {
+export async function ensureIdleComposite(skinGroupId) {
   const key = `idle::${skinGroupId}`;
   if (_layerCache.has(key)) return _layerCache.get(key);
   if (_pending.has(key)) return _pending.get(key);

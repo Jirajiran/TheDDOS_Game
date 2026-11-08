@@ -1,0 +1,26 @@
+[
+  {
+    "index": 1,
+    "id": "flatland_survival",
+    "mapFile": "data/maps/flatland_survival.json",
+    "name": "FlatLand Survival (Wave 1-7)",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "Tactical base defense survival on flat ground. Defend your base block (1,000 HP) against 7 waves of enemies.",
+    "image": "img_training",
+    "type": "FLATLAND",
+    "gameMode": "FLAT_SURVIVAL"
+  },
+  {
+    "index": 2,
+    "id": "flatland_resource",
+    "mapFile": "data/maps/flatland_resource.json",
+    "name": "Resource Gathering Outpost",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "Resource extraction zone with generator blocks, crafting stations, and tactical supplies.",
+    "image": "img_crystal",
+    "type": "RESOURCE",
+    "gameMode": "WORLD_TYPE"
+  }
+]

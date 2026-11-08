@@ -1,4 +1,4 @@
-﻿---
+---
 name: "constructor-sanity-checker"
 description: "Review constructors for clarity, invariant establishment, dependency sanity, and avoidance of hidden complexity."
 pack: "oop-code-structure-pack"

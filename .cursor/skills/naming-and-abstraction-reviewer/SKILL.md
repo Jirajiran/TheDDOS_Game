@@ -1,4 +1,4 @@
-﻿---
+---
 name: "naming-and-abstraction-reviewer"
 description: "Review whether names, interfaces, and abstractions communicate intent cleanly and match the underlying domain."
 pack: "oop-code-structure-pack"

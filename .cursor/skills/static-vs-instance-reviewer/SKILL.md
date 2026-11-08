@@ -1,4 +1,4 @@
-﻿---
+---
 name: "static-vs-instance-reviewer"
 description: "Decide whether data or behavior belongs on the class, the instance, or neither."
 pack: "oop-code-structure-pack"

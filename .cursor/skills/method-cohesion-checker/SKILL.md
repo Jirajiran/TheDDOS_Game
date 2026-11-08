@@ -1,4 +1,4 @@
-﻿---
+---
 name: "method-cohesion-checker"
 description: "Check whether methods are doing one coherent job, expose the right abstraction, and avoid mixed responsibility."
 pack: "oop-code-structure-pack"

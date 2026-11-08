@@ -1,4 +1,4 @@
-﻿---
+---
 name: "inheritance-vs-composition-advisor"
 description: "Decide whether a relationship should be modeled through inheritance, composition, aggregation, or delegation."
 pack: "oop-code-structure-pack"

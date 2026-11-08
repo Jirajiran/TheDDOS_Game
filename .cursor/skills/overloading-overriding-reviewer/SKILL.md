@@ -1,4 +1,4 @@
-﻿---
+---
 name: "overloading-overriding-reviewer"
 description: "Review whether overloading and overriding choices are safe, clear, and consistent with polymorphic intent."
 pack: "oop-code-structure-pack"

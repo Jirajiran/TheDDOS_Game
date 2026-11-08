@@ -1,4 +1,4 @@
-﻿---
+---
 name: "object-lifecycle-reviewer"
 description: "Review creation, ownership, mutation, disposal, and state-transition responsibilities across objects."
 pack: "oop-code-structure-pack"

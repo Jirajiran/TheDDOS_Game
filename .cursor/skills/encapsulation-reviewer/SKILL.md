@@ -1,4 +1,4 @@
-﻿---
+---
 name: "encapsulation-reviewer"
 description: "Review fields, methods, and object interactions for information hiding, invariant protection, and leakage of internal state."
 pack: "oop-code-structure-pack"

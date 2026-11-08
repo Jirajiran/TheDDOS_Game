@@ -1,4 +1,4 @@
-﻿---
+---
 name: "class-responsibility-checker"
 description: "Check whether each class has a clear, coherent reason to change and a sensible responsibility boundary."
 pack: "oop-code-structure-pack"

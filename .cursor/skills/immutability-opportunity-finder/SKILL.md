@@ -1,4 +1,4 @@
-﻿---
+---
 name: "immutability-opportunity-finder"
 description: "Identify where value objects, read-only state, or immutable design would reduce bugs and simplify reasoning."
 pack: "oop-code-structure-pack"

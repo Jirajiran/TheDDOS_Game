@@ -1,4 +1,4 @@
-﻿---
+---
 name: "visibility-modifier-reviewer"
 description: "Review public, protected, internal/package, and private surfaces for minimal exposure and clean APIs."
 pack: "oop-code-structure-pack"
