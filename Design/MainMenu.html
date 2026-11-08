@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<!--
+	NOTES:
+	1. All tokens are represented by '$' sign in the template.
+	2. You can write your code only wherever mentioned.
+	3. All occurrences of existing tokens will be replaced by their appropriate values.
+	4. Blank lines will be removed automatically.
+	5. Remove unnecessary comments before creating your template.
+-->
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="authoring-tool" content="Adobe_Animate_CC">
+<title>MainMenu</title>
+<!-- write your code here -->
+<link rel="stylesheet" href="style.css">
+<script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+<script src="MainMenu.js?1794129499417"></script>
+<script>
+// Global Scripts
+	// ===== ไฟล์ HTML: ใน <script> Global Scripts หรือ หน้าต่าง Actions > Global > Scripts =====
+// 1) วางไว้บนสุด ป้องกัน AdobeAn.makeResponsive มาตั้งขนาด canvas ทับ UIScreen ตอน resize
+if (window.AdobeAn) AdobeAn.makeResponsive = function () {};
+// ================= 1. Global Event Bus & State =================
+window.UIBus = window.UIBus || new createjs.EventDispatcher();
+window.UIAudio = window.UIAudio || new createjs.EventDispatcher();
+window.UILog = window.UILog || new createjs.EventDispatcher();
+if (typeof window.UIAudio.muted === "undefined") {
+    window.UIAudio.muted = false;
+}
+// สถานะและ Event Bus ของ Input Text
+window.UIInput = window.UIInput || new createjs.EventDispatcher();
+if (typeof window.UIInput.value === "undefined") window.UIInput.value = "";
+if (typeof window.UIInput.maxLength === "undefined") window.UIInput.maxLength = 20;
+window.UIInput.set = function (val) {
+    window.UIInput.value = val;
+    window.UIInput.dispatchEvent({ type: "INPUT_CHANGE", value: val });
+    window.UIInput.dispatchEvent({ type: "INPUT_SUBMIT", value: val });
+};
+// ================= ระบบ Event Bus กลางสำหรับ Preview (Loose Coupling) =================
+window.UIPreview = window.UIPreview || new createjs.EventDispatcher();
+window.UIPreview.show = function (data) {
+    window.UIPreview.dispatchEvent({ type: "PREVIEW_SHOW", data: data });
+};
+window.UIPreview.clear = function () {
+    window.UIPreview.dispatchEvent({ type: "PREVIEW_CLEAR" });
+};
+// ================= ระบบ Event Bus กลางสำหรับ Sorting (Loose Coupling) =================
+window.UISort = window.UISort || (function () {
+    var bus = new createjs.EventDispatcher();
+    bus.field = "index";
+    bus.order = "asc";
+    bus.set = function (newField) {
+        if (bus.field === newField) {
+            bus.order = bus.order === "asc" ? "desc" : "asc";
+        } else {
+            bus.field = newField;
+            bus.order = "asc";
+        }
+        bus.dispatchEvent({
+            type: "SORT_CHANGE",
+            field: bus.field,
+            order: bus.order
+        });
+    };
+    bus.sortArray = function (array, field, order) {
+        if (!Array.isArray(array)) return [];
+        var f = field || bus.field;
+        var o = order || bus.order;
+        return array.slice().sort(function (a, b) {
+            var valA = a[f], valB = b[f];
+            if (typeof valA === "number" && typeof valB === "number") {
+                return o === "asc" ? valA - valB : valB - valA;
+            } else {
+                var strA = (valA || "").toString().toLowerCase();
+                var strB = (valB || "").toString().toLowerCase();
+                if (strA < strB) return o === "asc" ? -1 : 1;
+                if (strA > strB) return o === "asc" ? 1 : -1;
+                return 0;
+            }
+        });
+    };
+    return bus;
+})();
+// ================= ระบบ Event Bus กลางสำหรับ InRoom & Players (Loose Coupling & State+Event) =================
+window.UIRoom = window.UIRoom || (function () {
+    var bus = new createjs.EventDispatcher();
+    bus.status = "IDLE";
+    bus.currentRoom = null;
+    bus.hashCode = "";
+    bus.players = [];
+    bus.generateHash = function () {
+        var num = Math.floor(1000 + Math.random() * 9000);
+        return "#RM-" + num;
+    };
+    bus.enter = function (roomData) {
+        bus.status = "IN_ROOM";
+        bus.currentRoom = roomData;
+        bus.hashCode = bus.generateHash();
+        var myName = (window.UIInput && window.UIInput.value && window.UIInput.value.trim()) || "Host Player";
+        bus.players = [
+            { index: 1, name: myName, isHost: true }
+        ];
+        bus.dispatchEvent({
+            type: "ROOM_ENTER",
+            status: bus.status,
+            room: roomData,
+            hashCode: bus.hashCode,
+            players: bus.players
+        });
+    };
+    bus.leave = function () {
+        bus.status = "IDLE";
+        bus.currentRoom = null;
+        bus.players = [];
+        bus.hashCode = "";
+        bus.dispatchEvent({ type: "ROOM_LEAVE", status: bus.status });
+    };
+    bus.joinByHash = function (inputHash, joinerName) {
+        if (!inputHash) return;
+        var pName = joinerName || (window.UIInput && window.UIInput.value && window.UIInput.value.trim()) || "Player 2";
+        if (!bus.currentRoom) {
+            bus.status = "IN_ROOM";
+            bus.currentRoom = { name: "Room (" + inputHash + ")", lore: "เชื่อมต่อผ่านรหัส Hash: " + inputHash };
+            bus.hashCode = inputHash;
+            bus.players = [
+                { index: 1, name: "Host Player", isHost: true },
+                { index: 2, name: pName, isHost: false }
+            ];
+            bus.dispatchEvent({
+                type: "ROOM_ENTER",
+                status: bus.status,
+                room: bus.currentRoom,
+                hashCode: bus.hashCode,
+                players: bus.players
+            });
+            return;
+        }
+        bus.status = "IN_ROOM";
+        var newPlayer = { index: bus.players.length + 1, name: pName, isHost: false };
+        bus.players.push(newPlayer);
+        bus.dispatchEvent({
+            type: "PLAYER_JOINED",
+            status: bus.status,
+            player: newPlayer,
+            players: bus.players,
+            hashCode: inputHash
+        });
+    };
+    // Host สั่งเตะ Guest ออกจากห้อง
+    bus.kickPlayer = function (targetIndex) {
+        if (bus.status !== "IN_ROOM" || !bus.players) return;
+        var myName = (window.UIInput && window.UIInput.value && window.UIInput.value.trim()) || "Host Player";
+        var isHost = (bus.players.length > 0 && (bus.players[0].name === myName || bus.players[0].isHost));
+        if (!isHost) return;
+        var kicked = null;
+        bus.players = bus.players.filter(function (p) {
+            if (p.index === targetIndex && !p.isHost) {
+                kicked = p;
+                return false;
+            }
+            return true;
+        });
+        if (kicked) {
+            console.log("👢 [KICK PLAYER] Host เตะผู้เล่น:", kicked.name);
+            bus.dispatchEvent({
+                type: "PLAYER_KICKED",
+                status: bus.status,
+                kickedPlayer: kicked,
+                players: bus.players,
+                hashCode: bus.hashCode
+            });
+        }
+    };
+    return bus;
+})();
+// ================= 2. Screen Controller (Full Viewport & Retina DPR) =================
+if (!window.UIScreen) {
+    window.UIScreen = (function () {
+        var bus = new createjs.EventDispatcher();
+        bus.w = window.innerWidth;
+        bus.h = window.innerHeight;
+        bus.dpr = window.devicePixelRatio || 1;
+        bus.apply = function (force) {
+            var cv = bus.cv || window.canvas || document.querySelector("canvas");
+            var st = bus.st || window.stage || (cv && cv.__stage) || (window.exportRoot && window.exportRoot.stage);
+            if (!cv || !st) return false;
+            if (!bus.cv) bus.cv = cv;
+            if (!bus.st) bus.st = st;
+            var w = window.innerWidth;
+            var h = window.innerHeight;
+            var dpr = window.devicePixelRatio || 1;
+            var bw = Math.round(w * dpr);
+            var bh = Math.round(h * dpr);
+            if (!force && bus._ready &&
+                cv.width === bw && cv.height === bh &&
+                cv.style.width === w + "px" && cv.style.height === h + "px" &&
+                st.scaleX === dpr && st.scaleY === dpr) {
+                return false;
+            }
+            bus._ready = true;
+            [window.anim_container, window.dom_overlay_container].forEach(function (c) {
+                if (c) { c.style.width = w + "px"; c.style.height = h + "px"; }
+            });
+            cv.width = bw;
+            cv.height = bh;
+            cv.style.width = w + "px";
+            cv.style.height = h + "px";
+            st.scaleX = st.scaleY = dpr;
+            bus.w = w; bus.h = h; bus.dpr = dpr;
+            bus.dispatchEvent({ type: "SCREEN_RESIZE", w: w, h: h, dpr: dpr });
+            var t = st.tickOnUpdate;
+            st.tickOnUpdate = false;
+            st.update();
+            st.tickOnUpdate = t;
+            return true;
+        };
+        window.addEventListener("resize", function () { bus.apply(); });
+        return bus;
+    })();
+}
+// ================= 3. UIAnchor ระบบ Snap ขอบจอตาม Offset ตัวเอง (Authoring Snap) =================
+if (!window.UIAnchor) {
+    window.UIAnchor = (function () {
+        var items = [];
+        var api = { base: null };
+        function getBase(it) {
+            return it.base || api.base || { width: 1280, height: 720 };
+        }
+        function snap(it) {
+            var o = it.obj;
+            if (!o || !o.parent) return;
+            var b = getBase(it);
+            var w = window.innerWidth;
+            var h = window.innerHeight;
+            if (!o._origOffset) {
+                o._origOffset = {
+                    initialX: o.x,
+                    initialY: o.y,
+                    offsetRight: b.width - o.x,
+                    offsetBottom: b.height - o.y,
+                    offsetCenterX: o.x - (b.width / 2),
+                    offsetCenterY: o.y - (b.height / 2)
+                };
+            }
+            var orig = o._origOffset;
+            switch (it.anchor) {
+                case "TOP_LEFT":
+                    o.x = orig.initialX;
+                    o.y = orig.initialY;
+                    break;
+                case "TOP_CENTER":
+                    o.x = (w / 2) + orig.offsetCenterX;
+                    o.y = orig.initialY;
+                    break;
+                case "TOP_RIGHT":
+                    o.x = w - orig.offsetRight;
+                    o.y = orig.initialY;
+                    break;
+                case "MIDDLE_LEFT":
+                    o.x = orig.initialX;
+                    o.y = (h / 2) + orig.offsetCenterY;
+                    break;
+                case "CENTER":
+                    o.x = (w / 2) + orig.offsetCenterX;
+                    o.y = (h / 2) + orig.offsetCenterY;
+                    break;
+                case "MIDDLE_RIGHT":
+                    o.x = w - orig.offsetRight;
+                    o.y = (h / 2) + orig.offsetCenterY;
+                    break;
+                case "BOTTOM_LEFT":
+                    o.x = orig.initialX;
+                    o.y = h - orig.offsetBottom;
+                    break;
+                case "BOTTOM_CENTER":
+                    o.x = (w / 2) + orig.offsetCenterX;
+                    o.y = h - orig.offsetBottom;
+                    break;
+                case "BOTTOM_RIGHT":
+                    o.x = w - orig.offsetRight;
+                    o.y = h - orig.offsetBottom;
+                    break;
+            }
+            if (it.fill) {
+                if (o._origScaleX === undefined) {
+                    o._origScaleX = o.scaleX;
+                    o._origScaleY = o.scaleY;
+                }
+                o.x = w / 2;
+                o.y = h / 2;
+                o.scaleX = o._origScaleX * (w / b.width);
+                o.scaleY = o._origScaleY * (h / b.height);
+            }
+        }
+        function snapAll() {
+            for (var i = 0; i < items.length; i++) {
+                snap(items[i]);
+            }
+        }
+        api.attach = function (obj, anchor, base, opts) {
+            if (!obj) return function () {};
+            api.detach(obj);
+            var it = { obj: obj, anchor: anchor, base: base || null, fill: !!(opts && opts.fill) };
+            items.push(it);
+            snap(it);
+            return function () { api.detach(obj); };
+        };
+        api.detach = function (obj) {
+            items = items.filter(function (it) { return it.obj !== obj; });
+        };
+        api.fill = function (obj, base) {
+            return api.attach(obj, "CENTER", base, { fill: true });
+        };
+        api.updateAll = snapAll;
+        window.UIScreen.on("SCREEN_RESIZE", snapAll);
+        return api;
+    })();
+}</script>
+<script>
+var canvas, stage, exportRoot, anim_container, dom_overlay_container, fnStartAnimation;
+function init() {
+	canvas = document.getElementById("canvas");
+	anim_container = document.getElementById("animation_container");
+	dom_overlay_container = document.getElementById("dom_overlay_container");
+	var comp=AdobeAn.getComposition("7E65D3D82A70B04BBA1E8CA78976B597");
+	var lib=comp.getLibrary();
+	handleComplete({},comp);
+}
+function handleComplete(evt,comp) {
+	//This function is always called, irrespective of the content. You can use the variable "stage" after it is created in token create_stage.
+	var lib=comp.getLibrary();
+	var ss=comp.getSpriteSheet();
+	exportRoot = new lib.MainMenu();
+	stage = new lib.Stage(canvas);
+	stage.enableMouseOver();	
+	//Registers the "tick" event listener.
+	fnStartAnimation = function() {
+		stage.addChild(exportRoot);
+		createjs.Ticker.framerate = lib.properties.fps;
+		createjs.Ticker.addEventListener("tick", stage);
+	}	    
+	//Code to support hidpi screens and responsive scaling.
+	AdobeAn.makeResponsive(false,'both',false,1,[canvas,anim_container,dom_overlay_container]);	
+	AdobeAn.compositionLoaded(lib.properties.id);
+	fnStartAnimation();
+}
+</script>
+<!-- write your code here -->
+</head>
+<body onload="init();" style="margin:0px;">
+	<div id="animation_container" style="background-color:rgba(255, 255, 255, 1.00); width:1280px; height:720px">
+		<canvas id="canvas" width="1280" height="720" style="position: absolute; display: block; background-color:rgba(255, 255, 255, 1.00);"></canvas>
+		<div id="dom_overlay_container" style="pointer-events:none; overflow:hidden; width:1280px; height:720px; position: absolute; left: 0px; top: 0px; display: block;">
+		</div>
+	</div>
+</body>
+</html>

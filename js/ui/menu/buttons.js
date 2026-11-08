@@ -293,6 +293,10 @@ export function installMenuButtons(api) {
       const el = api.$(id);
       if (!el) continue;
       api.makeHitTarget(el);
+      if (id === 'btn_Link') {
+        el.setAttribute('title', 'Map Editor');
+        el.setAttribute('aria-label', 'Open Map Editor');
+      }
       el.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();

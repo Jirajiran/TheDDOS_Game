@@ -1,0 +1,82 @@
+[
+  {
+    "index": 1,
+    "name": "Asia East Official #1",
+    "maxroom": 16,
+    "currentroom": 6,
+    "lore": "Dedicated low-latency competitive server hosted in Tokyo for standard 5v5 ranked matches.",
+    "image": "server_tokyo"
+  },
+  {
+    "index": 2,
+    "name": "Guild War Coliseum A",
+    "maxroom": 32,
+    "currentroom": 28,
+    "lore": "Official faction warfare battleground where rival syndicates clash for territory control banners.",
+    "image": "server_guild"
+  },
+  {
+    "index": 3,
+    "name": "Casual Sandbox & Hangout",
+    "maxroom": 10,
+    "currentroom": 3,
+    "lore": "Peaceful non-pvp lobby with infinite respawns and interactive emote mini-games for casual chatter.",
+    "image": "server_casual"
+  },
+  {
+    "index": 4,
+    "name": "Infernal Dragon Raid",
+    "maxroom": 12,
+    "currentroom": 12,
+    "lore": "Mythic tier 12-player raid chamber facing the Molten Drake Ignis. Full room waiting on tank.",
+    "image": "server_dragon"
+  },
+  {
+    "index": 5,
+    "name": "Underground Deathmatch",
+    "maxroom": 20,
+    "currentroom": 14,
+    "lore": "Fast-paced free-for-all bloodbath with instant power-up weapon drops every 30 seconds.",
+    "image": "server_deathmatch"
+  },
+  {
+    "index": 6,
+    "name": "Frozen Citadel Siege",
+    "maxroom": 24,
+    "currentroom": 19,
+    "lore": "Tactical breach and defend mode over a snowbound fortress gate with battering ram mechanics.",
+    "image": "server_citadel"
+  },
+  {
+    "index": 7,
+    "name": "Speedrun Cooperative Hub",
+    "maxroom": 4,
+    "currentroom": 2,
+    "lore": "Duo and quad dungeon time-trial room competing for the weekly global leaderboard crowns.",
+    "image": "server_speedrun"
+  },
+  {
+    "index": 8,
+    "name": "Pirate Cove Escort",
+    "maxroom": 16,
+    "currentroom": 11,
+    "lore": "Payload escort mission along treacherous tropical coastal boardwalks with cannon fire hazards.",
+    "image": "server_pirate"
+  },
+  {
+    "index": 9,
+    "name": "Cyber District Hide & Seek",
+    "maxroom": 12,
+    "currentroom": 8,
+    "lore": "Neon-drenched alleyways where hunters use sonar pulses to track shape-shifting prop fugitives.",
+    "image": "server_cyber"
+  },
+  {
+    "index": 10,
+    "name": "Championship Grand Final",
+    "maxroom": 10,
+    "currentroom": 10,
+    "lore": "Spectated tournament broadcast lobby featuring locked custom loadouts and referee oversight.",
+    "image": "server_final"
+  }
+]

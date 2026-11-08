@@ -334,7 +334,9 @@ export function createApp(dom) {
         if (saveFileInput) saveFileInput.click();
       },
       onAudioToggle: () => {},
-      onLink: () => {},
+      onLink: () => {
+        window.location.href = 'editor.html';
+      },
     });
   }
 

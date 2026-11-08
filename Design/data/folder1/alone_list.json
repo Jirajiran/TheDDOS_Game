@@ -1,0 +1,82 @@
+[
+  {
+    "index": 1,
+    "name": "Beginner Training Ground",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "A tranquil courtyard designed for novice adventurers to master swordplay and spellcasting basics.",
+    "image": "img_training"
+  },
+  {
+    "index": 2,
+    "name": "Whispering Forest",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "Ancient dense woodland where bioluminescent flora guide wanderers past mischievous spirit traps.",
+    "image": "img_forest"
+  },
+  {
+    "index": 3,
+    "name": "Sunken Catacombs",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "Flooded subterranean tomb echoing with whispers of forgotten monarchs and water demons.",
+    "image": "img_catacombs"
+  },
+  {
+    "index": 4,
+    "name": "Desert Labyrinth",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "Shifting sand dunes sheltering clockwork monoliths and ancient mirage puzzles.",
+    "image": "img_desert"
+  },
+  {
+    "index": 5,
+    "name": "Obsidian Sanctuary",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "Sacred volcanic altar carved from glass-hard black volcanic rock radiating latent magma energy.",
+    "image": "img_obsidian"
+  },
+  {
+    "index": 6,
+    "name": "Crystal Mine Depths",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "Deep cavern veins packed with humming resonant crystals that refract unstable arcane light.",
+    "image": "img_crystal"
+  },
+  {
+    "index": 7,
+    "name": "Windspire Peak",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "High altitude watchtower where ferocious gale currents test the agility of aerial gliders.",
+    "image": "img_windspire"
+  },
+  {
+    "index": 8,
+    "name": "Frozen Abyss",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "A permafrost glacial canyon concealing frost wyrm relics encased in unbreakable blue ice.",
+    "image": "img_frozen"
+  },
+  {
+    "index": 9,
+    "name": "Thunder Bastion",
+    "maxroom": 1,
+    "currentroom": 1,
+    "lore": "Electrified fortress pinnacle constantly attracting storm lightning into ancient battery cells.",
+    "image": "img_thunder"
+  },
+  {
+    "index": 10,
+    "name": "Astral Void Chamber",
+    "maxroom": 1,
+    "currentroom": 0,
+    "lore": "Weightless pocket dimension floating between cosmic rifts, accessible only to master dimensionalists.",
+    "image": "img_astral"
+  }
+]

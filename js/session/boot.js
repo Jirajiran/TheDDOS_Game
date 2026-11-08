@@ -12,7 +12,7 @@ import { UNIT_TEMPLATE_FILE } from '../assets/closedCatalog.js';
 
 export const BOOT_ASSETS = Object.freeze([
   { id: 'css', url: 'css/main.css' },
-  { id: 'favicon', url: 'favicon.svg' },
+  { id: 'favicon', url: 'Asset/AssetSVG/favicon.svg' },
   { id: 'place_object', url: 'Asset/AssetSVG/PlaceHold/Object_01.svg' },
   { id: 'unit_template', url: UNIT_TEMPLATE_FILE },
   { id: 'main_menu', url: 'Asset/AssetSVG/Ui/MainMenu.svg' },

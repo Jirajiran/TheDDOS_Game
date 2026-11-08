@@ -729,3 +729,11 @@ OOP skill pack (ติดตั้งแล้ว — เข้าใจโค�
   · Preload/cache hide-show: Path2D cache ตาม type/shape ที่ BOOT + MATCH LOADING · ไม่ alloc ใหม่ตอน craft/equip
 - 2026-10-02 locked tweaks landed: empty-hands cosmetics (no weaponId/FIST fallback) · bulletSpeed×2 (beams 9999) · SHOTGUN_BUCK spread 10° · projectile draw = oriented line
 
+- 2026-11-03 editor.html pause note (โควตาใกล้เต็ม — กลับมาทำต่อ):
+  · [✓] เมนู `btn_Link` → `editor.html` (js/app.js onLink) — Doc editor README เก่ายังบอกว่าไม่มีลิงก์จากเมนู = ล้าสมัย
+  · art Editor: มีงานที่ไม่มาจาก SVG ล้วน · ดึงบางส่วนจาก `theddos-gameWebBrach` · มี SVG ฝังในโค้ด/หน้า — ค้างเคลียร์ทีละชิ้น ห้าม merge ทั้งกิ่ง
+  · ต้องการ Damage & Armor Matrix เป็น **Tab** ในแผง (ตอนนี้เป็น modal ใน panels.js / editor.html แล้ว)
+  · กิ่ง `theddos-gameWebBrach` ไม่สมบูรณ์: Vite พังเพราะขาด `js/config.js` (ของจริงที่รากมีไฟล์นี้) — อย่ารัน/ยัดทั้งโฟลเดอร์
+  · API พร้อมใช้ผ่าน .env/Secrets เท่านั้น — ห้ามใส่คีย์ในแชท/repo
+  · งานถัดไปเมื่อโควตากลับ: (1) Tab matrix (2) เคลียร์ art ฝัง/ปนจากกิ่งทีละจุด (3) เกมยังไม่อ่านไฟล์แมป Export
+
