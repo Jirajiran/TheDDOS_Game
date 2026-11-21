@@ -274,6 +274,16 @@ export function createMainMenuUi(opts) {
     };
     window.UIPreview.select = function (data) {
       window.UIPreview.selected = data;
+      // Center preview = active room candidate for Play (not hard-locked to FlatLand).
+      if (data) {
+        state.selectedRoom = data;
+        if (data.worldPick) state.worldPick = data.worldPick;
+        else if (data.type === "RESOURCE" || data.gameMode === "WORLD_TYPE") {
+          state.worldPick = "resource";
+        } else if (data.type === "FLATLAND" || data.gameMode === "FLAT_SURVIVAL") {
+          state.worldPick = "flat";
+        }
+      }
       window.UIPreview.show(data);
     };
 
@@ -354,8 +364,10 @@ export function createMainMenuUi(opts) {
         if (window.UIPreview && window.UIPreview.select) {
           window.UIPreview.select(roomData);
         }
-        if (roomData && roomData.type === "RESOURCE") {
-          state.worldPick = "loadFile";
+        if (roomData && roomData.worldPick) {
+          state.worldPick = roomData.worldPick;
+        } else if (roomData && (roomData.type === "RESOURCE" || roomData.gameMode === "WORLD_TYPE")) {
+          state.worldPick = "resource";
         } else {
           state.worldPick = "flat";
         }
@@ -497,7 +509,11 @@ export function createMainMenuUi(opts) {
         bus.currentRoom = targetRoom.roomData; // Inherit Host's exact map!
         bus.hashCode = targetRoom.hashCode;
         state.selectedRoom = targetRoom.roomData;
-        state.worldPick = targetRoom.roomData.worldPick || (targetRoom.roomData.type === "RESOURCE" ? "loadFile" : "flat");
+        state.worldPick =
+          targetRoom.roomData.worldPick ||
+          (targetRoom.roomData.type === "RESOURCE" || targetRoom.roomData.gameMode === "WORLD_TYPE"
+            ? "resource"
+            : "flat");
 
         // Determine player name, preventing collision with Host name
         var pName = joinerName || (window.UIInput && window.UIInput.value && window.UIInput.value.trim()) || state.playerName || "Guest";
@@ -695,7 +711,11 @@ export function createMainMenuUi(opts) {
                 console.log("🎮 Host started the game! Following Host with map:", data.room && data.room.name);
                 if (data.room) {
                   state.selectedRoom = data.room;
-                  state.worldPick = data.room.worldPick || (data.room.type === "RESOURCE" ? "loadFile" : "flat");
+                  state.worldPick =
+                    data.room.worldPick ||
+                    (data.room.type === "RESOURCE" || data.room.gameMode === "WORLD_TYPE"
+                      ? "resource"
+                      : "flat");
                 }
                 if (opts.onPlay) opts.onPlay();
               }
@@ -987,10 +1007,11 @@ export function createMainMenuUi(opts) {
       console.log("🎮 [TheDDOS] Start game match from Design menu:", evt);
       if (evt && evt.room) {
         state.selectedRoom = evt.room;
-        if (evt.room.type === "RESOURCE") {
-          state.worldPick = "loadFile";
+        if (evt.room.worldPick) state.worldPick = evt.room.worldPick;
+        else if (evt.room.type === "RESOURCE" || evt.room.gameMode === "WORLD_TYPE") {
+          state.worldPick = "resource";
         } else {
-          state.worldPick = "flat";
+          state.worldPick = evt.room.worldPick || "flat";
         }
       }
 
@@ -1068,10 +1089,21 @@ export function createMainMenuUi(opts) {
       }
     },
     gameModeFromPick() {
+      if (state.selectedRoom && state.selectedRoom.gameMode) {
+        return String(state.selectedRoom.gameMode);
+      }
       if (state.selectedRoom && state.selectedRoom.type === "RESOURCE") {
         return "WORLD_TYPE";
       }
+      if (window.UIPreview && window.UIPreview.selected && window.UIPreview.selected.gameMode) {
+        return String(window.UIPreview.selected.gameMode);
+      }
       return "FLAT_SURVIVAL";
+    },
+    getSelectedRoom() {
+      if (state.selectedRoom) return state.selectedRoom;
+      if (window.UIPreview && window.UIPreview.selected) return window.UIPreview.selected;
+      return null;
     },
     getPlayerName() {
       return (window.UIInput && window.UIInput.value) || state.playerName || 'Player';

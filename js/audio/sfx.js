@@ -1,6 +1,7 @@
 /**
  * Fixed SFX pool. One set of voices per file, built once and kept.
- * A play restarts a voice already in the ring. The ring never grows or shrinks.
+ * Each pack file is fetched once into a Blob URL; play only restarts a voice
+ * already in the ring. The ring never grows or shrinks. Replay does not hit HTTP.
  * A missing row or a file that never becomes ready stays silent.
  */
 
@@ -26,6 +27,8 @@ let unlocked = false;
 /** @type {Record<string, { voices: HTMLAudioElement[], cursor: number, loop: boolean }> | null} */
 let voicesByFile = null;
 let warmPromise = null;
+/** @type {string[]} */
+const blobUrls = [];
 
 export function installAudioPack(doc) {
   const next = doc && doc.sounds;
@@ -61,11 +64,21 @@ function fileFor(id) {
   return null;
 }
 
-function buildPool() {
+/** One HTTP GET per unique file. Voices share the resulting blob: URL. */
+async function fetchBlobUrl(file) {
+  const res = await fetch(`${AUDIO_BASE}${file}`);
+  if (!res.ok) throw new Error(`sfx ${file}: HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  blobUrls.push(url);
+  return url;
+}
+
+async function buildPool() {
   const next = Object.create(null);
-  if (typeof Audio === 'undefined') {
+  if (typeof Audio === 'undefined' || typeof fetch !== 'function') {
     voicesByFile = next;
-    return Promise.resolve(next);
+    return next;
   }
 
   const loopByFile = Object.create(null);
@@ -78,11 +91,25 @@ function buildPool() {
     if (loopByFile[file] == null) loopByFile[file] = loop;
   }
 
-  const pending = [];
   const files = Object.keys(loopByFile);
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+  const sources = await Promise.all(
+    files.map(async (file) => {
+      try {
+        return { file, src: await fetchBlobUrl(file) };
+      } catch (_) {
+        return { file, src: null };
+      }
+    })
+  );
+
+  const pending = [];
+  for (let i = 0; i < sources.length; i++) {
+    const { file, src } = sources[i];
     const loop = loopByFile[file];
+    if (!src) {
+      next[file] = { voices: [], cursor: 0, loop };
+      continue;
+    }
     const count = loop ? 1 : ONE_SHOT_VOICES;
     const voices = new Array(count);
     for (let v = 0; v < count; v++) {
@@ -90,7 +117,7 @@ function buildPool() {
       clip.preload = 'auto';
       clip.loop = loop;
       clip.volume = loop ? 0 : SFX_VOLUME;
-      clip.src = `${AUDIO_BASE}${file}`;
+      clip.src = src;
       voices[v] = clip;
       pending.push(waitReady(clip));
     }
@@ -98,7 +125,8 @@ function buildPool() {
   }
 
   voicesByFile = next;
-  return Promise.all(pending).then(() => next);
+  await Promise.all(pending);
+  return next;
 }
 
 function waitReady(clip) {

@@ -36,7 +36,12 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer((HOST, PORT), NoCacheHandler)
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), NoCacheHandler)
+    except OSError as exc:
+        print(f"[ERROR] Cannot bind http://{HOST}:{PORT}/ — {exc}")
+        print("Another process is using this port. Close the old play-local window or rerun play-local.bat.")
+        raise SystemExit(1) from exc
     print(f"Local Server running at http://{HOST}:{PORT}/")
     print("Press Ctrl+C to stop.")
     try:

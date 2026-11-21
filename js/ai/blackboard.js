@@ -221,6 +221,7 @@ export function syncCombatToBlackboard(ent) {
   bb.combatTargetKind = ent.combatTargetKind || null;
   bb.combatTargetId =
     ent.combatTargetId != null ? ent.combatTargetId : -1;
+  bb.combatTargetEnum = ent.combatTargetEnum || null;
   bb.combatLockTimer = ent.combatLockTimer || 0;
   bb.aggroChase = !!ent.aggroChase;
   bb.aggroBlockId = ent.aggroBlockId != null ? ent.aggroBlockId : -1;
@@ -255,8 +256,13 @@ export function reserveCombatTarget(ent, kind, id, lockTimer) {
 }
 
 /** Map legacy combat kind string → TargetKind for Goals. */
-export function legacyCombatToTargetKind(kind, block) {
-  if (kind === 'unit') return TargetKind.PLAYER;
+export function legacyCombatToTargetKind(kind, block, unit) {
+  if (kind === 'unit') {
+    if (unit && unit.role === 'player') return TargetKind.PLAYER;
+    if (unit && (unit.team | 0) === 1) return TargetKind.PLAYER;
+    if (unit && (unit.team | 0) === 3) return TargetKind.ALLY_UNIT;
+    return TargetKind.ENEMY_UNIT;
+  }
   if (kind === 'base') return TargetKind.BLOCK_BASE;
   if (kind === 'block') {
     if (block && block.isDefeatCondition) return TargetKind.BLOCK_BASE;

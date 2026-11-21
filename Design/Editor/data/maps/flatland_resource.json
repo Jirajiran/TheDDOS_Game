@@ -1,0 +1,41 @@
+{
+  "id": "flatland_resource",
+  "name": "Resource Gathering Outpost",
+  "type": "RESOURCE",
+  "gameMode": "WORLD_TYPE",
+  "worldPick": "resource",
+  "maxroom": 1,
+  "currentroom": 0,
+  "lore": "Resource extraction zone with generator blocks, crafting stations, and tactical supplies.",
+  "image": "img_crystal",
+  "difficulty": "Resource & Exploration",
+  "rules": {
+    "targetWaveToWin": 5,
+    "setupPhaseDurationSec": 90,
+    "waveCountdownSec": 90,
+    "enemiesPerWaveBase": 2,
+    "enemiesPerWaveScale": 1,
+    "waveGroupCount": 2,
+    "loseMode": 2,
+    "lastStand": true,
+    "dodgeQuota": 6
+  },
+  "base": {
+    "maxHp": 1000,
+    "footprintL3": 5,
+    "blockId": "BASE_CORE"
+  },
+  "world": {
+    "type": "resource",
+    "width": 3072,
+    "height": 3072,
+    "pathSize": 1024,
+    "cellsW": 3,
+    "cellsH": 3
+  },
+  "resources": {
+    "trees": 12,
+    "stones": 10,
+    "ores": 8
+  }
+}

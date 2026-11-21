@@ -3,10 +3,18 @@
  */
 
 import { WEAPON_BTN_ART, weaponArtSpec } from '../view/cosmetics.js';
-import { renderRecord } from './recordForm.js';
+import { appendDivider, appendSectionTitle, renderRecord, toReadableLabel } from './recordForm.js';
 
 const DEFAULT_WEAPON_GROUP = 'Weapon_Colt_1911';
 const HOLD_STYLES = ['hold_Gun', 'hold_Gun_2'];
+
+export const WEAPON_TYPES = [
+  { value: 'Normal', label: 'Normal' },
+  { value: 'Shotgun', label: 'Shotgun' },
+  { value: 'Burst', label: 'Burst' },
+  { value: 'Lazer', label: 'Lazer' },
+  { value: 'Melee', label: 'Melee (Tool)' },
+];
 
 export const BLOCK_TAB_KINDS = ['Block', 'Door', 'Generator', 'Factory', 'Base'];
 export const ARMOR_TAB_KINDS = ['Armor', 'Shield'];
@@ -54,11 +62,16 @@ export function weaponPreviewSpec(record) {
   };
 }
 
-const WEAPON_COMMON = [
-  'id', 'label', 'color', 'baseDamage', 'cooldownSec', 'spreadDeg', 'magCapacity', 'maxMags',
-  'maxDistancePath', 'reloadSec', 'infiniteAmmo', 'ammoTypeId', 'targetFaction', 'damageType',
-  'reloadType', 'muzzleLeadSec', 'projectileRadius', 'aiFireRangePath',
+const WEAPON_IDENTITY = ['id', 'label', 'color'];
+const WEAPON_BALLISTICS = [
+  'baseDamage', 'cooldownSec', 'spreadDeg', 'maxDistancePath', 'aiFireRangePath',
+  'muzzleLeadSec', 'projectileRadius',
 ];
+const WEAPON_AMMO = [
+  'magCapacity', 'maxMags', 'reloadSec', 'infiniteAmmo', 'ammoTypeId',
+  'reloadType', 'damageType', 'targetFaction',
+];
+const WEAPON_COMMON = WEAPON_IDENTITY.concat(WEAPON_BALLISTICS, WEAPON_AMMO);
 
 const WEAPON_EXTRA = {
   Normal: ['bulletSpeedPxSec', 'pierceUnits'],
@@ -101,12 +114,18 @@ const EFFECT = {
 
 const SKILL_HEAD = ['id', 'label', 'castTimeSec', 'activeDurationSec', 'cooldownSec'];
 
-function categorySelect(label, names, value, onChange) {
+function categorySelect(label, items, value, onChange) {
   const select = document.createElement('select');
-  for (let i = 0; i < names.length; i++) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const option = document.createElement('option');
-    option.value = names[i];
-    option.textContent = names[i];
+    if (item && typeof item === 'object') {
+      option.value = item.value;
+      option.textContent = item.label;
+    } else {
+      option.value = item;
+      option.textContent = item;
+    }
     select.appendChild(option);
   }
   select.value = value;
@@ -139,7 +158,7 @@ function applyWeapon(record, category) {
   else record.burstCount = 1;
   if (category === 'Lazer') record.beamDurationSec = record.beamDurationSec > 0 ? record.beamDurationSec : 1;
   else record.beamDurationSec = 0;
-  ensure(record, WEAPON_COMMON.concat(WEAPON_EXTRA[category]), {
+  ensure(record, WEAPON_COMMON.concat(WEAPON_EXTRA[category] || WEAPON_EXTRA.Normal), {
     label: record.id || '',
     color: '#6b9fbf',
     baseDamage: 10,
@@ -150,9 +169,9 @@ function applyWeapon(record, category) {
     maxDistancePath: 1,
     reloadSec: 1.4,
     infiniteAmmo: category === 'Lazer',
-    ammoTypeId: category === 'Lazer' ? null : 'AMMO_5_56',
+    ammoTypeId: category === 'Lazer' ? null : 'Ammo_5_56',
     targetFaction: 'ENEMY',
-    damageType: category === 'Lazer' ? 'LAZER' : 'BULLET',
+    damageType: category === 'Lazer' ? 'Lazer' : 'Bullet',
     reloadType: 'MAGAZINE',
     muzzleLeadSec: 0.02,
     projectileRadius: 9,
@@ -166,6 +185,32 @@ function applyWeapon(record, category) {
   });
 }
 
+const GUN_ONLY_KEYS = WEAPON_BALLISTICS.concat(
+  WEAPON_AMMO,
+  ['bulletSpeedPxSec', 'pierceUnits', 'pelletCount', 'burstCount', 'burstIntervalSec', 'beamDurationSec'],
+  ['projectileMode', 'pierceConfig', 'model', 'holdStyle']
+);
+
+const TOOL_ONLY_KEYS = [
+  'kind', 'toolTier', 'maxStack', 'harvestDamage', 'structureDamage',
+  'repairAmount', 'meleeRole', 'activeDurationSec',
+];
+
+export function prepareWeaponAsTool(record) {
+  for (let i = 0; i < GUN_ONLY_KEYS.length; i++) {
+    const k = GUN_ONLY_KEYS[i];
+    if (k !== 'cooldownSec') delete record[k];
+  }
+  applyItem(record, 'Tool');
+}
+
+export function prepareToolAsWeapon(record, category) {
+  for (let i = 0; i < TOOL_ONLY_KEYS.length; i++) {
+    delete record[TOOL_ONLY_KEYS[i]];
+  }
+  applyWeapon(record, category || 'Normal');
+}
+
 export function itemHeadings() {
   return Object.keys(ITEM_FIELDS);
 }
@@ -174,7 +219,14 @@ export function skillEffectNames() {
   return Object.keys(EFFECT);
 }
 
-const LOCKED_BACKPACK_IDS = { BACKPACK_T1: true, BACKPACK_T2: true, BACKPACK_T3: true };
+const LOCKED_BACKPACK_IDS = {
+  Backpack_T1: true,
+  Backpack_T2: true,
+  Backpack_T3: true,
+  BACKPACK_T1: true,
+  BACKPACK_T2: true,
+  BACKPACK_T3: true,
+};
 
 export function isLockedBackpack(record) {
   return !!(record && !record.pending && LOCKED_BACKPACK_IDS[record.id]);
@@ -183,7 +235,7 @@ export function isLockedBackpack(record) {
 export function itemCategory(record) {
   if (record.kind === 'WEAPON') return 'Weapon';
   if (record.kind === 'RESOURCE') {
-    if (typeof record.id === 'string' && record.id.indexOf('AMMO_') === 0) return 'Ammo';
+    if (typeof record.id === 'string' && /^Ammo_/i.test(record.id)) return 'Ammo';
     return 'Resource';
   }
   if (record.kind === 'TOOL') return 'Tool';
@@ -226,7 +278,7 @@ function applyItem(record, category) {
     typeId: category === 'Ammo' ? 'RESOURCE' : category.toUpperCase(),
     maxStack: category === 'Resource' || category === 'Ammo' ? 64 : 1,
     maxHp: 100,
-    armorType: 'DEFAULT',
+    armorType: 'Default',
     skillId: '',
     pierceCost: 1,
     walkSolid: true,
@@ -289,13 +341,14 @@ export function blankFor(key, category) {
 function kindNote(parent, text) {
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.textContent = text;
+  note.textContent = toReadableLabel(text) || text;
   parent.appendChild(note);
 }
 
 function deleteButton(ctx, id) {
   const button = document.createElement('button');
   button.type = 'button';
+  button.className = 'is-delete-record';
   button.textContent = 'Delete';
   button.addEventListener('click', async () => {
     const yes = ctx.confirm
@@ -309,7 +362,7 @@ function deleteButton(ctx, id) {
 function finishDraft(key, record) {
   const category = record.pendingCategory;
   if (key === 'weaponId') {
-    if (category === 'Melee') applyItem(record, 'Tool');
+    if (category === 'Melee' || category === 'Tool') applyItem(record, 'Tool');
     else if (category === 'Gun') applyWeapon(record, 'Normal');
     else applyWeapon(record, category || 'Normal');
   } else if (key === 'itemId') applyItem(record, category || 'Block');
@@ -326,10 +379,17 @@ function finishDraft(key, record) {
   delete record.pendingCategory;
 }
 
+function normalizedWeaponDraftType(pendingCategory) {
+  if (pendingCategory === 'Melee' || pendingCategory === 'Tool') return 'Melee';
+  if (pendingCategory === 'Shotgun' || pendingCategory === 'Burst' || pendingCategory === 'Lazer') return pendingCategory;
+  return 'Normal';
+}
+
 function renderDraft(body, key, record, ctx) {
   if (key === 'weaponId') {
-    const piece = record.pendingCategory === 'Melee' ? 'Melee' : 'Gun';
-    body.appendChild(categorySelect('Piece', ['Gun', 'Melee'], piece, (next) => {
+    const draftType = normalizedWeaponDraftType(record.pendingCategory);
+    record.pendingCategory = draftType;
+    body.appendChild(categorySelect('Type', WEAPON_TYPES, draftType, (next) => {
       record.pendingCategory = next;
       if (ctx.touch) ctx.touch(true);
     }));
@@ -432,6 +492,8 @@ export function renderTyped(body, key, record, ctx) {
   if (key === 'weaponId') {
     const category = weaponCategory(record);
     kindNote(body, category);
+    appendDivider(body);
+    appendSectionTitle(body, 'Appearance & ID');
     const groups = weaponArtGroups();
     const artValue = shownWeaponModel(record);
     if (groups.indexOf(artValue) < 0) groups.push(artValue);
@@ -439,20 +501,36 @@ export function renderTyped(body, key, record, ctx) {
       record.model = next;
       ctx.touch(true);
     }));
-    body.appendChild(categorySelect('Hold style', HOLD_STYLES, shownWeaponHold(record), (next) => {
+    body.appendChild(categorySelect('Hold', HOLD_STYLES, shownWeaponHold(record), (next) => {
       record.holdStyle = next;
       ctx.touch(true);
     }));
     renderRecord(body, record, record, Object.assign({}, ctx, {
-      only: WEAPON_COMMON.concat(WEAPON_EXTRA[category] || WEAPON_EXTRA.Normal),
+      only: WEAPON_IDENTITY,
     }));
+    appendDivider(body);
+    appendSectionTitle(body, 'Ballistics');
+    renderRecord(body, record, record, Object.assign({}, ctx, {
+      only: WEAPON_BALLISTICS.concat(WEAPON_EXTRA[category] || WEAPON_EXTRA.Normal),
+    }));
+    appendDivider(body);
+    appendSectionTitle(body, 'Ammo & Target');
+    renderRecord(body, record, record, Object.assign({}, ctx, {
+      only: WEAPON_AMMO,
+    }));
+    appendDivider(body);
     body.appendChild(deleteButton(ctx, record.id));
     return;
   }
   if (key === 'itemId') {
     const category = itemCategory(record);
-    const fields = storedItemKeys(category) || ITEM_FIELDS.Block;
-    kindNote(body, isLockedBackpack(record) ? 'Backpack' : category);
+    let fields = storedItemKeys(category) || ITEM_FIELDS.Block;
+    // Turret: keep typeId in data, but do not show it in the form.
+    if (category === 'Turret') {
+      fields = fields.filter((name) => name !== 'typeId');
+    }
+    kindNote(body, isLockedBackpack(record) ? 'Backpack' : category === 'Tool' ? 'Melee (Tool)' : category);
+    appendDivider(body);
     if (category === 'Weapon' && record.maxStack !== 1) record.maxStack = 1;
     const formCtx = Object.assign({}, ctx, {
       only: fields,
@@ -476,17 +554,23 @@ export function renderTyped(body, key, record, ctx) {
       body.appendChild(pierce);
     }
     if (category === 'Block') renderBlockSkill(body, record, ctx);
+    appendDivider(body);
     body.appendChild(deleteButton(ctx, record.id));
     return;
   }
   if (key === 'skillId') {
-    const type = (record.effect && record.effect.type) || '';
+    let type = (record.effect && record.effect.type) || '';
+    const typeUpper = String(type).toUpperCase();
+    // Skills tab: never surface Tile / Backpack labels.
+    if (typeUpper === 'TILE' || typeUpper.indexOf('BACKPACK') >= 0) type = '';
     kindNote(body, type || 'Skill');
+    appendDivider(body);
     renderRecord(body, record, record, Object.assign({}, ctx, { only: SKILL_HEAD }));
     const effect = record.effect || {};
     const box = document.createElement('div');
     box.className = 'editor-fields';
     const keys = Object.keys(effect).filter((name) => name !== 'type' && name !== 'id');
+    if (keys.length) appendDivider(body);
     renderRecord(box, effect, effect, {
       choices: ctx.choices,
       canWear: ctx.canWear,
@@ -495,6 +579,7 @@ export function renderTyped(body, key, record, ctx) {
       only: keys,
     });
     body.appendChild(box);
+    appendDivider(body);
     body.appendChild(deleteButton(ctx, record.id));
   }
 }

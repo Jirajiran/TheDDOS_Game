@@ -21,6 +21,15 @@ import {
 import { getActiveSlot, isWeaponSlot } from '../player/inventory.js';
 import { isMeleeSwingOpen } from '../combat/meleeTools.js';
 import { getBtnActionArmPoses } from './weaponBtnArt.js';
+import {
+  ART_POOL_PIXEL,
+  artPoolKeyLayer,
+  ensureEntryImage,
+  getGameplayArtPool,
+  rasterMarkupToEntry,
+  setGameplayArtPool,
+  yieldPaint,
+} from './artPool.js';
 
 export const UNIT_TEMPLATE_URL = UNIT_TEMPLATE_FILE;
 
@@ -133,7 +142,9 @@ const BODY_ID_RE = /^(Body|Outfit)/i;
 const ASSET_BOTTOM_RE = /^Pivot_Asset_Bottom/i;
 const ASSET_TOP_RE = /^Pivot_Asset_Top/i;
 
-const RASTER_PX = 128;
+/** Native pool resolution per SizeView cell (lineless). Arms use same pixel density. */
+const RASTER_PX = ART_POOL_PIXEL;
+const ARM_RASTER_PX = ART_POOL_PIXEL * 2;
 const LOCAL_VB = Object.freeze({ x: -32, y: -36, w: 64, h: 64 });
 const ARM_VB = Object.freeze({ x: -80, y: -80, w: 160, h: 160 });
 
@@ -166,6 +177,21 @@ export function enemySkinGroupId() {
   const pack = GAME_PACK;
   if (pack && pack.enemyDefaultSkinGroupId) return pack.enemyDefaultSkinGroupId;
   return closedModelGroupId('model.unit.default_2') || 'Default_skin_2';
+}
+
+/**
+ * Skin from unit sheet / archetype `model` (closed catalog) — not team/role hard lock.
+ * @param {object|null} record unit sheet, archetype, or { model, skinGroupId }
+ * @param {string} [fallbackGroupId]
+ */
+export function skinGroupIdFromSheet(record, fallbackGroupId) {
+  if (record && record.skinGroupId) return String(record.skinGroupId);
+  if (record && record.model) {
+    const gid = closedModelGroupId(record.model);
+    if (gid) return gid;
+  }
+  if (fallbackGroupId) return fallbackGroupId;
+  return enemySkinGroupId();
 }
 
 function parseMatrixAttr(el) {
@@ -254,19 +280,10 @@ function hideEl(el) {
   el.style.display = 'none';
 }
 
-function svgToImage(markup) {
-  return new Promise((resolve) => {
-    if (!markup) {
-      resolve(null);
-      return;
-    }
-    const img = new Image();
-    img.decoding = 'async';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src =
-      'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
-  });
+async function svgMarkupToPoolImage(markup, destW, destH) {
+  const entry = await rasterMarkupToEntry(markup, destW, destH);
+  if (!entry) return null;
+  return (await ensureEntryImage(entry)) || null;
 }
 
 function wrapSvg(inner, vb, px) {
@@ -351,8 +368,21 @@ async function ensureLayerImage(skinGroupId, kind) {
       LOCAL_VB,
       RASTER_PX
     );
-    const img = await svgToImage(markup);
+    const img = await svgMarkupToPoolImage(markup, RASTER_PX, RASTER_PX);
     _layerCache.set(key, img);
+    const pool = getGameplayArtPool() || setGameplayArtPool(new Map());
+    if (img) {
+      pool.set(artPoolKeyLayer(kind, skinGroupId), {
+        cellSize: ART_POOL_PIXEL,
+        frameW: RASTER_PX,
+        frameH: RASTER_PX,
+        anchorX: RASTER_PX / 2,
+        anchorY: RASTER_PX / 2,
+        pixelArt: true,
+        dataUrl: img.src,
+        image: img,
+      });
+    }
     return img;
   })().finally(() => _pending.delete(key));
 
@@ -402,10 +432,23 @@ async function ensureArmImage(skinGroupId, which) {
     const markup = wrapSvg(
       new XMLSerializer().serializeToString(clone),
       ARM_VB,
-      RASTER_PX
+      ARM_RASTER_PX
     );
-    const img = await svgToImage(markup);
+    const img = await svgMarkupToPoolImage(markup, ARM_RASTER_PX, ARM_RASTER_PX);
     _armCache.set(key, img);
+    const pool = getGameplayArtPool() || setGameplayArtPool(new Map());
+    if (img) {
+      pool.set(artPoolKeyLayer('arm' + which, skinGroupId), {
+        cellSize: ART_POOL_PIXEL,
+        frameW: ARM_RASTER_PX,
+        frameH: ARM_RASTER_PX,
+        anchorX: ARM_RASTER_PX / 2,
+        anchorY: ARM_RASTER_PX / 2,
+        pixelArt: true,
+        dataUrl: img.src,
+        image: img,
+      });
+    }
     return img;
   })().finally(() => _pending.delete(key));
 
@@ -442,7 +485,7 @@ export async function ensureIdleComposite(skinGroupId) {
       LOCAL_VB,
       RASTER_PX
     );
-    const img = await svgToImage(markup);
+    const img = await svgMarkupToPoolImage(markup, RASTER_PX, RASTER_PX);
     _layerCache.set(key, img);
     return img;
   })().finally(() => _pending.delete(key));
@@ -451,12 +494,47 @@ export async function ensureIdleComposite(skinGroupId) {
   return p;
 }
 
-export async function initUnitVisualFromSvgText(svgText) {
+/**
+ * Bake all closed-model layers into the gameplay art pool (lineless).
+ * Arm pose matrices stay from SVG parse — only bitmaps are pooled.
+ * @param {(label: string, done: number, total: number) => void} [onProgress]
+ */
+export async function buildGameplayLayerArtPool(onProgress) {
+  if (!_svgText) return getGameplayArtPool();
+  const pool = getGameplayArtPool() || setGameplayArtPool(new Map());
+  const skins = listClosedModelGroupIds();
+  const kinds = ['body', 'assetBottom', 'assetTop'];
+  const total = skins.length * (kinds.length + 2 + 1);
+  let done = 0;
+  const report = (label) => {
+    if (onProgress) onProgress(label, done, total);
+  };
+  for (let i = 0; i < skins.length; i++) {
+    const s = skins[i];
+    report('Art pool · layers ' + s);
+    for (let k = 0; k < kinds.length; k++) {
+      await ensureLayerImage(s, kinds[k]);
+      done += 1;
+    }
+    await ensureArmImage(s, 1);
+    done += 1;
+    await ensureArmImage(s, 2);
+    done += 1;
+    await ensureIdleComposite(s);
+    done += 1;
+    await yieldPaint();
+  }
+  report('Art pool ready · ' + pool.size + ' layer sprites');
+  return pool;
+}
+
+export async function initUnitVisualFromSvgText(svgText, onProgress) {
   _svgText = String(svgText || '');
   _layerCache.clear();
   _armCache.clear();
   _pending.clear();
   _armPoses.clear();
+  setGameplayArtPool(new Map());
   _ready = false;
   if (!_svgText) return false;
 
@@ -465,20 +543,7 @@ export async function initUnitVisualFromSvgText(svgText) {
   _defsHtml = defs ? defs.innerHTML : '';
   loadArmPoses(doc);
 
-  const skins = listClosedModelGroupIds();
-  const jobs = [];
-  for (let i = 0; i < skins.length; i++) {
-    const s = skins[i];
-    jobs.push(
-      ensureLayerImage(s, 'body'),
-      ensureLayerImage(s, 'assetBottom'),
-      ensureLayerImage(s, 'assetTop'),
-      ensureArmImage(s, 1),
-      ensureArmImage(s, 2),
-      ensureIdleComposite(s)
-    );
-  }
-  await Promise.all(jobs);
+  await buildGameplayLayerArtPool(onProgress);
 
   _ready = true;
   return true;
@@ -751,9 +816,14 @@ export function getUnitArm1PivotWorld(unit) {
 }
 
 function resolveSkinGroup(unit) {
-  return unit.role === 'enemy'
-    ? enemySkinGroupId()
-    : unit.skinGroupId || 'Default_skin_1';
+  // Always prefer the instance skin from sheet/spawn — never force by team/role.
+  if (unit && unit.skinGroupId) return unit.skinGroupId;
+  if (unit && unit.role === 'player') {
+    return (
+      (GAME_PACK && GAME_PACK.playerDefaultSkinGroupId) || 'Default_skin_1'
+    );
+  }
+  return enemySkinGroupId();
 }
 
 function facingOffset(unit) {
@@ -778,6 +848,8 @@ function unitScaleOf(unit) {
 
 function drawLocalLayer(ctx, img, unitScale) {
   if (!img) return;
+  const smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     img,
     LOCAL_VB.x * unitScale,
@@ -785,11 +857,13 @@ function drawLocalLayer(ctx, img, unitScale) {
     LOCAL_VB.w * unitScale,
     LOCAL_VB.h * unitScale
   );
+  ctx.imageSmoothingEnabled = smooth;
 }
 
 function drawArm(ctx, img, mat, unitScale) {
   if (!img || !mat) return;
   ctx.save();
+  ctx.imageSmoothingEnabled = false;
   ctx.transform(
     mat.a,
     mat.b,

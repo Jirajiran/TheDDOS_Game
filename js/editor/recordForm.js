@@ -5,6 +5,53 @@
 
 const TEXT_KEYS = { id: true, label: true, description: true };
 
+/** Gun / model tokens kept as proper nouns (not Title_Case). */
+const CATALOG_ACRONYMS = {
+  SMG: 'SMG',
+  AK47: 'AK47',
+  RPG: 'RPG',
+  M1991: 'M1991',
+  M1911: 'M1911',
+  KAR98: 'KAR98',
+  '50CAL': '50Cal',
+  HP: 'HP',
+  AI: 'AI',
+  ID: 'ID',
+  T1: 'T1',
+  T2: 'T2',
+  T3: 'T3',
+};
+
+/**
+ * Catalog id display / storage form: GRUNT_BASIC → Grunt_Basic.
+ * Keeps gun tokens like SMG / M1991; normal words (Lazer, Grunt) use Title case.
+ */
+export function formatCatalogId(raw) {
+  if (raw == null || raw === '') return '';
+  const text = String(raw).trim();
+  if (!text) return '';
+  const parts = text.split('_');
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) {
+      out.push(part);
+      continue;
+    }
+    const upper = part.toUpperCase();
+    if (CATALOG_ACRONYMS[upper]) {
+      out.push(CATALOG_ACRONYMS[upper]);
+      continue;
+    }
+    if (/^\d/.test(part)) {
+      out.push(part.toLowerCase() === part ? part : part.charAt(0) + part.slice(1).toLowerCase());
+      continue;
+    }
+    out.push(part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+  }
+  return out.join('_');
+}
+
 export const UNIT_MODEL_IDS = ['model.unit.default_1', 'model.unit.default_2'];
 
 const WEAPON_CHOICE_KEYS = {
@@ -17,7 +64,8 @@ const WEAPON_CHOICE_KEYS = {
 export function shownUnitModel(record) {
   const model = record && record.model;
   if (UNIT_MODEL_IDS.indexOf(model) >= 0) return model;
-  return record && record.id === 'PLAYER' ? UNIT_MODEL_IDS[0] : UNIT_MODEL_IDS[1];
+  // No hard Player→default_1 lock — unset sheet uses default_2 until author picks.
+  return UNIT_MODEL_IDS[1];
 }
 
 export function cssColor(value) {
@@ -71,6 +119,82 @@ function mergeShape(a, b) {
   return a === undefined ? b : a;
 }
 
+/** Hover help text for settings fields (shown in left Trail #editor-field-help). */
+const FIELD_HELP = {
+  id: 'Stable catalog id referenced by maps, loadouts, craft, and spawns. Renaming retargets linked rows.',
+  label: 'Human-readable name in editor lists and UI. Does not change the catalog id.',
+  color: 'Swatch used in list thumbs and simple block previews on the map.',
+  model: 'Unit body SVG group from the pack art template (SizeView).',
+  hpRange: 'Min/max HP roll for this unit template when it spawns or is placed.',
+  speed: 'Base move speed in world units per second for this unit.',
+  armorType: 'Armor column in the damage matrix. Multipliers below show damage×armor for this type.',
+  preferredRange: 'AI preferred fight distance band (closer / mid / far) for this unit.',
+  skills: 'Skill ids granted to this unit (passive or activatable).',
+  startingLoadout: 'Starting inventory rows (items/weapons) this unit holds when it spawns. Hover a row to preview it in Trail.',
+  currentSlot: 'Which loadout slot index is held/active first when the unit appears.',
+  weaponId: 'Weapon template this turret fires. Most gun stats (mag, reload, damage type) are authored on the Weapons sheet; unit loadout picks which weapon id a unit holds under the Units tab.',
+  defaultWeapon: 'Fallback gun id if loadout has no weapon. Set on the Units tab loadout when possible.',
+  footprint: 'Occupied size in L3 cells (64×64). Minimum 1×1. Used for place overlap.',
+  maxHp: 'Maximum hit points for this placeable template. Placed instances copy this as Max HP.',
+  detectRadius: 'How far (world units) a turret searches for targets.',
+  magCapacity: 'Rounds per magazine. Authored on the Weapons sheet; units only pick which weapon id to hold (Units → Loadout).',
+  maxMags: 'Spare magazines carried with the weapon template (Weapons sheet). Units reference the weapon via Loadout.',
+  reloadSec: 'Reload duration in seconds (Weapons sheet). Units do not override this — they hold a weapon id.',
+  fireIntervalSec: 'Time between shots (Weapons sheet). Assign the weapon on Units → Loadout.',
+  damage: 'Base damage before the armor matrix (Weapons sheet). Units pick the weapon id in Loadout.',
+  damageType: 'Damage row in the matrix (Weapons sheet). Pair with a unit armorType to resolve final multipliers.',
+  ammoTypeId: 'Ammo item consumed when firing (Weapons sheet). Units hold the weapon; ammo is weapon-defined.',
+  infiniteAmmo: 'If on, this weapon/turret does not consume magazines.',
+  pierceCost: 'How much pierce budget a projectile spends hitting this structure.',
+  walkSolid: 'Blocks unit walking when true.',
+  projectileSolid: 'Blocks projectiles when true (unless allow pass).',
+  allowProjectilePass: 'Lets projectiles pass even if solid flags are set.',
+  canToggle: 'Door can open/close in play.',
+  Wave: 'Wave index locked to the side rail tab (wave N always equals N). Not editable here.',
+  Time: 'Seconds from match start before this wave’s units begin spawning.',
+  Team: 'Team id for seats, waves, or placed instances (0 = neutral).',
+  Unit: 'Unit template used for this seat or wave row. Hover to preview in Trail.',
+  Count: 'How many copies of that unit spawn in this wave row.',
+  Area: 'Map area this spawn is tied to (or free point if unset).',
+  Art: 'Weapon SVG art group for preview and in-world draw (Weapons sheet).',
+  Hold: 'Hold pose when a unit aims this weapon (Weapons sheet).',
+  typeId: 'Internal placeable type tag. Not shown for Turrets in this editor.',
+};
+
+/** Append damage×armor multipliers for an armor column. */
+export function armorMatrixHelpLine(doc, armorName) {
+  if (!doc || !armorName) return '';
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix || typeof matrix !== 'object') return '';
+  const parts = [];
+  const rows = Object.keys(matrix);
+  for (let i = 0; i < rows.length; i++) {
+    const row = matrix[rows[i]];
+    if (!row || typeof row !== 'object') continue;
+    if (row[armorName] == null) continue;
+    parts.push(toReadableLabel(rows[i]) + '=' + row[armorName]);
+  }
+  if (!parts.length) return '';
+  return ' Values vs this armor: ' + parts.join(', ') + '.';
+}
+
+export function getFieldHelp(key, doc, currentValue) {
+  if (!key) return '';
+  const raw = String(key);
+  let text = '';
+  if (FIELD_HELP[raw]) text = FIELD_HELP[raw];
+  else {
+    const readable = toReadableLabel(raw);
+    if (FIELD_HELP[readable]) text = FIELD_HELP[readable];
+    else text = readable ? readable + ' — settings field for this record.' : '';
+  }
+  if ((raw === 'armorType' || toReadableLabel(raw) === 'Armor') && doc) {
+    const armor = currentValue || '';
+    text += armorMatrixHelpLine(doc, armor);
+  }
+  return text;
+}
+
 export function toReadableLabel(str) {
   if (!str) return '';
   const s = String(str);
@@ -80,75 +204,166 @@ export function toReadableLabel(str) {
     SURVIVE_RETREAT: 'Survive / Retreat',
     SEEK_HEAL_POINT: 'Seek Heal Point',
     REGROUP_ALLIES: 'Regroup Allies',
-    BLOCK_TURRET: 'Block: Turret',
-    BLOCK_BASE: 'Block: Base',
+    BLOCK_TURRET: 'Turret',
+    BLOCK_BASE: 'Base',
     MAGAZINE: 'Magazine',
-    INDIVIDUAL_SHELL: 'Individual Shell',
-    PROJECTILE_RAYCAST: 'Raycast Projectile',
-    MELEE_OBJECT: 'Melee Object',
+    INDIVIDUAL_SHELL: 'Shell',
+    PROJECTILE_RAYCAST: 'Raycast',
+    MELEE_OBJECT: 'Melee',
     EXPLOSION: 'Explosion',
+    Explosion: 'Explosion',
     BULLET: 'Bullet',
+    Bullet: 'Bullet',
     LAZER: 'Laser',
+    Lazer: 'Laser',
     DEFAULT: 'Default',
+    Default: 'Default',
+    MELEE_SWING: 'Melee Swing',
+    TAUNT_PULSE: 'Taunt Pulse',
+    SPEED_BOOST: 'Speed Boost',
+    SHIELD_OVERCHARGE: 'Shield Overcharge',
+    HEAL_SELF: 'Heal Self',
+    PASS_THROUGH: 'Pass Through',
+    HEAL_RADIUS: 'Heal Radius',
     MEDIUM: 'Medium',
     CLOSE: 'Close',
     LONG: 'Long',
     ENEMY: 'Enemy',
     FRIENDLY: 'Friendly',
     id: 'ID',
-    model: 'Unit Model',
-    hpRange: 'HP Range (Min / Max)',
-    startingLoadout: 'Starting Loadout',
+    label: 'Label',
+    color: 'Color',
+    model: 'Model',
+    hpRange: 'HP Range',
+    startingLoadout: 'Loadout',
     skills: 'Skills',
-    currentSlot: 'Active Slot',
-    armorType: 'Armor Type',
-    speed: 'Movement Speed',
-    behaviorFlags: 'Behavior Settings',
-    allowedGoals: 'Allowed Goals',
-    targetPriorityList: 'Target Priorities',
-    retreatHpRatio: 'Retreat HP Ratio',
-    preferredRange: 'Preferred Range',
-    canRegroup: 'Can Regroup',
-    damageType: 'Damage Type',
-    reloadType: 'Reload Type',
-    targetFaction: 'Target Faction',
-    ammoTypeId: 'Ammo Type',
-    baseDamage: 'Base Damage',
-    cooldownSec: 'Cooldown (sec)',
-    bulletSpeedPxSec: 'Bullet Speed (px/s)',
-    explosionRadius: 'Explosion Radius',
-    explosionDamage: 'Explosion Damage',
-    magCapacity: 'Mag Capacity',
+    currentSlot: 'Slot',
+    armorType: 'Armor',
+    speed: 'Speed',
+    behaviorFlags: 'Behavior',
+    allowedGoals: 'Goals',
+    targetPriorityList: 'Priorities',
+    retreatHpRatio: 'Retreat HP',
+    preferredRange: 'Range',
+    canRegroup: 'Regroup',
+    damageType: 'Dmg Type',
+    reloadType: 'Reload',
+    targetFaction: 'Faction',
+    ammoTypeId: 'Ammo ID',
+    baseDamage: 'Damage',
+    cooldownSec: 'Cooldown',
+    bulletSpeedPxSec: 'Bullet Spd',
+    explosionRadius: 'Exp Radius',
+    explosionDamage: 'Exp Dmg',
+    magCapacity: 'Mag Cap',
     maxMags: 'Max Mags',
-    reloadSec: 'Reload Time (sec)',
-    spreadDeg: 'Spread (deg)',
-    maxDistancePath: 'Max Range (Path)',
+    reloadSec: 'Reload (s)',
+    spreadDeg: 'Spread',
+    maxDistancePath: 'Max Range',
+    aiFireRangePath: 'AI Range',
+    muzzleLeadSec: 'Muzzle Lead',
+    projectileRadius: 'Proj Rad',
+    pierceUnits: 'Pierce',
+    pelletCount: 'Pellets',
+    burstCount: 'Burst',
+    burstIntervalSec: 'Burst Gap',
+    beamDurationSec: 'Beam (s)',
+    infiniteAmmo: 'Inf Ammo',
+    harvestDamage: 'Harvest Dmg',
+    structureDamage: 'Struct Dmg',
+    repairAmount: 'Repair',
+    activeDurationSec: 'Active (s)',
+    castTimeSec: 'Cast (s)',
+    toolTier: 'Tier',
+    meleeRole: 'Role',
+    maxStack: 'Max Stack',
+    damageReduction: 'Dmg Reduct',
+    markerColor: 'Marker',
+    shieldMaxHp: 'Shield HP',
+    shieldRadius: 'Radius',
+    shieldOffset: 'Offset',
+    shieldPierceCost: 'Pierce Cost',
+    shieldAbsorbRatio: 'Absorb',
+    shieldRegenPerSec: 'Regen/s',
+    backpackTier: 'Tier',
+    backpackBonusSlots: 'Bonus Slots',
+    walkSolid: 'Walk Solid',
+    projectileSolid: 'Proj Solid',
+    allowProjectilePass: 'Pass Shot',
+    pierceCost: 'Pierce Cost',
+    detectRadius: 'Detect Rad',
+    priorityScore: 'Priority',
+    generatorList: 'Gen List',
+    genRate: 'Gen Rate',
+    canToggle: 'Toggle',
+    skillId: 'Skill',
+    typeId: 'Type ID',
+    weaponId: 'Weapon',
+    footprint: 'Size',
+    // Never surface as "Tile" in Skills / forms.
+    tile: 'Size',
+    Tile: 'Size',
   };
   if (dict[s]) return dict[s];
 
-  if (/^[A-Z0-9_]+$/.test(s) && s.includes('_')) {
-    return s
-      .split('_')
-      .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
-      .join(' ');
-  }
+  if (s.indexOf('_') >= 0 || /^[A-Z0-9-]+$/.test(s)) return formatCatalogId(s);
   return s
     .replace(/([A-Z])/g, ' $1')
     .replace(/^./, (c) => c.toUpperCase())
     .trim();
 }
 
-function field(label, control, kind) {
+function helpCtxOf(ctx, getValue) {
+  return {
+    doc: ctx && ctx.getDoc ? ctx.getDoc() : null,
+    getValue: typeof getValue === 'function' ? getValue : () => '',
+  };
+}
+
+function field(label, control, kind, helpCtx) {
   const wrap = document.createElement('label');
   if (kind) wrap.className = kind;
-  wrap.textContent = toReadableLabel(label);
+  if (label) wrap.textContent = toReadableLabel(label);
+  const resolveHelp = () => {
+    const value = helpCtx && typeof helpCtx.getValue === 'function' ? helpCtx.getValue() : '';
+    const doc = helpCtx && helpCtx.doc ? helpCtx.doc : null;
+    return getFieldHelp(label, doc, value);
+  };
+  const help = resolveHelp();
+  if (help) {
+    wrap.title = help;
+    wrap.dataset.fieldHelp = help;
+    wrap.addEventListener('pointerenter', () => {
+      const next = resolveHelp();
+      wrap.title = next;
+      if (typeof window.__editorSetFieldHelp === 'function') {
+        window.__editorSetFieldHelp(next);
+      }
+    });
+    wrap.addEventListener('pointerleave', () => {
+      if (typeof window.__editorClearFieldHelp === 'function') {
+        window.__editorClearFieldHelp();
+      }
+    });
+  }
   wrap.appendChild(control);
   return wrap;
 }
 
-const UNIT_FRONT = ['id', 'model', 'startingLoadout', 'skills', 'currentSlot', 'hpRange'];
-const UNIT_TAIL = ['allowedGoals', 'targetPriorityList', 'behaviorFlags'];
-const UNIT_HIDDEN = { defaultWeapon: true, hasPassiveShield: true, drops: true };
+export function appendDivider(parent) {
+  const hr = document.createElement('hr');
+  hr.className = 'editor-divider';
+  parent.appendChild(hr);
+  return hr;
+}
+
+export function appendSectionTitle(parent, text) {
+  const heading = document.createElement('p');
+  heading.className = 'editor-section-title';
+  heading.textContent = text;
+  parent.appendChild(heading);
+  return heading;
+}
 
 function orderedKeys(record, shape) {
   const seen = {};
@@ -212,20 +427,20 @@ function isItemRow(sample) {
   return true;
 }
 
-function fillSelect(select, options, value) {
+function fillSelect(select, options, value, rawText) {
   const seen = {};
   for (let i = 0; i < options.length; i++) {
     if (seen[options[i]]) continue;
     seen[options[i]] = true;
     const option = document.createElement('option');
     option.value = options[i];
-    option.textContent = toReadableLabel(options[i]);
+    option.textContent = rawText ? String(options[i]) : toReadableLabel(options[i]);
     select.appendChild(option);
   }
   if (value && !seen[value]) {
     const option = document.createElement('option');
     option.value = value;
-    option.textContent = toReadableLabel(value);
+    option.textContent = rawText ? String(value) : toReadableLabel(value);
     select.appendChild(option);
   }
   select.value = value == null ? '' : value;
@@ -238,36 +453,189 @@ function columnMark(text, kind) {
   return span;
 }
 
-function lineHead(parent, cells) {
+function lineHead(parent, cells, compact) {
   const head = document.createElement('div');
-  head.className = 'editor-line is-head';
+  head.className = compact ? 'editor-line is-head is-compact-head' : 'editor-line is-head';
   for (let i = 0; i < cells.length; i++) head.appendChild(columnMark(cells[i].text, cells[i].kind));
   parent.appendChild(head);
 }
 
 function itemHead(row, withRemove) {
   const cells = [{ text: 'Item', kind: 'is-grow' }];
-  if (row && 'count' in row) cells.push({ text: 'Count', kind: 'is-short' });
-  if (row && 'amount' in row) cells.push({ text: 'Amount', kind: 'is-short' });
-  if (row && 'intervalSec' in row) cells.push({ text: 'Every', kind: 'is-short' });
-  if (row && 'active' in row) cells.push({ text: 'Active', kind: 'is-short' });
-  if (withRemove !== false) cells.push({ text: '', kind: 'is-remove' });
+  if (row && 'count' in row) cells.push({ text: 'Qty', kind: 'is-short' });
+  if (row && 'amount' in row) cells.push({ text: 'Amt', kind: 'is-short' });
+  if (row && 'intervalSec' in row) cells.push({ text: 'Sec', kind: 'is-short' });
+  if (row && 'active' in row) cells.push({ text: 'On', kind: 'is-check' });
+  if (withRemove !== false) cells.push({ text: '', kind: 'is-danger-slot' });
   return cells;
+}
+
+function trailKindForItemId(ctx, itemId) {
+  if (!itemId) return 'object';
+  if (ctx.weaponLoadout && ctx.weaponLoadout(itemId)) return 'object';
+  const doc = ctx.getDoc ? ctx.getDoc() : null;
+  if (doc && doc.units && doc.units[itemId]) return 'unit';
+  return 'object';
+}
+
+/** Tools-style list picker so each row can fire hover preview (native <select> cannot). */
+export function buildCatalogListPicker(opts) {
+  const ids = Array.isArray(opts && opts.ids) ? opts.ids.slice() : [];
+  let value = opts && opts.value != null ? String(opts.value) : '';
+  const allowEmpty = !!(opts && opts.allowEmpty);
+  const emptyLabel = (opts && opts.emptyLabel) || '(none)';
+  const formatId = (opts && opts.formatId) || formatCatalogId;
+  const onChange = opts && opts.onChange;
+  const onHoverId = opts && opts.onHoverId;
+  const onHoverEnd = opts && opts.onHoverEnd;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-picker editor-catalog-picker';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'tool-picker-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'tool-picker-menu';
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+
+  const labelOf = (id) => (id ? formatId(id) : emptyLabel);
+  const syncBtn = () => {
+    btn.textContent = value ? labelOf(value) : emptyLabel;
+  };
+  syncBtn();
+
+  const closeMenu = () => {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    if (onHoverEnd) onHoverEnd();
+  };
+
+  const fillMenu = () => {
+    menu.replaceChildren();
+    if (allowEmpty) {
+      const blank = document.createElement('button');
+      blank.type = 'button';
+      blank.className = 'tool-picker-item' + (!value ? ' is-selected' : '');
+      blank.setAttribute('role', 'option');
+      blank.textContent = emptyLabel;
+      blank.addEventListener('pointerenter', () => {
+        if (onHoverEnd) onHoverEnd();
+      });
+      blank.addEventListener('click', (event) => {
+        event.stopPropagation();
+        value = '';
+        syncBtn();
+        closeMenu();
+        if (onChange) onChange('');
+      });
+      menu.appendChild(blank);
+    }
+    for (let i = 0; i < ids.length; i++) {
+      const id = String(ids[i] || '');
+      if (!id) continue;
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'tool-picker-item' + (id === value ? ' is-selected' : '');
+      opt.setAttribute('role', 'option');
+      opt.setAttribute('aria-selected', id === value ? 'true' : 'false');
+      opt.dataset.id = id;
+      opt.textContent = labelOf(id);
+      opt.addEventListener('pointerenter', () => {
+        if (onHoverId) onHoverId(id);
+      });
+      opt.addEventListener('focus', () => {
+        if (onHoverId) onHoverId(id);
+      });
+      opt.addEventListener('click', (event) => {
+        event.stopPropagation();
+        value = id;
+        syncBtn();
+        closeMenu();
+        if (onChange) onChange(id);
+      });
+      menu.appendChild(opt);
+    }
+  };
+
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const opening = menu.hidden;
+    document.querySelectorAll('.editor-catalog-picker .tool-picker-menu').forEach((node) => {
+      if (node !== menu) {
+        node.hidden = true;
+        const host = node.closest('.editor-catalog-picker');
+        const otherBtn = host && host.querySelector('.tool-picker-btn');
+        if (otherBtn) otherBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    if (!opening) {
+      closeMenu();
+      return;
+    }
+    fillMenu();
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    if (value && onHoverId) onHoverId(value);
+  });
+
+  menu.addEventListener('pointerleave', () => {
+    if (onHoverEnd) onHoverEnd();
+  });
+
+  if (typeof document !== 'undefined' && !document.documentElement.dataset.editorCatalogPicker) {
+    document.documentElement.dataset.editorCatalogPicker = '1';
+    document.addEventListener('pointerdown', (event) => {
+      const t = event.target;
+      if (t && t.closest && t.closest('.editor-catalog-picker')) return;
+      document.querySelectorAll('.editor-catalog-picker .tool-picker-menu').forEach((node) => {
+        if (node.hidden) return;
+        node.hidden = true;
+        const host = node.closest('.editor-catalog-picker');
+        const otherBtn = host && host.querySelector('.tool-picker-btn');
+        if (otherBtn) otherBtn.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
+  wrap.appendChild(btn);
+  wrap.appendChild(menu);
+  wrap.getValue = () => value;
+  return wrap;
 }
 
 function renderItemLine(parent, row, ctx, onRemove) {
   const line = document.createElement('div');
-  line.className = 'editor-line';
-  const select = document.createElement('select');
+  line.className = 'editor-line is-compact-row';
   const choiceKey = ctx.loadoutWeapon && ctx.weaponLoadout && ctx.weaponLoadout(row.itemId) ? 'weaponId' : 'itemId';
-  fillSelect(select, ctx.choices(choiceKey, row.itemId), row.itemId || '');
-  select.addEventListener('change', () => {
-    row.itemId = select.value;
-    const cap = ctx.stackCap ? ctx.stackCap(row.itemId) : 0;
-    if (cap > 0 && (row.count | 0) > cap) row.count = cap;
-    ctx.touch(true);
+  const choiceIds = (ctx.choices(choiceKey, row.itemId) || []).filter(Boolean);
+  const picker = buildCatalogListPicker({
+    ids: choiceIds,
+    value: row.itemId || '',
+    allowEmpty: true,
+    emptyLabel: '(none)',
+    onHoverId: (id) => {
+      if (!ctx.trailPreview || !id) return;
+      ctx.trailPreview(trailKindForItemId(ctx, id), id);
+    },
+    onHoverEnd: () => {
+      if (ctx.trailRelease) ctx.trailRelease();
+    },
+    onChange: (id) => {
+      row.itemId = id;
+      const cap = ctx.stackCap ? ctx.stackCap(row.itemId) : 0;
+      if (cap > 0 && (row.count | 0) > cap) row.count = cap;
+      if (ctx.trailRelease) ctx.trailRelease();
+      ctx.touch(true);
+    },
   });
-  line.appendChild(field('', select, 'is-grow'));
+  line.appendChild(field('', picker, 'is-grow', {
+    doc: ctx.getDoc ? ctx.getDoc() : null,
+    getValue: () => picker.getValue(),
+  }));
   if ('count' in row) {
     const cap = ctx.stackCap ? ctx.stackCap(row.itemId) : 0;
     let count = row.count == null ? 1 : row.count | 0;
@@ -318,13 +686,15 @@ function renderItemLine(parent, row, ctx, onRemove) {
       row.active = input.checked;
       ctx.touch(false);
     });
-    line.appendChild(field('', input, 'is-short'));
+    line.appendChild(field('', input, 'is-check'));
   }
   if (onRemove) {
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'is-remove';
-    remove.textContent = 'Remove';
+    remove.className = 'editor-btn-danger';
+    remove.textContent = '×';
+    remove.title = 'Remove';
+    remove.setAttribute('aria-label', 'Remove');
     remove.addEventListener('click', onRemove);
     line.appendChild(remove);
   }
@@ -337,11 +707,22 @@ function renderHpRange(parent, holder, ctx) {
   const stack = document.createElement('div');
   stack.className = 'editor-hp-range';
   const title = document.createElement('span');
-  title.textContent = 'hpRange';
+  title.textContent = toReadableLabel('hpRange');
   stack.appendChild(title);
+  const row = document.createElement('div');
+  row.className = 'editor-hp-range-row';
+  const placeholders = ['Min', 'Max'];
   for (let i = 0; i < 2; i++) {
+    if (i === 1) {
+      const sep = document.createElement('span');
+      sep.className = 'editor-hp-range-sep';
+      sep.textContent = '–';
+      row.appendChild(sep);
+    }
     const input = document.createElement('input');
     input.type = 'number';
+    input.placeholder = placeholders[i];
+    input.setAttribute('aria-label', 'HP ' + placeholders[i]);
     input.value = String(shown[i] == null ? 0 : shown[i]);
     input.addEventListener('change', () => {
       const next = Array.isArray(holder.hpRange) ? holder.hpRange.slice() : shown.slice();
@@ -351,12 +732,84 @@ function renderHpRange(parent, holder, ctx) {
       input.value = String(next[i]);
       ctx.touch(false);
     });
-    stack.appendChild(input);
+    row.appendChild(input);
   }
+  stack.appendChild(row);
   parent.appendChild(stack);
 }
 
-function renderObject(parent, record, shape, ctx, isRoot) {
+function hasRecordKey(record, shape, key) {
+  return (
+    (record && Object.prototype.hasOwnProperty.call(record, key)) ||
+    (shape && Object.prototype.hasOwnProperty.call(shape, key))
+  );
+}
+
+function renderUnitField(parent, record, shape, ctx, key, opts) {
+  const sample = shape ? shape[key] : undefined;
+  const value = record[key] === undefined ? blankLike(sample) : record[key];
+  renderValue(
+    parent,
+    key,
+    value,
+    sample,
+    (next) => {
+      record[key] = next;
+      ctx.touch(key === 'id' || key === 'model');
+    },
+    ctx,
+    record,
+    key === 'id',
+    opts
+  );
+}
+
+function renderUnitSections(parent, record, shape, ctx) {
+  appendSectionTitle(parent, 'Identity & Stats');
+  if (hasRecordKey(record, shape, 'id')) renderUnitField(parent, record, shape, ctx, 'id');
+  if (hasRecordKey(record, shape, 'model')) renderUnitField(parent, record, shape, ctx, 'model');
+  if (hasRecordKey(record, shape, 'hpRange')) renderUnitField(parent, record, shape, ctx, 'hpRange');
+  const hasSpeed = hasRecordKey(record, shape, 'speed');
+  const hasArmor = hasRecordKey(record, shape, 'armorType');
+  if (hasSpeed || hasArmor) {
+    const pair = document.createElement('div');
+    pair.className = 'editor-pair';
+    if (hasSpeed) renderUnitField(pair, record, shape, ctx, 'speed', { fullWidth: true });
+    if (hasArmor) renderUnitField(pair, record, shape, ctx, 'armorType', { fullWidth: true });
+    parent.appendChild(pair);
+  }
+
+  const hasLoadout = hasRecordKey(record, shape, 'startingLoadout');
+  const hasSlot = hasRecordKey(record, shape, 'currentSlot');
+  if (hasLoadout || hasSlot) {
+    appendDivider(parent);
+    appendSectionTitle(parent, 'Loadout');
+    if (hasLoadout) renderUnitField(parent, record, shape, ctx, 'startingLoadout', { hideTitle: true });
+    if (hasSlot) renderUnitField(parent, record, shape, ctx, 'currentSlot', { fullWidth: true });
+  }
+
+  if (hasRecordKey(record, shape, 'skills')) {
+    appendDivider(parent);
+    renderUnitField(parent, record, shape, ctx, 'skills');
+  }
+
+  const hasBehavior = hasRecordKey(record, shape, 'behaviorFlags');
+  const hasGoals = hasRecordKey(record, shape, 'allowedGoals');
+  const hasTargets = hasRecordKey(record, shape, 'targetPriorityList');
+  if (hasBehavior || hasGoals || hasTargets) {
+    appendDivider(parent);
+    appendSectionTitle(parent, 'AI & Behavior');
+    if (hasBehavior) renderUnitField(parent, record, shape, ctx, 'behaviorFlags');
+    if (hasGoals) renderUnitField(parent, record, shape, ctx, 'allowedGoals');
+    if (hasTargets) renderUnitField(parent, record, shape, ctx, 'targetPriorityList');
+  }
+}
+
+function renderObject(parent, record, shape, ctx, isRoot, objOpts) {
+  if (isRoot && !ctx.only && ctx.unitLayout) {
+    renderUnitSections(parent, record, shape, ctx);
+    return;
+  }
   const keys = isRoot && ctx.only ? ctx.only : isRoot && ctx.unitLayout ? unitFieldKeys(record, shape) : orderedKeys(record, shape);
   let line = null;
   for (let i = 0; i < keys.length; i++) {
@@ -380,7 +833,7 @@ function renderObject(parent, record, shape, ctx, isRoot) {
     renderValue(host, key, value, sample, (next) => {
       record[key] = next;
       ctx.touch(key === 'id' || key === 'model');
-    }, ctx, record, isRoot && key === 'id');
+    }, ctx, record, isRoot && key === 'id', objOpts);
   }
 }
 
@@ -414,10 +867,12 @@ function renderChoiceControl(parent, key, value, setValue, ctx) {
     if (key === 'ammoTypeId' && !select.value) setValue(null);
     else setValue(select.value);
   });
-  parent.appendChild(field(key, select));
+  parent.appendChild(field(key, select, '', helpCtxOf(ctx, () => select.value)));
 }
 
-function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId) {
+function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId, opts) {
+  const fullWidth = !!(opts && opts.fullWidth);
+  const hideTitle = !!(opts && opts.hideTitle);
   if (key === 'hpRange') {
     renderHpRange(parent, holder, ctx);
     return;
@@ -429,11 +884,12 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
   if (value == null) {
     const note = document.createElement('p');
     note.className = 'editor-note';
-    note.textContent = key + ': (none)';
+    note.textContent = toReadableLabel(key) + ': (none)';
     parent.appendChild(note);
     return;
   }
   if (typeof value === 'number') {
+    const numberClass = fullWidth ? '' : 'is-short';
     if (key === 'currentSlot') {
       const select = document.createElement('select');
       for (let n = 1; n <= 6; n++) {
@@ -445,7 +901,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       const shown = Math.min(6, Math.max(1, (value | 0) + 1));
       select.value = String(shown);
       select.addEventListener('change', () => setValue((select.value | 0) - 1));
-      parent.appendChild(field(key, select, 'is-short'));
+      parent.appendChild(field(key, select, numberClass, helpCtxOf(ctx, () => select.value)));
       return;
     }
     if (key === 'maxStack' && ctx.lockMaxStack) {
@@ -456,14 +912,24 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       input.max = '1';
       input.value = '1';
       input.disabled = true;
-      parent.appendChild(field(key, input, 'is-short'));
+      parent.appendChild(field(key, input, numberClass, helpCtxOf(ctx)));
       return;
     }
     const input = document.createElement('input');
     input.type = 'number';
-    input.value = String(value);
-    input.addEventListener('change', () => setValue(Number(input.value) || 0));
-    parent.appendChild(field(key, input, 'is-short'));
+    const minVal = opts && typeof opts.minVal === 'number' ? opts.minVal : null;
+    if (minVal != null) input.min = String(minVal);
+    input.value = String(minVal != null ? Math.max(minVal, Number(value) || minVal) : value);
+    input.addEventListener('change', () => {
+      let next = Number(input.value);
+      if (!isFinite(next)) next = minVal != null ? minVal : 0;
+      if (minVal != null) {
+        next = Math.max(minVal, Math.round(next));
+        input.value = String(next);
+      }
+      setValue(next);
+    });
+    parent.appendChild(field(key, input, numberClass, helpCtxOf(ctx, () => input.value)));
     return;
   }
   if (typeof value === 'boolean') {
@@ -471,7 +937,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     input.type = 'checkbox';
     input.checked = value;
     input.addEventListener('change', () => setValue(input.checked));
-    parent.appendChild(field(key, input, 'is-short'));
+    parent.appendChild(field(key, input, 'is-short', helpCtxOf(ctx, () => String(input.checked))));
     return;
   }
   if (typeof value === 'string') {
@@ -484,7 +950,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         const swatch = document.querySelector('#editor-panel .editor-preview-swatch');
         if (swatch) swatch.style.background = input.value;
       });
-      parent.appendChild(field(key, input));
+      parent.appendChild(field(key, input, '', helpCtxOf(ctx, () => input.value)));
       return;
     }
     if (key === 'model') {
@@ -497,7 +963,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       }
       select.value = shownUnitModel(holder);
       select.addEventListener('change', () => setValue(select.value));
-      parent.appendChild(field(key, select));
+      parent.appendChild(field(key, select, '', helpCtxOf(ctx, () => select.value)));
       return;
     }
     if (isRootId || TEXT_KEYS[key]) {
@@ -509,7 +975,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         if (isRootId) ctx.rename(next);
         else setValue(next);
       });
-      parent.appendChild(field(key, input));
+      parent.appendChild(field(key, input, '', helpCtxOf(ctx, () => input.value)));
       return;
     }
     const options = ctx.choices(key, value);
@@ -531,7 +997,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     }
     select.value = value;
     select.addEventListener('change', () => setValue(select.value));
-    parent.appendChild(field(key, select));
+    parent.appendChild(field(key, select, '', helpCtxOf(ctx, () => select.value)));
     return;
   }
   if (Array.isArray(value)) {
@@ -546,10 +1012,12 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     });
     const block = document.createElement('div');
     block.className = 'editor-fields';
-    const title = document.createElement('p');
-    title.className = 'editor-note';
-    title.textContent = toReadableLabel(key);
-    block.appendChild(title);
+    if (!hideTitle) {
+      const title = document.createElement('p');
+      title.className = 'editor-note';
+      title.textContent = toReadableLabel(key);
+      block.appendChild(title);
+    }
     const itemSample = Array.isArray(sample) && sample.length ? sample[0] : list[0];
     const itemList = key === 'startingLoadout' || key === 'generatorList' || isItemRow(itemSample) || (list[0] && isItemRow(list[0]));
     const kind = itemList ? 'item' : list.length ? typeof list[0] : itemSample == null ? 'string' : typeof itemSample;
@@ -558,30 +1026,30 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       if (skillList && list.length) {
         lineHead(block, [
           { text: 'Skill', kind: 'is-grow' },
-          { text: '', kind: 'is-remove' },
-        ]);
+          { text: '', kind: 'is-danger-slot' },
+        ], true);
       }
       for (let i = 0; i < list.length; i++) {
         const line = document.createElement('div');
-        line.className = 'editor-line';
+        line.className = 'editor-line is-compact-row';
         const select = document.createElement('select');
-        fillSelect(select, childCtx.choices(key, list[i]), list[i]);
+        fillSelect(select, childCtx.choices(key, list[i]), list[i], skillList);
         select.addEventListener('change', () => {
           list[i] = select.value;
           childCtx.touch(true);
         });
         line.appendChild(field('', select, 'is-grow'));
-        if (skillList) {
-          const remove = document.createElement('button');
-          remove.type = 'button';
-          remove.className = 'is-remove';
-          remove.textContent = 'Remove';
-          remove.addEventListener('click', () => {
-            list.splice(i, 1);
-            childCtx.touch(true);
-          });
-          line.appendChild(remove);
-        }
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'editor-btn-danger';
+        remove.textContent = '×';
+        remove.title = 'Remove';
+        remove.setAttribute('aria-label', 'Remove');
+        remove.addEventListener('click', () => {
+          list.splice(i, 1);
+          childCtx.touch(true);
+        });
+        line.appendChild(remove);
         block.appendChild(line);
       }
     } else if (kind === 'number') {
@@ -596,7 +1064,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         block.appendChild(input);
       }
     } else if (itemList) {
-      if (list[0]) lineHead(block, itemHead(list[0]));
+      if (list[0]) lineHead(block, itemHead(list[0]), true);
       for (let i = 0; i < list.length; i++) {
         renderItemLine(block, list[i], childCtx, () => {
           list.splice(i, 1);
@@ -610,6 +1078,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         renderObject(card, list[i], itemSample || {}, childCtx, false);
         const remove = document.createElement('button');
         remove.type = 'button';
+        remove.className = 'is-delete-record';
         remove.textContent = 'Remove';
         remove.addEventListener('click', () => {
           list.splice(i, 1);
@@ -625,7 +1094,15 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     }
     const add = document.createElement('button');
     add.type = 'button';
-    add.textContent = 'Add ' + toReadableLabel(key);
+    const addMap = {
+      startingLoadout: 'Add Item',
+      skills: 'Add Skill',
+      activeSkills: 'Add Skill',
+      allowedGoals: 'Add Goal',
+      targetPriorityList: 'Add Priority',
+      generatorList: 'Add Output',
+    };
+    add.textContent = addMap[key] || ('Add ' + toReadableLabel(key));
     add.addEventListener('click', () => {
       if (skillList && list.length >= 3) return;
       if (kind === 'string') {
@@ -664,7 +1141,8 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     title.className = 'editor-note';
     title.textContent = toReadableLabel(key);
     block.appendChild(title);
-    renderObject(block, target, sample && typeof sample === 'object' ? sample : {}, childCtx, false);
+    const nextOpts = key === 'footprint' ? { minVal: 1 } : undefined;
+    renderObject(block, target, sample && typeof sample === 'object' ? sample : {}, childCtx, false, nextOpts);
     parent.appendChild(block);
   }
 }

@@ -223,16 +223,119 @@ export function spawnRow(doc, key) {
   return null;
 }
 
+/** GRUNT_BASIC → Grunt_Basic; keeps SMG / M1991-style tokens. */
+export function formatCatalogId(raw) {
+  if (raw == null || raw === '') return '';
+  const text = String(raw).trim();
+  if (!text) return '';
+  const keep = {
+    SMG: 'SMG',
+    AK47: 'AK47',
+    RPG: 'RPG',
+    M1991: 'M1991',
+    M1911: 'M1911',
+    KAR98: 'KAR98',
+    '50CAL': '50Cal',
+    T1: 'T1',
+    T2: 'T2',
+    T3: 'T3',
+  };
+  const parts = text.split('_');
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) {
+      out.push(part);
+      continue;
+    }
+    const upper = part.toUpperCase();
+    if (keep[upper]) {
+      out.push(keep[upper]);
+      continue;
+    }
+    if (/^\d/.test(part)) {
+      out.push(part.charAt(0) + part.slice(1).toLowerCase());
+      continue;
+    }
+    out.push(part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+  }
+  return out.join('_');
+}
+
+function rewriteCatalogStrings(node, remap) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      if (typeof node[i] === 'string' && remap[node[i]]) node[i] = remap[node[i]];
+      else rewriteCatalogStrings(node[i], remap);
+    }
+    return;
+  }
+  const keys = Object.keys(node);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = node[key];
+    if (typeof value === 'string') {
+      if (key === 'label' || key === 'description' || key === 'color' || key === 'markerColor') continue;
+      if (remap[value]) node[key] = remap[value];
+    } else {
+      rewriteCatalogStrings(value, remap);
+    }
+  }
+}
+
+function normalizeCatalogMap(map) {
+  const src = map && typeof map === 'object' ? map : {};
+  const remap = {};
+  const keys = Object.keys(src);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const rec = src[key];
+    const nextId = formatCatalogId((rec && rec.id) || key);
+    remap[key] = nextId;
+    if (key !== nextId) remap[key.toUpperCase()] = nextId;
+    if (rec && typeof rec === 'object' && typeof rec.id === 'string') rec.id = nextId;
+  }
+  const next = {};
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const nid = remap[key] || formatCatalogId(key);
+    next[nid] = src[key];
+  }
+  rewriteCatalogStrings(next, remap);
+  return next;
+}
+
 export function sheetsFromPack(pack) {
   const game = (pack.gamePack && pack.gamePack.pack) || {};
   const rules = cloneData(pack.rules || {});
   if (game.respawnBaseSec != null) rules.respawnBaseSec = game.respawnBaseSec;
   if (game.respawnExtraPerWave != null) rules.respawnExtraPerWave = game.respawnExtraPerWave;
+  const units = normalizeCatalogMap(cloneData((pack.units && pack.units.units) || {}));
+  const weapons = normalizeCatalogMap(cloneData((pack.weapons && pack.weapons.weapons) || {}));
+  const items = normalizeCatalogMap(cloneData((pack.items && pack.items.items) || {}));
+  const skills = normalizeCatalogMap(cloneData((pack.skills && pack.skills.skills) || {}));
+  const cross = {};
+  function absorb(map) {
+    const ids = Object.keys(map);
+    for (let i = 0; i < ids.length; i++) {
+      cross[ids[i]] = ids[i];
+      cross[ids[i].toUpperCase()] = ids[i];
+    }
+  }
+  absorb(units);
+  absorb(weapons);
+  absorb(items);
+  absorb(skills);
+  rewriteCatalogStrings(units, cross);
+  rewriteCatalogStrings(weapons, cross);
+  rewriteCatalogStrings(items, cross);
+  rewriteCatalogStrings(skills, cross);
   return {
-    units: cloneData((pack.units && pack.units.units) || {}),
-    weapons: cloneData((pack.weapons && pack.weapons.weapons) || {}),
-    items: cloneData((pack.items && pack.items.items) || {}),
-    skills: cloneData((pack.skills && pack.skills.skills) || {}),
+    units,
+    weapons,
+    items,
+    skills,
     rules,
     teams: normalizeTeams(game.teams),
     damageMatrix: cloneDamageMatrix(pack.damageMatrix),
@@ -240,16 +343,16 @@ export function sheetsFromPack(pack) {
 }
 
 const MIX_SKILLS = {
-  WIRE: {
-    id: 'WIRE',
+  Wire: {
+    id: 'Wire',
     label: 'Wire',
     castTimeSec: 0,
     activeDurationSec: 0,
     cooldownSec: 0,
     effect: { type: 'PASS_THROUGH', allowProjectilePass: true },
   },
-  HEAL: {
-    id: 'HEAL',
+  Heal: {
+    id: 'Heal',
     label: 'Heal',
     castTimeSec: 0,
     activeDurationSec: 0,
@@ -324,6 +427,32 @@ export function parseMapFile(text) {
   if (!doc.items || typeof doc.items !== 'object') doc.items = {};
   if (!doc.skills || typeof doc.skills !== 'object') doc.skills = {};
   if (!doc.rules || typeof doc.rules !== 'object') doc.rules = {};
+  doc.units = normalizeCatalogMap(doc.units);
+  doc.weapons = normalizeCatalogMap(doc.weapons);
+  doc.items = normalizeCatalogMap(doc.items);
+  doc.skills = normalizeCatalogMap(doc.skills);
+  const cross = {};
+  function absorb(map) {
+    const ids = Object.keys(map);
+    for (let i = 0; i < ids.length; i++) {
+      cross[ids[i]] = ids[i];
+      cross[String(ids[i]).toUpperCase()] = ids[i];
+    }
+  }
+  absorb(doc.units);
+  absorb(doc.weapons);
+  absorb(doc.items);
+  absorb(doc.skills);
+  rewriteCatalogStrings(doc.units, cross);
+  rewriteCatalogStrings(doc.weapons, cross);
+  rewriteCatalogStrings(doc.items, cross);
+  rewriteCatalogStrings(doc.skills, cross);
+  for (let i = 0; i < doc.placedObjects.length; i++) {
+    const inst = doc.placedObjects[i];
+    if (!inst || typeof inst.templateId !== 'string') continue;
+    const next = cross[inst.templateId] || cross[inst.templateId.toUpperCase()] || formatCatalogId(inst.templateId);
+    if (next) inst.templateId = next;
+  }
   if (doc.damageMatrix && typeof doc.damageMatrix === 'object') doc.damageMatrix = cloneDamageMatrix(doc.damageMatrix);
   else delete doc.damageMatrix;
   doc.teams = normalizeTeams(doc.teams);

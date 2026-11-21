@@ -2,14 +2,17 @@
  * Right-hand panels. One id is one record. Catalog ids are chosen, not typed.
  */
 
-import { closedModelGroupId } from '../assets/closedCatalog.js';
 import { armorTypeNames, damageTypeNames, spawnRow } from './mapDoc.js';
 import {
   UNIT_MODEL_IDS,
+  appendDivider,
+  appendSectionTitle,
   blankRecord,
   cssColor,
+  buildCatalogListPicker,
+  formatCatalogId,
+  getFieldHelp,
   renderRecord,
-  shownUnitModel,
   unionShape,
   toReadableLabel,
 } from './recordForm.js';
@@ -17,13 +20,20 @@ import {
   blankFor,
   isArmorTabKind,
   isBlockTabKind,
-  isLockedBackpack,
   itemCategory,
   itemHeadings,
   renderTyped,
   skillEffectNames,
-  weaponPreviewSpec,
 } from './sheetForm.js';
+import {
+  buildStructureMapIcon,
+  ensureUnitPoolEntry,
+  ensureWeaponHeldPoolEntry,
+  heldLoadout,
+  mountPoolPreview,
+  recordSwatch,
+  weaponRecordOf,
+} from './unitArt.js';
 
 const TABS = [
   ['area', 'Area'],
@@ -57,10 +67,99 @@ const RELOAD_CHOICES = ['MAGAZINE', 'INDIVIDUAL_SHELL'];
 
 let catalogPage = 0;
 
+/** Active trail owner: settings | tools | placed | null (higher focus wins until released). */
+let trailClaim = { source: null, kind: '', templateId: '' };
+
+function syncTrailVisibility(trayEl) {
+  if (!trayEl) return;
+  const bar = document.getElementById('editor-field-help');
+  const panel = document.getElementById('editor-placed-panel');
+  const helpOn = !!(bar && !bar.hidden && String(bar.textContent || '').trim());
+  const panelOn = !!(panel && panel.childNodes.length);
+  trayEl.hidden = !(helpOn || panelOn || trailClaim.source);
+}
+
+/** Field help lives on the left tray (near placed-panel), not inside settings. */
+export function setFieldHelp(text) {
+  const tray = document.getElementById('editor-placed-tray');
+  const bar = document.getElementById('editor-field-help');
+  if (!bar) return;
+  const msg = text && String(text).trim() ? String(text).trim() : '';
+  if (!msg) {
+    bar.textContent = '';
+    bar.hidden = true;
+  } else {
+    bar.textContent = msg;
+    bar.hidden = false;
+  }
+  syncTrailVisibility(tray);
+  if (typeof window !== 'undefined') {
+    window.__editorSetFieldHelp = setFieldHelp;
+    window.__editorClearFieldHelp = clearFieldHelp;
+  }
+}
+
+/** Hide help when pointer leaves a help-bearing control. */
+export function clearFieldHelp() {
+  setFieldHelp('');
+}
+
+function bindFieldHelpHover(el, resolveHelp) {
+  if (!el || typeof resolveHelp !== 'function') return;
+  el.addEventListener('pointerenter', () => setFieldHelp(resolveHelp()));
+  el.addEventListener('pointerleave', () => clearFieldHelp());
+}
+
+export function claimTrailPreview(source, api, kind, templateId) {
+  trailClaim = {
+    source: source || null,
+    kind: kind || '',
+    templateId: templateId || '',
+  };
+  const tray = document.getElementById('editor-placed-tray');
+  if (!tray || !api) return;
+  if (templateId) fillCatalogPreview(tray, api, kind, templateId);
+  else {
+    const panel = tray.querySelector('#editor-placed-panel');
+    if (panel) panel.replaceChildren();
+  }
+  syncTrailVisibility(tray);
+}
+
+export function releaseTrailClaim(source, api) {
+  if (trailClaim.source !== source) return;
+  trailClaim = { source: null, kind: '', templateId: '' };
+  refreshTrail(api);
+}
+
+export function refreshTrail(api) {
+  const tray = document.getElementById('editor-placed-tray');
+  if (!tray) return;
+  if (
+    (trailClaim.source === 'settings' || trailClaim.source === 'tools') &&
+    trailClaim.templateId
+  ) {
+    fillCatalogPreview(tray, api, trailClaim.kind, trailClaim.templateId);
+    syncTrailVisibility(tray);
+    return;
+  }
+  renderPlacedTray(tray, api);
+}
+
 function field(label, input, kind) {
   const wrap = document.createElement('label');
   if (kind) wrap.className = kind;
   if (label) wrap.textContent = label;
+  const resolveHelp = () => {
+    const value = input && 'value' in input ? input.value : '';
+    return getFieldHelp(label, null, value);
+  };
+  const help = resolveHelp();
+  if (help) {
+    wrap.title = help;
+    wrap.dataset.fieldHelp = help;
+    bindFieldHelpHover(wrap, resolveHelp);
+  }
   wrap.appendChild(input);
   return wrap;
 }
@@ -115,9 +214,9 @@ function idList(ids, current) {
   for (let i = 0; i < ids.length; i++) {
     if (!ids[i] || seen[ids[i]]) continue;
     seen[ids[i]] = true;
-    options.push({ value: ids[i], label: ids[i] });
+    options.push({ value: ids[i], label: formatCatalogId(ids[i]) });
   }
-  if (current && !seen[current]) options.unshift({ value: current, label: current });
+  if (current && !seen[current]) options.unshift({ value: current, label: formatCatalogId(current) });
   return options;
 }
 
@@ -305,14 +404,11 @@ export function renderPanel(root, api) {
   bench.appendChild(renderRail(api, doc, tab));
   const settings = document.createElement('div');
   settings.className = 'editor-settings';
-  const placedId = api.getSelectedPlacedId ? api.getSelectedPlacedId() : '';
-  const placedItem = placedId && doc.placedObjects ? doc.placedObjects.find((p) => p.id === placedId) : null;
-  if (placedItem) renderPlacedInspector(settings, api, doc, placedItem);
-  else if (tab === 'area') renderArea(settings, api, doc);
+  if (tab === 'area') renderArea(settings, api, doc);
   else if (tab === 'spawn') renderSpawns(settings, api, doc);
-  else if (tab === 'unit') renderSheet(settings, api, doc, doc.units, 'unitId', 'UNIT');
+  else if (tab === 'unit') renderSheet(settings, api, doc, doc.units, 'unitId', 'Unit');
   else if (tab === 'weapon') renderGear(settings, api, doc);
-  else if (kind) renderSheet(settings, api, doc, doc.items, 'itemId', 'ITEM');
+  else if (kind) renderSheet(settings, api, doc, doc.items, 'itemId', 'Item');
   else if (tab === 'skill') renderSkillSheet(settings, api, doc);
   else renderRules(settings, api, doc);
   bench.appendChild(settings);
@@ -323,60 +419,215 @@ export function renderPanel(root, api) {
   fitPreviewArt(root);
 }
 
-function renderPlacedInspector(parent, api, doc, item) {
-  parent.replaceChildren();
+function fillCatalogPreview(trayEl, api, kind, templateId) {
+  const doc = api.getDoc();
+  const panel = trayEl.querySelector('#editor-placed-panel') || trayEl;
+  if (!doc || !templateId) {
+    panel.replaceChildren();
+    return;
+  }
+  let previewKey = 'itemId';
+  let def = null;
+  let noteText = 'Object place preview';
+  if (kind === 'unit') {
+    def = doc.units && doc.units[templateId];
+    previewKey = 'unitId';
+    noteText = 'Unit place preview';
+  } else if (doc.items && doc.items[templateId]) {
+    def = doc.items[templateId];
+    previewKey = 'itemId';
+  } else if (doc.weapons && doc.weapons[templateId]) {
+    def = doc.weapons[templateId];
+    previewKey = 'weaponId';
+    noteText = 'Weapon / loadout preview';
+  }
+  panel.replaceChildren();
+  if (!def) return;
 
-  const card = document.createElement('div');
-  card.className = 'editor-instance-inspector';
-
-  const badge = document.createElement('div');
-  badge.className = 'editor-instance-badge';
-  badge.textContent = `📍 Placed ${item.kind === 'unit' ? 'Unit' : 'Object'} Instance`;
-  card.appendChild(badge);
-
-  const heading = document.createElement('h2');
-  heading.style.margin = '0';
-  heading.style.fontSize = '16px';
-  heading.style.color = '#ffffff';
-  heading.textContent = item.templateId || item.id;
-  card.appendChild(heading);
-
+  trayEl.setAttribute('aria-label', 'Trail');
+  const header = document.createElement('div');
+  header.className = 'editor-placed-header';
+  const title = document.createElement('span');
+  title.className = 'editor-placed-title';
+  title.textContent = 'Preview · ' + formatCatalogId(templateId);
+  header.appendChild(title);
+  panel.appendChild(header);
+  panel.appendChild(previewFor(api, previewKey, def));
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.style.fontSize = '12px';
-  note.textContent = '📌 ปรับสถานะเฉพาะตัวนี้บนแมป (Instance Override) โดยไม่ย้อนไปแก้ค่าต้นทางของ Template';
-  card.appendChild(note);
+  note.textContent = noteText;
+  panel.appendChild(note);
+  fitPreviewArt(panel);
+}
 
-  // Readonly Instance ID
-  const idWrap = document.createElement('label');
-  idWrap.textContent = 'Instance ID';
-  const idInput = document.createElement('input');
-  idInput.value = item.id;
-  idInput.disabled = true;
-  idWrap.appendChild(idInput);
-  card.appendChild(idWrap);
+/** Claim trail preview from tools/settings hover (does not fight placed until released). */
+export function renderCatalogTrailPreview(trayEl, api, kind, templateId, source) {
+  claimTrailPreview(source || 'tools', api, kind, templateId);
+  if (trayEl) syncTrailVisibility(trayEl);
+}
 
-  // Readonly Template ID
-  const tWrap = document.createElement('label');
-  tWrap.textContent = 'Original Template';
-  const tInput = document.createElement('input');
-  tInput.value = item.templateId;
-  tInput.disabled = true;
-  tWrap.appendChild(tInput);
-  card.appendChild(tWrap);
+function clearPlacedSelection(api) {
+  if (api.setSelectedPlacedIds) api.setSelectedPlacedIds([]);
+  else if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
+}
 
-  // Team Selector
+function selectedPlacedItems(api, doc) {
+  const ids = api.getSelectedPlacedIds
+    ? api.getSelectedPlacedIds()
+    : (api.getSelectedPlacedId ? [api.getSelectedPlacedId()].filter(Boolean) : []);
+  if (!doc || !Array.isArray(doc.placedObjects) || !ids.length) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    const item = doc.placedObjects.find((p) => p && p.id === ids[i]);
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+function selectionIsSameType(items) {
+  if (!items.length) return false;
+  const kind = items[0].kind;
+  const templateId = items[0].templateId || '';
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].kind !== kind || (items[i].templateId || '') !== templateId) return false;
+  }
+  return true;
+}
+
+export function renderPlacedTray(trayEl, api) {
+  if (!trayEl) return;
+  // Hover preview from settings/tools keeps ownership until released.
+  if (
+    (trailClaim.source === 'settings' || trailClaim.source === 'tools') &&
+    trailClaim.templateId
+  ) {
+    fillCatalogPreview(trayEl, api, trailClaim.kind, trailClaim.templateId);
+    syncTrailVisibility(trayEl);
+    return;
+  }
+
+  const doc = api.getDoc();
+  const items = selectedPlacedItems(api, doc);
+  const panel = trayEl.querySelector('#editor-placed-panel') || trayEl;
+  if (!items.length) {
+    trailClaim = { source: null, kind: '', templateId: '' };
+    panel.replaceChildren();
+    syncTrailVisibility(trayEl);
+    return;
+  }
+
+  const sameType = selectionIsSameType(items);
+  const primary = items[0];
+  trailClaim = {
+    source: 'placed',
+    kind: primary.kind === 'unit' ? 'unit' : 'object',
+    templateId: sameType ? (primary.templateId || '') : '',
+  };
+  trayEl.setAttribute('aria-label', 'Trail');
+  panel.replaceChildren();
+
+  const header = document.createElement('div');
+  header.className = 'editor-placed-header';
+  const title = document.createElement('span');
+  title.className = 'editor-placed-title';
+  if (items.length === 1) {
+    title.textContent = 'Trail · ' + formatCatalogId(primary.templateId || primary.id);
+  } else if (sameType) {
+    title.textContent = 'Trail · ' + formatCatalogId(primary.templateId || primary.id) + ' ×' + items.length;
+  } else {
+    title.textContent = 'Trail · ' + items.length + ' selected (mixed)';
+  }
+  header.appendChild(title);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'editor-placed-close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.addEventListener('click', () => {
+    clearPlacedSelection(api);
+    api.paint();
+    renderPlacedTray(trayEl, api);
+  });
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  if (sameType) {
+    const def = primary.kind === 'unit'
+      ? (doc.units && doc.units[primary.templateId])
+      : (doc.items && doc.items[primary.templateId]);
+    if (def) {
+      panel.appendChild(previewFor(api, primary.kind === 'unit' ? 'unitId' : 'itemId', def));
+    }
+  } else {
+    const note = document.createElement('p');
+    note.className = 'editor-note';
+    note.textContent = 'Mixed types — Team and Delete only.';
+    panel.appendChild(note);
+  }
+
+  if (sameType) {
+    let sharedMax = items[0].maxHp != null ? items[0].maxHp : items[0].currentHp || 100;
+    let sharedCur = items[0].currentHp != null ? items[0].currentHp : sharedMax;
+    let maxSame = true;
+    let curSame = true;
+    for (let i = 0; i < items.length; i++) {
+      const maxHpVal = items[i].maxHp != null ? items[i].maxHp : items[i].currentHp || 100;
+      const curHpVal = items[i].currentHp != null ? items[i].currentHp : maxHpVal;
+      if (maxHpVal !== sharedMax) maxSame = false;
+      if (curHpVal !== sharedCur) curSame = false;
+      if (maxHpVal < sharedMax) sharedMax = maxHpVal;
+    }
+
+    const hpRow = document.createElement('div');
+    hpRow.className = 'editor-placed-hp-row';
+
+    const hpWrap = document.createElement('label');
+    hpWrap.textContent = items.length > 1 ? 'Current HP (all)' : 'Current HP';
+    const hpInput = document.createElement('input');
+    hpInput.type = 'number';
+    hpInput.min = '1';
+    hpInput.max = String(sharedMax);
+    hpInput.value = curSame ? String(sharedCur) : '';
+    hpInput.placeholder = curSame ? '' : 'mixed';
+    hpInput.addEventListener('change', () => {
+      const next = Math.max(1, Number(hpInput.value) || 1);
+      for (let i = 0; i < items.length; i++) {
+        const maxHpVal = items[i].maxHp != null ? items[i].maxHp : items[i].currentHp || 100;
+        items[i].currentHp = Math.min(maxHpVal, next);
+      }
+      hpInput.value = String(next);
+      api.touch();
+      api.paint();
+    });
+    hpWrap.appendChild(hpInput);
+    hpRow.appendChild(hpWrap);
+
+    const maxHpWrap = document.createElement('label');
+    maxHpWrap.textContent = 'Max HP';
+    const maxHpInput = document.createElement('input');
+    maxHpInput.type = 'number';
+    maxHpInput.value = maxSame ? String(sharedMax) : '';
+    maxHpInput.placeholder = maxSame ? '' : 'mixed';
+    maxHpInput.disabled = true;
+    maxHpInput.title = 'From template — not editable';
+    maxHpWrap.appendChild(maxHpInput);
+    hpRow.appendChild(maxHpWrap);
+    panel.appendChild(hpRow);
+  }
+
   const teamWrap = document.createElement('label');
-  teamWrap.textContent = 'Team (ทีม)';
+  teamWrap.textContent = items.length > 1 ? 'Team (all)' : 'Team';
   const teamSelect = document.createElement('select');
   const teamOpts = [
-    { value: '1', label: 'Team 1 (Player / Friendly)' },
-    { value: '2', label: 'Team 2 (Enemy / Hostile)' },
-    { value: '3', label: 'Team 3' },
-    { value: '4', label: 'Team 4' },
-    { value: '5', label: 'Team 5' },
-    { value: '6', label: 'Team 6' },
-    { value: '0', label: 'Nature / Neutral (ทีม 0)' },
+    { value: '1', label: '1' },
+    { value: '2', label: '2' },
+    { value: '3', label: '3' },
+    { value: '4', label: '4' },
+    { value: '5', label: '5' },
+    { value: '6', label: '6' },
+    { value: '0', label: '0' },
   ];
   for (let i = 0; i < teamOpts.length; i++) {
     const opt = document.createElement('option');
@@ -384,112 +635,48 @@ function renderPlacedInspector(parent, api, doc, item) {
     opt.textContent = teamOpts[i].label;
     teamSelect.appendChild(opt);
   }
-  teamSelect.value = String(item.team != null ? item.team : 1);
+  let teamSame = true;
+  const team0 = items[0].team != null ? items[0].team : 1;
+  for (let i = 1; i < items.length; i++) {
+    const t = items[i].team != null ? items[i].team : 1;
+    if (t !== team0) teamSame = false;
+  }
+  if (teamSame) teamSelect.value = String(team0);
+  else {
+    const mixed = document.createElement('option');
+    mixed.value = '';
+    mixed.textContent = 'mixed';
+    teamSelect.insertBefore(mixed, teamSelect.firstChild);
+    teamSelect.value = '';
+  }
   teamSelect.addEventListener('change', () => {
-    item.team = Number(teamSelect.value) || 0;
+    if (teamSelect.value === '') return;
+    const next = Number(teamSelect.value) || 0;
+    for (let i = 0; i < items.length; i++) items[i].team = next;
     api.touch();
     api.paint();
   });
   teamWrap.appendChild(teamSelect);
-  card.appendChild(teamWrap);
-
-  // Current HP
-  const hpWrap = document.createElement('label');
-  hpWrap.textContent = 'Current HP (เลือดปัจจุบัน)';
-  const hpInput = document.createElement('input');
-  hpInput.type = 'number';
-  hpInput.value = String(item.currentHp != null ? item.currentHp : 100);
-  hpInput.addEventListener('change', () => {
-    item.currentHp = Math.max(1, Number(hpInput.value) || 1);
-    api.touch();
-    api.paint();
-  });
-  hpWrap.appendChild(hpInput);
-  card.appendChild(hpWrap);
-
-  // Max HP
-  const maxHpWrap = document.createElement('label');
-  maxHpWrap.textContent = 'Max HP (เลือดสูงสุด)';
-  const maxHpInput = document.createElement('input');
-  maxHpInput.type = 'number';
-  maxHpInput.value = String(item.maxHp != null ? item.maxHp : item.currentHp || 100);
-  maxHpInput.addEventListener('change', () => {
-    item.maxHp = Math.max(1, Number(maxHpInput.value) || 1);
-    api.touch();
-    api.paint();
-  });
-  maxHpWrap.appendChild(maxHpInput);
-  card.appendChild(maxHpWrap);
-
-  // Position X & Y
-  const posRow = document.createElement('div');
-  posRow.style.display = 'grid';
-  posRow.style.gridTemplateColumns = '1fr 1fr';
-  posRow.style.gap = '8px';
-
-  const xWrap = document.createElement('label');
-  xWrap.textContent = 'Grid X (px)';
-  const xInput = document.createElement('input');
-  xInput.type = 'number';
-  xInput.step = '64';
-  xInput.value = String(item.x);
-  xInput.addEventListener('change', () => {
-    item.x = Math.floor(Number(xInput.value) / 64) * 64;
-    api.touch();
-    api.paint();
-  });
-  xWrap.appendChild(xInput);
-  posRow.appendChild(xWrap);
-
-  const yWrap = document.createElement('label');
-  yWrap.textContent = 'Grid Y (px)';
-  const yInput = document.createElement('input');
-  yInput.type = 'number';
-  yInput.step = '64';
-  yInput.value = String(item.y);
-  yInput.addEventListener('change', () => {
-    item.y = Math.floor(Number(yInput.value) / 64) * 64;
-    api.touch();
-    api.paint();
-  });
-  yWrap.appendChild(yInput);
-  posRow.appendChild(yWrap);
-  card.appendChild(posRow);
-
-  // Delete & Close buttons
-  const btnRow = document.createElement('div');
-  btnRow.style.display = 'flex';
-  btnRow.style.gap = '8px';
-  btnRow.style.marginTop = '12px';
+  panel.appendChild(teamWrap);
 
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
-  delBtn.textContent = '🗑️ Delete from Map (ลบออกจากฉาก)';
-  delBtn.style.color = '#ff6b6b';
-  delBtn.style.flex = '1';
+  delBtn.className = 'is-delete-record';
+  delBtn.textContent = items.length > 1 ? 'Del all' : 'Del';
+  delBtn.title = items.length > 1 ? 'Delete selected instances' : 'Delete placed instance';
   delBtn.addEventListener('click', () => {
-    const idx = doc.placedObjects.indexOf(item);
-    if (idx >= 0) doc.placedObjects.splice(idx, 1);
-    if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
+    const drop = {};
+    for (let i = 0; i < items.length; i++) drop[items[i].id] = true;
+    doc.placedObjects = (doc.placedObjects || []).filter((p) => p && !drop[p.id]);
+    clearPlacedSelection(api);
     api.touch();
     api.paint();
-    renderPanel(api.panelRoot(), api);
+    renderPlacedTray(trayEl, api);
   });
-  btnRow.appendChild(delBtn);
+  panel.appendChild(delBtn);
 
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.textContent = '✕ Close';
-  closeBtn.style.flex = '0 0 auto';
-  closeBtn.addEventListener('click', () => {
-    if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
-    api.paint();
-    renderPanel(api.panelRoot(), api);
-  });
-  btnRow.appendChild(closeBtn);
-
-  card.appendChild(btnRow);
-  parent.appendChild(card);
+  fitPreviewArt(panel);
+  syncTrailVisibility(trayEl);
 }
 
 function railButton(label, on, onClick, hint) {
@@ -511,35 +698,13 @@ function renderRail(api, doc, tab) {
     for (let i = 0; i < doc.areas.length; i++) {
       const id = doc.areas[i].id;
       rail.appendChild(
-        railButton(id, api.getSelectedAreaId() === id && (!api.getSelectedPlacedId || !api.getSelectedPlacedId()), () => {
-          if (api.setSelectedPlacedId) api.setSelectedPlacedId('');
+        railButton(id, api.getSelectedAreaId() === id, () => {
+          clearPlacedSelection(api);
           api.selectArea(id);
           api.paint();
-          renderPanel(api.panelRoot(), api);
+          api.refreshPanel();
         })
       );
-    }
-    if (doc.placedObjects && doc.placedObjects.length) {
-      const sep = document.createElement('div');
-      sep.className = 'editor-line is-head';
-      sep.style.padding = '8px 4px 4px';
-      sep.style.fontSize = '12px';
-      sep.style.color = '#8b949e';
-      sep.textContent = 'Placed (' + doc.placedObjects.length + ')';
-      rail.appendChild(sep);
-
-      for (let i = 0; i < doc.placedObjects.length; i++) {
-        const item = doc.placedObjects[i];
-        const isSel = api.getSelectedPlacedId && api.getSelectedPlacedId() === item.id;
-        const icon = item.kind === 'unit' ? '👤 ' : '🧱 ';
-        rail.appendChild(
-          railButton(icon + (item.templateId || item.id), isSel, () => {
-            if (api.setSelectedPlacedId) api.setSelectedPlacedId(item.id);
-            api.paint();
-            renderPanel(api.panelRoot(), api);
-          })
-        );
-      }
     }
     return rail;
   }
@@ -587,7 +752,7 @@ function renderRail(api, doc, tab) {
           const unitIds = Object.keys(doc.units || {});
           doc.playerSpawns.push({
             role: 'player',
-            unitId: doc.units && doc.units.PLAYER ? 'PLAYER' : unitIds[0] || '',
+            unitId: doc.units && doc.units.Player ? 'Player' : unitIds[0] || '',
             team: team,
             areaId: doc.areas[0] ? doc.areas[0].id : '',
           });
@@ -599,9 +764,12 @@ function renderRail(api, doc, tab) {
       );
     }
     for (let i = 0; i < doc.spawns.length; i++) {
+      const waveNum = i + 1;
+      if (doc.spawns[i]) doc.spawns[i].wave = waveNum;
       const key = 'wave:' + i;
       rail.appendChild(
-        railButton('wave ' + (i + 1), api.getSpawnKey() === key, () => {
+        railButton('wave ' + waveNum, api.getSpawnKey() === key, () => {
+          if (doc.spawns[i]) doc.spawns[i].wave = waveNum;
           api.selectSpawnKey(key);
           api.paint();
           renderPanel(api.panelRoot(), api);
@@ -612,8 +780,9 @@ function renderRail(api, doc, tab) {
       railButton('+', false, () => {
         const area = api.getSelectedArea();
         const unitIds = Object.keys(doc.units || {});
+        const waveNum = doc.spawns.length + 1;
         doc.spawns.push({
-          wave: doc.spawns.length + 1,
+          wave: waveNum,
           timeStart: 0,
           team: 2,
           areaId: area ? area.id : doc.areas[0] ? doc.areas[0].id : '',
@@ -670,10 +839,10 @@ function renderRail(api, doc, tab) {
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     rail.appendChild(
-      railButton(id, selected === id, () => {
+      railButton(formatCatalogId(id), selected === id, () => {
         api.setSheetId(sheet.key, id);
         renderPanel(api.panelRoot(), api);
-      })
+      }, formatCatalogId(id))
     );
   }
   rail.appendChild(
@@ -712,7 +881,6 @@ function idsOfKind(map, kind) {
   return out;
 }
 
-const LOCKED_BACKPACKS = ['BACKPACK_T1', 'BACKPACK_T2', 'BACKPACK_T3'];
 const BLOCK_RAIL_SECTIONS = ['Block', 'Door', 'Generator', 'Factory', 'Base'];
 
 function railHeading(text) {
@@ -753,18 +921,18 @@ function appendBlockRail(rail, api, sheet) {
     const list = buckets[typeName];
     for (let i = 0; i < list.length; i++) {
       const id = list[i];
-      const label = id + ' ' + typeName;
+      const label = formatCatalogId(id);
       rail.appendChild(
         railButton(label, selected === id, () => {
           api.setSheetId(sheet.key, id);
           renderPanel(api.panelRoot(), api);
-        }, label)
+        }, label + ' · ' + typeName)
       );
     }
   }
   rail.appendChild(
     railButton('+', false, () => {
-      const id = nextId(sheet.map, 'ITEM');
+      const id = nextId(sheet.map, 'Item');
       const row = blankFor(sheet.key, 'Block');
       row.id = id;
       sheet.map[id] = row;
@@ -777,13 +945,23 @@ function appendBlockRail(rail, api, sheet) {
 
 function appendSkillRail(rail, api, doc) {
   const skills = doc.skills || {};
-  const ids = Object.keys(skills);
+  const ids = Object.keys(skills).filter((id) => {
+    const upper = String(id || '').toUpperCase();
+    // Skills tab: no Tile / Backpack entries or labels.
+    if (upper === 'TILE' || upper.indexOf('BACKPACK') >= 0) return false;
+    const rec = skills[id];
+    const type = rec && rec.effect && rec.effect.type ? String(rec.effect.type).toUpperCase() : '';
+    if (type === 'TILE' || type.indexOf('BACKPACK') >= 0) return false;
+    return true;
+  });
   const known = skillEffectNames();
   const buckets = {};
   const order = [];
   for (let i = 0; i < ids.length; i++) {
     const effect = skills[ids[i]] && skills[ids[i]].effect;
-    const typeName = (effect && effect.type) || 'Skill';
+    let typeName = (effect && effect.type) || 'Skill';
+    const typeUpper = String(typeName).toUpperCase();
+    if (typeUpper === 'TILE' || typeUpper.indexOf('BACKPACK') >= 0) typeName = 'Skill';
     if (!buckets[typeName]) {
       buckets[typeName] = [];
       order.push(typeName);
@@ -798,24 +976,29 @@ function appendSkillRail(rail, api, doc) {
     if (bi >= 0) return 1;
     return a < b ? -1 : a > b ? 1 : 0;
   });
-  const pick = api.getSheetId('skillId');
+  let pick = api.getSheetId('skillId');
+  const flat = [];
   for (let s = 0; s < order.length; s++) {
-    const typeName = order[s];
-    rail.appendChild(railHeading(typeName));
-    const list = buckets[typeName];
-    for (let i = 0; i < list.length; i++) {
-      const id = list[i];
-      rail.appendChild(
-        railButton(id, pick === id, () => {
-          api.setSheetId('skillId', id);
-          renderPanel(api.panelRoot(), api);
-        }, id)
-      );
-    }
+    const list = buckets[order[s]];
+    for (let i = 0; i < list.length; i++) flat.push(list[i]);
+  }
+  if (flat.indexOf(pick) < 0) {
+    pick = flat[0] || '';
+    api.setSheetId('skillId', pick);
+  }
+  for (let i = 0; i < flat.length; i++) {
+    const id = flat[i];
+    const label = formatCatalogId(id);
+    rail.appendChild(
+      railButton(label, pick === id, () => {
+        api.setSheetId('skillId', id);
+        renderPanel(api.panelRoot(), api);
+      }, label)
+    );
   }
   rail.appendChild(
     railButton('+', false, () => {
-      const id = nextId(skills, 'SKILL');
+      const id = nextId(skills, 'Skill');
       const row = blankFor('skillId', 'MELEE_SWING');
       row.id = id;
       skills[id] = row;
@@ -824,34 +1007,10 @@ function appendSkillRail(rail, api, doc) {
       renderPanel(api.panelRoot(), api);
     }, 'Add skill')
   );
-  rail.appendChild(railHeading('Backpack'));
-  const items = doc.items || {};
-  for (let i = 0; i < LOCKED_BACKPACKS.length; i++) {
-    const id = LOCKED_BACKPACKS[i];
-    if (!items[id]) continue;
-    rail.appendChild(
-      railButton(id, pick === id, () => {
-        api.setSheetId('skillId', id);
-        renderPanel(api.panelRoot(), api);
-      }, id)
-    );
-  }
 }
 
 function renderSkillSheet(body, api, doc) {
-  const pick = api.getSheetId('skillId');
-  const item = doc.items && doc.items[pick];
-  if (isLockedBackpack(item)) {
-    renderTyped(body, 'itemId', item, {
-      choices: (key, current) => choiceIds(doc, key, current),
-      touch: () => {},
-      rename: () => {},
-      confirm: (message) => (api.confirm ? api.confirm(message) : Promise.resolve(false)),
-      remove: () => {},
-    });
-    return;
-  }
-  renderSheet(body, api, doc, doc.skills, 'skillId', 'SKILL');
+  renderSheet(body, api, doc, doc.skills, 'skillId', 'Skill');
 }
 
 function appendKindRail(rail, api, sheet, kind) {
@@ -868,15 +1027,15 @@ function appendKindRail(rail, api, sheet, kind) {
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     rail.appendChild(
-      railButton(id, selected === id, () => {
+      railButton(formatCatalogId(id), selected === id, () => {
         api.setSheetId(sheet.key, id);
         renderPanel(api.panelRoot(), api);
-      })
+      }, formatCatalogId(id))
     );
   }
   rail.appendChild(
     railButton('+', false, () => {
-      const id = nextId(sheet.map, kind === 'Ammo' ? 'AMMO' : 'ITEM');
+      const id = nextId(sheet.map, kind === 'Ammo' ? 'Ammo' : 'Item');
       const row = blankFor(sheet.key, kind);
       row.id = id;
       sheet.map[id] = row;
@@ -894,18 +1053,18 @@ function itemRailGroup(record) {
 }
 
 function sheetOf(doc, tab) {
-  if (tab === 'weapon') return { map: doc.weapons, key: 'weaponId', prefix: 'WEAPON' };
-  if (itemKindOf(tab)) return { map: doc.items, key: 'itemId', prefix: 'ITEM' };
-  if (tab === 'skill') return { map: doc.skills, key: 'skillId', prefix: 'SKILL' };
-  return { map: doc.units, key: 'unitId', prefix: 'UNIT' };
+  if (tab === 'weapon') return { map: doc.weapons, key: 'weaponId', prefix: 'Weapon' };
+  if (itemKindOf(tab)) return { map: doc.items, key: 'itemId', prefix: 'Item' };
+  if (tab === 'skill') return { map: doc.skills, key: 'skillId', prefix: 'Skill' };
+  return { map: doc.units, key: 'unitId', prefix: 'Unit' };
 }
 
 function nextId(map, prefix) {
   let n = Object.keys(map).length + 1;
-  let id = prefix + '_' + n;
+  let id = formatCatalogId(prefix + '_' + n);
   while (map[id]) {
     n += 1;
-    id = prefix + '_' + n;
+    id = formatCatalogId(prefix + '_' + n);
   }
   return id;
 }
@@ -949,27 +1108,27 @@ function appendGearRail(rail, api, doc) {
   for (let i = 0; i < gear.guns.length; i++) {
     const id = gear.guns[i];
     rail.appendChild(
-      railButton(id, gear.pick === 'gun' && gear.id === id, () => {
+      railButton(formatCatalogId(id), gear.pick === 'gun' && gear.id === id, () => {
         api.setSheetId('gearPick', 'gun');
         api.setSheetId('weaponId', id);
         renderPanel(api.panelRoot(), api);
-      })
+      }, formatCatalogId(id))
     );
   }
   for (let i = 0; i < gear.tools.length; i++) {
     const id = gear.tools[i];
     rail.appendChild(
-      railButton(id, gear.pick === 'tool' && gear.id === id, () => {
+      railButton(formatCatalogId(id), gear.pick === 'tool' && gear.id === id, () => {
         api.setSheetId('gearPick', 'tool');
         api.setSheetId('meleeId', id);
         renderPanel(api.panelRoot(), api);
-      })
+      }, formatCatalogId(id))
     );
   }
   rail.appendChild(
     railButton('+', false, () => {
-      const id = nextId(doc.weapons, 'WEAPON');
-      const row = blankFor('weaponId', 'Gun');
+      const id = nextId(doc.weapons, 'Weapon');
+      const row = blankFor('weaponId', 'Normal');
       row.id = id;
       doc.weapons[id] = row;
       api.setSheetId('gearPick', 'gun');
@@ -1174,6 +1333,31 @@ function appendAreaField(line, api, doc, row) {
   line.appendChild(field('Area', center));
 }
 
+/** Area always on its own settings row (not packed with Unit/Team). */
+function appendAreaRow(body, api, doc, row) {
+  const line = document.createElement('div');
+  line.className = 'editor-line';
+  appendAreaField(line, api, doc, row);
+  body.appendChild(line);
+}
+
+function settingsUnitPicker(api, unitIds, currentId, onPick) {
+  return buildCatalogListPicker({
+    ids: unitIds,
+    value: currentId || '',
+    allowEmpty: false,
+    formatId: formatCatalogId,
+    onHoverId: (id) => {
+      renderCatalogTrailPreview(document.getElementById('editor-placed-tray'), api, 'unit', id, 'settings');
+    },
+    onHoverEnd: () => releaseTrailClaim('settings', api),
+    onChange: (id) => {
+      releaseTrailClaim('settings', api);
+      if (onPick) onPick(id);
+    },
+  });
+}
+
 function renderSeat(body, api, doc, row, canDelete) {
   body.appendChild(
     field(
@@ -1194,12 +1378,11 @@ function renderSeat(body, api, doc, row, canDelete) {
   const line = document.createElement('div');
   line.className = 'editor-line';
   const unitIds = Object.keys(doc.units || {});
-  line.appendChild(
-    field('Unit', selectOf(idList(unitIds, row.unitId), row.unitId || '', (value) => {
-      row.unitId = value;
-      api.touch();
-    }), 'is-grow')
-  );
+  const seatUnitPicker = settingsUnitPicker(api, unitIds, row.unitId || '', (value) => {
+    row.unitId = value;
+    api.touch();
+  });
+  line.appendChild(field('Unit', seatUnitPicker, 'is-grow'));
   line.appendChild(
     field('Team', selectOf(seatTeamOptions(doc, row), row.team, (value) => {
       row.team = value | 0;
@@ -1208,8 +1391,8 @@ function renderSeat(body, api, doc, row, canDelete) {
       renderPanel(api.panelRoot(), api);
     }), 'is-short')
   );
-  appendAreaField(line, api, doc, row);
   body.appendChild(line);
+  appendAreaRow(body, api, doc, row);
   if (!canDelete) return;
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -1239,14 +1422,16 @@ function renderSpawns(body, api, doc) {
     return;
   }
 
+  const waveIndex = key.indexOf('wave:') === 0 ? (key.slice(5) | 0) : -1;
+  const waveNum = waveIndex >= 0 ? waveIndex + 1 : Math.max(1, row.wave | 0);
+  row.wave = waveNum;
+
   const line = document.createElement('div');
-  line.className = 'editor-line';
-  line.appendChild(
-    field('Wave', numberOf(row.wave, 1, (value) => {
-      row.wave = Math.max(1, value | 0);
-      api.touch();
-    }), 'is-short')
-  );
+  line.className = 'editor-line is-compact-row';
+  const waveInput = numberOf(waveNum, 1, () => {});
+  waveInput.disabled = true;
+  waveInput.title = 'Locked to rail tab wave ' + waveNum;
+  line.appendChild(field('Wave', waveInput, 'is-short'));
   line.appendChild(
     field('Time', numberOf(row.timeStart, 0, (value) => {
       row.timeStart = Math.max(0, Number(value) || 0);
@@ -1261,14 +1446,14 @@ function renderSpawns(body, api, doc) {
       api.touch();
     }), 'is-short')
   );
-  appendAreaField(line, api, doc, row);
   body.appendChild(line);
+  appendAreaRow(body, api, doc, row);
 
   const unitIds = Object.keys(doc.units || {});
   const specs = Array.isArray(row.units) ? row.units : [];
   if (specs.length) {
     const head = document.createElement('div');
-    head.className = 'editor-line is-head';
+    head.className = 'editor-line is-head is-compact-head';
     head.appendChild(columnMark('Unit', 'is-grow'));
     head.appendChild(columnMark('Count', 'is-short'));
     head.appendChild(columnMark('', 'is-remove'));
@@ -1277,25 +1462,30 @@ function renderSpawns(body, api, doc) {
   for (let i = 0; i < specs.length; i++) {
     const spec = parseUnitSpec(specs[i]);
     const unitLine = document.createElement('div');
-    unitLine.className = 'editor-line';
-    unitLine.appendChild(
-      field('', selectOf(idList(unitIds, spec.id), spec.id, (value) => {
-        row.units[i] = value + ':' + spec.count;
-        api.touch();
-        renderPanel(api.panelRoot(), api);
-      }), 'is-grow')
-    );
-    unitLine.appendChild(
-      field('', numberOf(spec.count, 1, (value) => {
-        row.units[i] = spec.id + ':' + Math.max(1, value | 0);
-        api.touch();
-        renderPanel(api.panelRoot(), api);
-      }), 'is-short')
-    );
+    unitLine.className = 'editor-line is-compact-row';
+    const unitPicker = settingsUnitPicker(api, unitIds, spec.id, (value) => {
+      row.units[i] = value + ':' + spec.count;
+      api.touch();
+      renderPanel(api.panelRoot(), api);
+    });
+    // Empty visible label — head row already names columns; help still uses Unit/Count.
+    const unitField = field('', unitPicker, 'is-grow');
+    unitField.title = getFieldHelp('Unit');
+    bindFieldHelpHover(unitField, () => getFieldHelp('Unit'));
+    unitLine.appendChild(unitField);
+    const countField = field('', numberOf(spec.count, 1, (value) => {
+      row.units[i] = spec.id + ':' + Math.max(1, value | 0);
+      api.touch();
+      renderPanel(api.panelRoot(), api);
+    }), 'is-short');
+    countField.title = getFieldHelp('Count');
+    bindFieldHelpHover(countField, () => getFieldHelp('Count'));
+    unitLine.appendChild(countField);
     const dropUnit = document.createElement('button');
     dropUnit.type = 'button';
     dropUnit.className = 'is-remove';
     dropUnit.textContent = 'Remove';
+    dropUnit.title = 'Remove this unit row';
     dropUnit.addEventListener('click', () => {
       row.units.splice(i, 1);
       api.touch();
@@ -1362,15 +1552,16 @@ function renderSheet(body, api, doc, map, selectedKey) {
     armorTypes: armorTypeNames(doc),
     choices: (key, current) => choiceIds(doc, key, current),
     rename: (next) => {
-      if (!next || next === record.id || map[next]) return;
+      const normalized = formatCatalogId(next);
+      if (!normalized || normalized === record.id || map[normalized]) return;
       const prev = record.id;
-      map[next] = record;
-      record.id = next;
+      map[normalized] = record;
+      record.id = normalized;
       delete map[prev];
-      retarget(doc, selectedKey, prev, next);
-      api.setSheetId(selectedKey, next);
+      retarget(doc, selectedKey, prev, normalized);
+      api.setSheetId(selectedKey, normalized);
       if (selectedKey === 'itemId' && api.getSheetId('gearPick') === 'tool') {
-        api.setSheetId('meleeId', next);
+        api.setSheetId('meleeId', normalized);
       }
       api.touch();
       renderPanel(api.panelRoot(), api);
@@ -1381,7 +1572,7 @@ function renderSheet(body, api, doc, map, selectedKey) {
         delete doc.weapons[prev];
         let id = prev;
         if (doc.items[id]) {
-          id = nextId(doc.items, 'ITEM');
+          id = nextId(doc.items, 'Item');
           row.id = id;
         }
         doc.items[id] = row;
@@ -1395,6 +1586,7 @@ function renderSheet(body, api, doc, map, selectedKey) {
     confirm: (message) => (api.confirm ? api.confirm(message) : Promise.resolve(false)),
     touch: (structural) => {
       api.touch();
+      api.paint();
       if (structural) renderPanel(api.panelRoot(), api);
     },
     remove: () => {
@@ -1403,6 +1595,18 @@ function renderSheet(body, api, doc, map, selectedKey) {
       api.touch();
       renderPanel(api.panelRoot(), api);
     },
+    trailPreview: (kind, templateId) => {
+      if (!templateId) return;
+      renderCatalogTrailPreview(
+        document.getElementById('editor-placed-tray'),
+        api,
+        kind,
+        templateId,
+        'settings'
+      );
+    },
+    trailRelease: () => releaseTrailClaim('settings', api),
+    getDoc: () => doc,
   };
   if (selectedKey !== 'unitId') {
     renderTyped(body, selectedKey, record, ctx);
@@ -1497,13 +1701,11 @@ function renderDropRows(body, api, doc, record, selectedKey) {
   const ids = resourceItemIds(doc.items);
   const block = selectedKey !== 'unitId';
   const rows = block ? blockDropRows(record) : unitDropRows(record);
-  const note = document.createElement('p');
-  note.className = 'editor-note';
-  note.textContent = 'Drop';
-  body.appendChild(note);
+  appendDivider(body);
+  appendSectionTitle(body, 'Drops');
   for (let i = 0; i < rows.length; i++) {
     const line = document.createElement('div');
-    line.className = 'editor-line';
+    line.className = 'editor-line is-compact-row';
     const options = [];
     for (let n = 0; n < ids.length; n++) options.push({ value: ids[n], label: ids[n] });
     if (rows[i].id && ids.indexOf(rows[i].id) < 0) options.unshift({ value: rows[i].id, label: rows[i].id });
@@ -1574,6 +1776,8 @@ function resourceItemIds(items) {
 
 function renderCraft(body, api, doc, record) {
   const craft = readEditorCraft(record);
+  appendDivider(body);
+  appendSectionTitle(body, 'Crafting');
   const toggle = document.createElement('input');
   toggle.type = 'checkbox';
   toggle.checked = craft.on;
@@ -1592,7 +1796,7 @@ function renderCraft(body, api, doc, record) {
     const row = rows[i];
     if (!row || typeof row !== 'object') continue;
     const line = document.createElement('div');
-    line.className = 'editor-line';
+    line.className = 'editor-line is-compact-row';
     const options = [];
     for (let n = 0; n < ids.length; n++) options.push({ value: ids[n], label: ids[n] });
     if (!options.length) options.push({ value: '', label: '(none)' });
@@ -1642,14 +1846,17 @@ function renderCraft(body, api, doc, record) {
   body.appendChild(box);
 }
 
+function nonPendingIds(map) {
+  return Object.keys(map || {}).filter((id) => map[id] && !map[id].pending);
+}
+
 function ammoItemIds(items) {
   const ids = [];
   const keys = Object.keys(items || {});
   for (let i = 0; i < keys.length; i++) {
     const row = items[keys[i]];
-    if (!row) continue;
-    const ammo = row.pending ? row.pendingCategory === 'Ammo' : itemCategory(row) === 'Ammo';
-    if (!ammo) continue;
+    if (!row || row.pending) continue;
+    if (itemCategory(row) !== 'Ammo') continue;
     const id = typeof row.id === 'string' && row.id ? row.id : keys[i];
     if (id && ids.indexOf(id) < 0) ids.push(id);
   }
@@ -1658,9 +1865,9 @@ function ammoItemIds(items) {
 
 function choiceIds(doc, key, current) {
   const units = mapRecords(doc.units);
-  const weapons = mapRecords(doc.weapons);
-  const items = mapRecords(doc.items);
-  const skills = mapRecords(doc.skills);
+  const weapons = mapRecords(doc.weapons).filter((r) => r && !r.pending);
+  const items = mapRecords(doc.items).filter((r) => r && !r.pending);
+  const skills = mapRecords(doc.skills).filter((r) => r && !r.pending);
   let ids = [];
   if (key === 'model') ids = UNIT_MODEL_IDS.slice();
   else if (key === 'ammoTypeId') ids = ammoItemIds(doc.items);
@@ -1668,9 +1875,9 @@ function choiceIds(doc, key, current) {
   else if (key === 'damageType') ids = damageTypeNames(doc);
   else if (key === 'reloadType') ids = RELOAD_CHOICES.slice();
   else if (key === 'armorType') ids = armorTypeNames(doc);
-  else if (key === 'itemId') ids = Object.keys(doc.items || {});
-  else if (key === 'defaultWeapon' || key === 'weaponId') ids = Object.keys(doc.weapons || {});
-  else if (key === 'skills' || key === 'activeSkills') ids = Object.keys(doc.skills || {});
+  else if (key === 'itemId') ids = nonPendingIds(doc.items);
+  else if (key === 'defaultWeapon' || key === 'weaponId') ids = nonPendingIds(doc.weapons);
+  else if (key === 'skills' || key === 'activeSkills') ids = nonPendingIds(doc.skills);
   else if (key === 'allowedGoals') ids = collectStrings(units, 'allowedGoals');
   else if (key === 'targetPriorityList') ids = collectStrings(units, 'targetPriorityList');
   else if (key === 'preferredRange') ids = collectStrings(units, 'preferredRange');
@@ -1691,6 +1898,17 @@ function retarget(doc, kind, prev, next) {
     const seats = doc.playerSpawns || [];
     for (let i = 0; i < seats.length; i++) {
       if (seats[i].unitId === prev) seats[i].unitId = next;
+    }
+  }
+  if (Array.isArray(doc.placedObjects)) {
+    const targetKind = kind === 'unitId' ? 'unit' : kind === 'itemId' ? 'object' : '';
+    if (targetKind) {
+      for (let i = 0; i < doc.placedObjects.length; i++) {
+        const inst = doc.placedObjects[i];
+        if (inst && inst.kind === targetKind && inst.templateId === prev) {
+          inst.templateId = next;
+        }
+      }
     }
   }
   const sheets = [doc.units, doc.weapons, doc.items];
@@ -1730,14 +1948,6 @@ function previewFor(api, key, record) {
   return colorPreview(recordSwatch(record));
 }
 
-function recordSwatch(record) {
-  if (record && typeof record.color === 'string' && record.color) return record.color;
-  if (record && record.effect && typeof record.effect.color === 'string' && record.effect.color) {
-    return record.effect.color;
-  }
-  return '#808080';
-}
-
 function previewFrame() {
   const wrap = document.createElement('div');
   wrap.className = 'editor-preview';
@@ -1754,155 +1964,6 @@ function colorPreview(color) {
   swatch.style.background = cssColor(color);
   frame.box.appendChild(swatch);
   return frame.wrap;
-}
-
-function parseUnitArt(svgText) {
-  if (!svgText || svgText.indexOf('<svg') < 0) return null;
-  return new DOMParser().parseFromString(svgText, 'image/svg+xml');
-}
-
-function hideMeasures(clone, extra) {
-  const nodes = clone.querySelectorAll('[id]');
-  for (let i = 0; i < nodes.length; i++) {
-    const id = nodes[i].getAttribute('id') || '';
-    if (id.indexOf('SizeView') === 0 || (extra && extra(id))) nodes[i].setAttribute('display', 'none');
-  }
-}
-
-function cloneArtGroup(parsed, groupId) {
-  if (!parsed || !groupId) return null;
-  const src = parsed.getElementById(groupId);
-  if (!src) return null;
-  const clone = src.cloneNode(true);
-  clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
-  return clone;
-}
-
-function weaponClone(parsed, groupName) {
-  let clone = cloneArtGroup(parsed, groupName);
-  if (!clone && groupName !== 'Weapon_Colt_1911') clone = cloneArtGroup(parsed, 'Weapon_Colt_1911');
-  if (!clone) return null;
-  hideMeasures(clone);
-  return clone;
-}
-
-const LAYER_ARM_RE = /^Arm_/i;
-const LAYER_BODY_RE = /^(Body|Outfit)/i;
-const LAYER_BOTTOM_RE = /^Pivot_Asset_Bottom/i;
-const LAYER_TOP_RE = /^Pivot_Asset_Top/i;
-
-function hideNode(el) {
-  el.setAttribute('display', 'none');
-  el.style.display = 'none';
-}
-
-function filterSkinLayer(clone, kind) {
-  const rootId = clone.getAttribute('id') || '';
-  const nodes = clone.querySelectorAll('[id]');
-  for (let i = 0; i < nodes.length; i++) {
-    const el = nodes[i];
-    const id = el.getAttribute('id') || '';
-    const arm = LAYER_ARM_RE.test(id);
-    const measure = id.indexOf('SizeView') === 0 || id.indexOf('ColliderBody') === 0;
-    if (measure || arm) {
-      if (!(kind === 'arms' && arm)) hideNode(el);
-      continue;
-    }
-    if (kind === 'arms') {
-      if (id !== rootId) hideNode(el);
-      continue;
-    }
-    if (kind === 'body') {
-      if (LAYER_TOP_RE.test(id) || LAYER_BOTTOM_RE.test(id)) hideNode(el);
-      else if (!LAYER_BODY_RE.test(id) && /^Pivot_/i.test(id)) hideNode(el);
-    } else if (kind === 'assetBottom') {
-      if (!LAYER_BOTTOM_RE.test(id) && id !== rootId) {
-        if (LAYER_BODY_RE.test(id) || LAYER_TOP_RE.test(id) || /^Pivot_/i.test(id)) hideNode(el);
-      }
-    } else if (kind === 'assetTop') {
-      if (!LAYER_TOP_RE.test(id) && id !== rootId) {
-        if (LAYER_BODY_RE.test(id) || LAYER_BOTTOM_RE.test(id) || /^Pivot_/i.test(id)) hideNode(el);
-      }
-    }
-  }
-}
-
-function armPoseTransform(parsed, hold, which) {
-  const name = hold === 'hold_Gun_2' ? 'Action_hold_Gun_2' : 'Action_hold_Gun';
-  const group = parsed.getElementById(name);
-  if (!group) return '';
-  const re = which === 1 ? /^Arm_1/i : /^Arm_2/i;
-  const nodes = group.querySelectorAll('[id]');
-  for (let i = 0; i < nodes.length; i++) {
-    const id = nodes[i].getAttribute('id') || '';
-    if (!re.test(id)) continue;
-    return nodes[i].getAttribute('transform') || '';
-  }
-  return '';
-}
-
-function applyModelArmPose(clone, parsed, hold) {
-  const nodes = clone.querySelectorAll('[id]');
-  for (let i = 0; i < nodes.length; i++) {
-    const id = nodes[i].getAttribute('id') || '';
-    let which = 0;
-    if (/^Arm_1/i.test(id)) which = 1;
-    else if (/^Arm_2/i.test(id)) which = 2;
-    if (!which) continue;
-    const transform = armPoseTransform(parsed, hold, which);
-    if (transform) nodes[i].setAttribute('transform', transform);
-  }
-}
-
-function modelHoldNodes(parsed, groupId, spec) {
-  const bottom = cloneArtGroup(parsed, groupId);
-  const arms = cloneArtGroup(parsed, groupId);
-  const body = cloneArtGroup(parsed, groupId);
-  const top = cloneArtGroup(parsed, groupId);
-  if (!bottom && !arms && !body && !top) return [];
-  if (bottom) filterSkinLayer(bottom, 'assetBottom');
-  if (arms) {
-    filterSkinLayer(arms, 'arms');
-    if (spec && spec.hold) applyModelArmPose(arms, parsed, spec.hold);
-  }
-  if (body) filterSkinLayer(body, 'body');
-  if (top) filterSkinLayer(top, 'assetTop');
-  const nodes = [];
-  if (bottom) nodes.push(bottom);
-  if (arms) nodes.push(arms);
-  if (spec && spec.group) {
-    const gun = weaponClone(parsed, spec.group);
-    if (gun) nodes.push(gun);
-  }
-  if (body) nodes.push(body);
-  if (top) nodes.push(top);
-  return nodes;
-}
-
-function mountModelPreview(parsed, groupId, spec) {
-  const nodes = modelHoldNodes(parsed, groupId, spec);
-  if (!nodes.length) return null;
-  const svg = mountPreviewSvg(parsed.querySelector('defs'), nodes);
-  svg.setAttribute('data-skin', groupId);
-  svg.setAttribute('data-layers', spec && spec.group ? 'bottom arm weapon body top' : 'bottom arm body top');
-  return svg;
-}
-
-function mountPreviewSvg(defs, nodes) {
-  const serial = new XMLSerializer();
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '100%');
-  if (defs) svg.appendChild(defs.cloneNode(true));
-  const host = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  let html = '';
-  for (let i = 0; i < nodes.length; i++) {
-    if (nodes[i]) html += serial.serializeToString(nodes[i]);
-  }
-  host.innerHTML = html;
-  svg.appendChild(host);
-  return svg;
 }
 
 function fitPreviewArt(root) {
@@ -1932,19 +1993,6 @@ function fitPreviewArt(root) {
   }
 }
 
-function weaponRecordOf(doc, weaponId) {
-  if (!weaponId) return null;
-  if (doc && doc.weapons && doc.weapons[weaponId]) return doc.weapons[weaponId];
-  if (doc && doc.weapons) {
-    const ids = Object.keys(doc.weapons);
-    for (let i = 0; i < ids.length; i++) {
-      const row = doc.weapons[ids[i]];
-      if (row && row.id === weaponId) return row;
-    }
-  }
-  return { id: weaponId };
-}
-
 function previewCaption(text) {
   const note = document.createElement('p');
   note.className = 'editor-preview-caption';
@@ -1955,137 +2003,39 @@ function previewCaption(text) {
 function weaponPreview(api, record) {
   const frame = previewFrame();
   const pack = api.getPack ? api.getPack() : null;
-  const parsed = parseUnitArt(pack && pack.unitArt);
-  const svg = parsed ? mountModelPreview(parsed, 'Default_skin_1', weaponPreviewSpec(record)) : null;
-  if (svg) frame.box.appendChild(svg);
+  // Unit hold + gun layers (not weapon-only).
+  const pooled = ensureWeaponHeldPoolEntry(pack, record, () => {
+    if (api.refreshPanel) api.refreshPanel();
+  });
+  if (pooled) {
+    const img = mountPoolPreview(pooled);
+    if (img) frame.box.appendChild(img);
+  }
   return frame.wrap;
-}
-
-function boxInSpace(el, space, svg) {
-  let bb = null;
-  try {
-    bb = el.getBBox();
-  } catch (err) {
-    bb = null;
-  }
-  if (!bb || !(bb.width > 0) || !(bb.height > 0)) return null;
-  const from = el.getScreenCTM();
-  const to = space.getScreenCTM();
-  if (!from || !to) return { x: bb.x, y: bb.y, w: bb.width, h: bb.height };
-  const into = to.inverse();
-  const corners = [
-    [bb.x, bb.y],
-    [bb.x + bb.width, bb.y],
-    [bb.x, bb.y + bb.height],
-    [bb.x + bb.width, bb.y + bb.height],
-  ];
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (let i = 0; i < corners.length; i++) {
-    const point = svg.createSVGPoint();
-    point.x = corners[i][0];
-    point.y = corners[i][1];
-    const placed = point.matrixTransform(from).matrixTransform(into);
-    if (placed.x < minX) minX = placed.x;
-    if (placed.y < minY) minY = placed.y;
-    if (placed.x > maxX) maxX = placed.x;
-    if (placed.y > maxY) maxY = placed.y;
-  }
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-}
-
-function unionSpace(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const right = Math.max(a.x + a.w, b.x + b.w);
-  const bottom = Math.max(a.y + a.h, b.y + b.h);
-  return { x: x, y: y, w: right - x, h: bottom - y };
-}
-
-function cellSnapSvg(parsed, groupName, fill, drawGun) {
-  let gun = cloneArtGroup(parsed, groupName);
-  if (!gun && groupName !== 'Weapon_Colt_1911') gun = cloneArtGroup(parsed, 'Weapon_Colt_1911');
-  if (!gun) return null;
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '8');
-  svg.setAttribute('height', '8');
-  svg.style.position = 'absolute';
-  svg.style.left = '-10000px';
-  svg.style.top = '0';
-  const defs = parsed.querySelector('defs');
-  if (defs) svg.appendChild(defs.cloneNode(true));
-  const host = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  host.appendChild(gun);
-  svg.appendChild(host);
-  document.body.appendChild(svg);
-  let cell = null;
-  const nodes = gun.querySelectorAll('[id]');
-  for (let i = 0; i < nodes.length; i++) {
-    const id = nodes[i].getAttribute('id') || '';
-    if (id.indexOf('SizeView') !== 0) continue;
-    cell = unionSpace(cell, boxInSpace(nodes[i], host, svg));
-  }
-  const gunBox = boxInSpace(gun, host, svg);
-  hideMeasures(gun);
-  if (!drawGun) gun.remove();
-  if (cell) {
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', String(cell.x));
-    rect.setAttribute('y', String(cell.y));
-    rect.setAttribute('width', String(cell.w));
-    rect.setAttribute('height', String(cell.h));
-    rect.setAttribute('fill', fill || '#1c2128');
-    rect.setAttribute('stroke', '#2a2010');
-    rect.setAttribute('stroke-width', '1');
-    host.insertBefore(rect, host.firstChild);
-  }
-  const frame = unionSpace(cell, drawGun ? gunBox : null) || cell || gunBox;
-  const pad = 4;
-  if (frame && frame.w > 0 && frame.h > 0) {
-    svg.setAttribute('viewBox', (frame.x - pad) + ' ' + (frame.y - pad) + ' ' + (frame.w + pad * 2) + ' ' + (frame.h + pad * 2));
-  }
-  svg.setAttribute('data-snap', 'kept');
-  svg.classList.add('is-snap');
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '100%');
-  svg.style.position = '';
-  svg.style.left = '';
-  svg.style.top = '';
-  svg.remove();
-  return svg;
 }
 
 function structurePreview(api, record) {
   const frame = previewFrame();
   frame.box.classList.add('is-structure');
   const pack = api.getPack ? api.getPack() : null;
-  const parsed = parseUnitArt(pack && pack.unitArt);
   const doc = api.getDoc ? api.getDoc() : null;
-  const weapon = record && record.weaponId ? weaponRecordOf(doc, record.weaponId) : null;
-  const spec = weapon ? weaponPreviewSpec(weapon) : null;
-  const svg = cellSnapSvg(parsed, spec ? spec.group : 'Weapon_Colt_1911', cssColor(recordSwatch(record)), !!spec);
-  if (svg) frame.box.appendChild(svg);
+  const refresh = () => {
+    if (api.refreshPanel) api.refreshPanel();
+  };
+  // Layer Block (footprint color) + Layer Gun on top — same rule as map icon.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 64 64');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.setAttribute('overflow', 'visible');
+  svg.setAttribute('shape-rendering', 'crispEdges');
+  svg.setAttribute('data-snap', 'kept');
+  svg.classList.add('editor-preview-structure');
+  const icon = buildStructureMapIcon(null, doc, record, 0, 0, 64, 64, pack, refresh);
+  if (icon) svg.appendChild(icon);
+  frame.box.appendChild(svg);
   return frame.wrap;
-}
-
-function heldLoadout(record) {
-  const list = record && Array.isArray(record.startingLoadout) ? record.startingLoadout : [];
-  const index = record && record.currentSlot != null ? record.currentSlot | 0 : 0;
-  const row = index >= 0 && index < list.length ? list[index] : null;
-  return { index: index, row: row, list: list };
-}
-
-function heldWeaponId(doc, itemId) {
-  if (!itemId || !doc) return '';
-  const item = doc.items ? doc.items[itemId] : null;
-  if (item && typeof item.weaponId === 'string' && item.weaponId) return item.weaponId;
-  if (doc.weapons && doc.weapons[itemId]) return itemId;
-  return '';
 }
 
 function wearLine(doc, list) {
@@ -2108,106 +2058,33 @@ function wearLine(doc, list) {
 function unitCaption(doc, record) {
   const held = heldLoadout(record);
   const itemId = held.row && held.row.itemId ? held.row.itemId : '(none)';
-  return 'Current slot ' + (held.index + 1) + ': ' + itemId + '. ' + wearLine(doc, held.list);
+  return 'Slot ' + (held.index + 1) + ': ' + itemId + ' · ' + wearLine(doc, held.list);
 }
 
 function unitPreview(api, record) {
   const frame = previewFrame();
   const pack = api.getPack ? api.getPack() : null;
-  const parsed = parseUnitArt(pack && pack.unitArt);
-  const groupId = closedModelGroupId(shownUnitModel(record));
   const doc = api.getDoc ? api.getDoc() : null;
-  if (parsed && groupId) {
-    const held = heldLoadout(record);
-    const itemId = held.row && held.row.itemId ? held.row.itemId : '';
-    const weaponId = heldWeaponId(doc, itemId);
-    const weapon = weaponId ? weaponRecordOf(doc, weaponId) : null;
-    const spec = weapon ? weaponPreviewSpec(weapon) : null;
-    const svg = mountModelPreview(parsed, groupId, spec);
-    if (svg) frame.box.appendChild(svg);
+  const pooled = ensureUnitPoolEntry(pack, doc, record, () => {
+    if (api.refreshPanel) api.refreshPanel();
+  });
+  if (pooled) {
+    const img = mountPoolPreview(pooled);
+    if (img) frame.box.appendChild(img);
   }
-  frame.wrap.appendChild(previewCaption(unitCaption(doc, record) + ' Model ' + (groupId || '(none)') + '.'));
+  frame.wrap.appendChild(previewCaption(unitCaption(doc, record)));
   return frame.wrap;
-}
-
-function teamLabel(team) {
-  const name = team && team.name ? ' ' + team.name : '';
-  return 'Team ' + (team ? team.id : '') + name;
-}
-
-function hostileOptions(teams, selfId, current) {
-  const options = [];
-  const seen = {};
-  for (let i = 0; i < teams.length; i++) {
-    const id = teams[i].id | 0;
-    if (id === (selfId | 0) || seen[id]) continue;
-    seen[id] = true;
-    options.push({ value: String(id), label: teamLabel(teams[i]) });
-  }
-  const currentId = current | 0;
-  if (currentId && currentId !== (selfId | 0) && !seen[currentId]) {
-    options.push({ value: String(currentId), label: 'Team ' + currentId });
-  }
-  return options;
 }
 
 function xButton(label, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'is-x';
-  button.textContent = 'X';
+  button.className = 'editor-btn-danger';
+  button.textContent = '×';
+  button.title = label;
   button.setAttribute('aria-label', label);
   button.addEventListener('click', onClick);
   return button;
-}
-
-function renderRelationList(parent, team, teams, api, key, title, addLabel) {
-  if (!Array.isArray(team[key])) team[key] = [];
-  const list = team[key];
-  const note = document.createElement('p');
-  note.className = 'editor-note';
-  note.textContent = title;
-  parent.appendChild(note);
-  for (let h = 0; h < list.length; h++) {
-    const column = document.createElement('div');
-    column.className = 'editor-column';
-    column.appendChild(
-      field(
-        '',
-        selectOf(hostileOptions(teams, team.id, list[h]), list[h], (value) => {
-          list[h] = value | 0;
-          api.touch();
-        })
-      )
-    );
-    column.appendChild(
-      xButton(title, () => {
-        list.splice(h, 1);
-        api.touch();
-        renderPanel(api.panelRoot(), api);
-      })
-    );
-    parent.appendChild(column);
-  }
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.textContent = addLabel;
-  add.addEventListener('click', () => {
-    const options = hostileOptions(teams, team.id, 0);
-    let pick = 0;
-    for (let i = 0; i < options.length; i++) {
-      const id = options[i].value | 0;
-      if (list.indexOf(id) < 0) {
-        pick = id;
-        break;
-      }
-    }
-    if (!pick) return;
-    list.push(pick);
-    api.touch();
-    renderPanel(api.panelRoot(), api);
-  });
-  parent.appendChild(add);
 }
 
 function nextTeamId(teams) {
@@ -2232,7 +2109,58 @@ function resizeTeams(teams, count) {
   while (teams.length < n) {
     const id = nextTeamId(teams);
     if (!id) break;
-    teams.push({ id: id, name: '', hostileTo: [], allyTo: [] });
+    teams.push({ id: id, name: 'Team ' + id, hostileTo: [], allyTo: [] });
+  }
+}
+
+function renderRelationGroup(body, teams, api, key, otherKey, activeClass, title) {
+  appendDivider(body);
+  appendSectionTitle(body, title);
+  if (teams.length < 2) {
+    const note = document.createElement('p');
+    note.className = 'editor-note';
+    note.textContent = 'Need 2+ teams.';
+    body.appendChild(note);
+    return;
+  }
+  for (let i = 0; i < teams.length; i++) {
+    const team = teams[i];
+    if (!Array.isArray(team[key])) team[key] = [];
+    if (!Array.isArray(team[otherKey])) team[otherKey] = [];
+    const row = document.createElement('div');
+    row.className = 'editor-relation-row';
+    const owner = document.createElement('span');
+    owner.className = 'editor-relation-owner';
+    owner.textContent = 'Team ' + team.id;
+    row.appendChild(owner);
+
+    const chips = document.createElement('div');
+    chips.className = 'editor-chip-group';
+    for (let j = 0; j < teams.length; j++) {
+      const other = teams[j];
+      if (!other || other.id === team.id) continue;
+      const on = team[key].indexOf(other.id) >= 0;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = on ? 'editor-chip ' + activeClass : 'editor-chip';
+      chip.textContent = 'Team ' + other.id;
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+      chip.addEventListener('click', () => {
+        const idx = team[key].indexOf(other.id);
+        if (idx >= 0) {
+          team[key].splice(idx, 1);
+        } else {
+          team[key].push(other.id);
+          const opp = team[otherKey].indexOf(other.id);
+          if (opp >= 0) team[otherKey].splice(opp, 1);
+        }
+        api.touch();
+        renderPanel(api.panelRoot(), api);
+      });
+      chips.appendChild(chip);
+    }
+    row.appendChild(chips);
+    body.appendChild(row);
   }
 }
 
@@ -2251,39 +2179,28 @@ function renderPlayerRules(body, api, doc) {
     api.touch();
     renderPanel(api.panelRoot(), api);
   });
-  body.appendChild(field('Team count', countInput, 'is-short'));
+  body.appendChild(field('Teams', countInput, 'is-short'));
 
   const teams = doc.teams;
+  const tags = document.createElement('div');
+  tags.className = 'editor-team-tags';
   for (let i = 0; i < teams.length; i++) {
     const team = teams[i];
-    const title = document.createElement('p');
-    title.className = 'editor-note';
-    title.textContent = 'Team ' + team.id;
-    body.appendChild(title);
-    const nameInput = document.createElement('input');
-    nameInput.value = team.name || '';
-    nameInput.addEventListener('change', () => {
-      team.name = nameInput.value.trim();
-      api.touch();
-      renderPanel(api.panelRoot(), api);
-    });
-    body.appendChild(field('Name', nameInput));
-    renderRelationList(body, team, teams, api, 'hostileTo', 'Hostile', 'Add hostile');
-    renderRelationList(body, team, teams, api, 'allyTo', 'Ally', 'Add ally');
+    if (!team.name) team.name = 'Team ' + team.id;
+    const tag = document.createElement('span');
+    tag.className = 'editor-team-tag';
+    tag.textContent = 'Team ' + team.id;
+    tags.appendChild(tag);
   }
+  body.appendChild(tags);
 
-  const natureTitle = document.createElement('p');
-  natureTitle.className = 'editor-note';
-  natureTitle.textContent = 'Nature';
-  body.appendChild(natureTitle);
-  const natureName = document.createElement('input');
-  natureName.value = 'Nature';
-  natureName.disabled = true;
-  natureName.setAttribute('aria-label', 'Nature');
-  body.appendChild(field('Name', natureName));
+  renderRelationGroup(body, teams, api, 'hostileTo', 'allyTo', 'is-hostile-on', 'Hostile');
+  renderRelationGroup(body, teams, api, 'allyTo', 'hostileTo', 'is-ally-on', 'Ally');
+
+  appendDivider(body);
   const natureNote = document.createElement('p');
   natureNote.className = 'editor-note';
-  natureNote.textContent = 'Map resources. Not a Host or Player seat.';
+  natureNote.textContent = 'Nature: Neutral map resources.';
   body.appendChild(natureNote);
 }
 
@@ -2300,6 +2217,205 @@ function renderRules(body, api, doc) {
   matchNumbers(body, api, rules);
 }
 
+function normalizeTypeId(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^A-Za-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function nextMatrixTypeId(existing, prefix) {
+  let n = existing.length + 1;
+  let candidate = prefix + '_' + n;
+  while (existing.indexOf(candidate) >= 0) {
+    n += 1;
+    candidate = prefix + '_' + n;
+  }
+  return candidate;
+}
+
+function addArmorType(doc, rawName) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const existing = armorTypeNames(doc);
+  const name = normalizeTypeId(rawName) || nextMatrixTypeId(existing, 'Armor');
+  if (existing.indexOf(name) >= 0) return false;
+  const rowKeys = damageTypeNames(doc);
+  for (let i = 0; i < rowKeys.length; i++) {
+    const r = rowKeys[i];
+    if (!matrix[r] || typeof matrix[r] !== 'object') matrix[r] = {};
+    matrix[r][name] = 1;
+  }
+  return true;
+}
+
+function renameArmorType(doc, prevCol, rawNext) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const nextCol = normalizeTypeId(rawNext);
+  const existing = armorTypeNames(doc);
+  if (!nextCol || nextCol === prevCol || existing.indexOf(nextCol) >= 0) return false;
+  const rowKeys = Object.keys(matrix);
+  for (let i = 0; i < rowKeys.length; i++) {
+    const row = matrix[rowKeys[i]];
+    if (!row || typeof row !== 'object') continue;
+    const rebuilt = {};
+    const cols = Object.keys(row);
+    for (let c = 0; c < cols.length; c++) {
+      const k = cols[c];
+      rebuilt[k === prevCol ? nextCol : k] = row[k];
+    }
+    if (!Object.prototype.hasOwnProperty.call(rebuilt, nextCol)) rebuilt[nextCol] = 1;
+    matrix[rowKeys[i]] = rebuilt;
+  }
+  const sheets = [doc.units, doc.items];
+  for (let s = 0; s < sheets.length; s++) {
+    const rows = mapRecords(sheets[s]);
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].armorType === prevCol) rows[i].armorType = nextCol;
+      if (rows[i].resistPercent && typeof rows[i].resistPercent === 'object' && Object.prototype.hasOwnProperty.call(rows[i].resistPercent, prevCol)) {
+        rows[i].resistPercent[nextCol] = rows[i].resistPercent[prevCol];
+        delete rows[i].resistPercent[prevCol];
+      }
+    }
+  }
+  return true;
+}
+
+function removeArmorType(doc, col) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const cols = armorTypeNames(doc);
+  if (cols.length <= 1) return false;
+  const remaining = cols.filter((c) => c !== col);
+  const fallback = remaining.indexOf('Default') >= 0 ? 'Default' : remaining[0];
+  const rowKeys = Object.keys(matrix);
+  for (let i = 0; i < rowKeys.length; i++) {
+    if (matrix[rowKeys[i]] && typeof matrix[rowKeys[i]] === 'object') {
+      delete matrix[rowKeys[i]][col];
+    }
+  }
+  const sheets = [doc.units, doc.items];
+  for (let s = 0; s < sheets.length; s++) {
+    const rows = mapRecords(sheets[s]);
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].armorType === col) rows[i].armorType = fallback;
+      if (rows[i].resistPercent && typeof rows[i].resistPercent === 'object') {
+        delete rows[i].resistPercent[col];
+      }
+    }
+  }
+  return true;
+}
+
+function addDamageType(doc, rawName) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const existing = damageTypeNames(doc);
+  const name = normalizeTypeId(rawName) || nextMatrixTypeId(existing, 'Dmg');
+  if (existing.indexOf(name) >= 0) return false;
+  const cols = armorTypeNames(doc);
+  const row = {};
+  for (let c = 0; c < cols.length; c++) row[cols[c]] = 1;
+  matrix[name] = row;
+  return true;
+}
+
+function renameDamageType(doc, prevRow, rawNext) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const nextRow = normalizeTypeId(rawNext);
+  const existing = damageTypeNames(doc);
+  if (!nextRow || nextRow === prevRow || existing.indexOf(nextRow) >= 0) return false;
+  const rebuilt = {};
+  const rowKeys = Object.keys(matrix);
+  for (let i = 0; i < rowKeys.length; i++) {
+    const k = rowKeys[i];
+    rebuilt[k === prevRow ? nextRow : k] = matrix[k];
+  }
+  doc.damageMatrix.matrix = rebuilt;
+  const weapons = mapRecords(doc.weapons);
+  for (let i = 0; i < weapons.length; i++) {
+    if (weapons[i].damageType === prevRow) weapons[i].damageType = nextRow;
+  }
+  return true;
+}
+
+function removeDamageType(doc, rowName) {
+  const matrix = doc.damageMatrix && doc.damageMatrix.matrix;
+  if (!matrix) return false;
+  const rows = damageTypeNames(doc);
+  if (rows.length <= 1) return false;
+  const remaining = rows.filter((r) => r !== rowName);
+  const fallback = remaining.indexOf('Default') >= 0 ? 'Default' : remaining[0];
+  delete matrix[rowName];
+  const weapons = mapRecords(doc.weapons);
+  for (let i = 0; i < weapons.length; i++) {
+    if (weapons[i].damageType === rowName) weapons[i].damageType = fallback;
+  }
+  return true;
+}
+
+function renderMatrixTypeEditor(body, api, doc, title, names, placeholder, handlers) {
+  appendSectionTitle(body, title + ' (' + names.length + ')');
+  const list = document.createElement('div');
+  list.className = 'editor-type-list';
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const line = document.createElement('div');
+    line.className = 'editor-line is-compact-row';
+    const input = document.createElement('input');
+    input.value = name;
+    input.setAttribute('aria-label', title + ' ' + name);
+    input.addEventListener('change', () => {
+      if (handlers.rename(name, input.value)) {
+        api.touch();
+        renderPanel(api.panelRoot(), api);
+      } else {
+        input.value = name;
+      }
+    });
+    line.appendChild(field('', input, 'is-grow'));
+    const del = xButton('Remove ' + name, () => {
+      if (handlers.remove(name)) {
+        api.touch();
+        renderPanel(api.panelRoot(), api);
+      }
+    });
+    del.disabled = names.length <= 1;
+    line.appendChild(del);
+    list.appendChild(line);
+  }
+  body.appendChild(list);
+
+  const addLine = document.createElement('div');
+  addLine.className = 'editor-line is-compact-row';
+  const addInput = document.createElement('input');
+  addInput.placeholder = placeholder;
+  addInput.setAttribute('aria-label', placeholder);
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'editor-type-add-btn';
+  addBtn.textContent = '+ Add';
+  const submitAdd = () => {
+    if (handlers.add(addInput.value)) {
+      api.touch();
+      renderPanel(api.panelRoot(), api);
+    }
+  };
+  addBtn.addEventListener('click', submitAdd);
+  addInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitAdd();
+    }
+  });
+  addLine.appendChild(field('', addInput, 'is-grow'));
+  addLine.appendChild(addBtn);
+  body.appendChild(addLine);
+}
+
 function renderArmorTypeTable(body, api, doc) {
   const stored = doc.damageMatrix && doc.damageMatrix.matrix;
   if (!stored) return;
@@ -2309,36 +2425,33 @@ function renderArmorTypeTable(body, api, doc) {
   const card = document.createElement('div');
   card.className = 'editor-fields';
 
-  const title = document.createElement('h3');
-  title.style.margin = '0 0 6px 0';
-  title.style.fontSize = '15px';
-  title.style.color = '#ffffff';
-  title.textContent = 'Damage & Armor Matrix Multipliers';
-  card.appendChild(title);
-
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.textContent = `2D multiplier table (${rows.length} Damage Types × ${cols.length} Armor Types). Controls damage calculations across factions and weapons.`;
+  note.textContent = `Matrix: ${rows.length} Damage × ${cols.length} Armor`;
   card.appendChild(note);
 
   const openBtn = document.createElement('button');
   openBtn.type = 'button';
-  openBtn.className = 'tool-btn';
-  openBtn.style.padding = '10px 16px';
-  openBtn.style.fontSize = '14px';
-  openBtn.style.marginTop = '10px';
-  openBtn.style.background = '#238636';
-  openBtn.style.borderColor = '#2ea043';
-  openBtn.style.color = '#ffffff';
-  openBtn.style.width = '100%';
-  openBtn.style.justifyContent = 'center';
-  openBtn.textContent = '📊 Open Matrix Table in Center Screen (เปิดตารางตรงกลาง)';
+  openBtn.textContent = 'Open Matrix Table';
   openBtn.addEventListener('click', () => {
     openDamageMatrixModal(api, doc);
   });
   card.appendChild(openBtn);
-
   body.appendChild(card);
+
+  appendDivider(body);
+  renderMatrixTypeEditor(body, api, doc, 'Armor Types', cols, 'New armor (e.g. HEAVY)', {
+    add: (val) => addArmorType(doc, val),
+    rename: (prev, next) => renameArmorType(doc, prev, next),
+    remove: (name) => removeArmorType(doc, name),
+  });
+
+  appendDivider(body);
+  renderMatrixTypeEditor(body, api, doc, 'Damage Types', rows, 'New damage (e.g. FIRE)', {
+    add: (val) => addDamageType(doc, val),
+    rename: (prev, next) => renameDamageType(doc, prev, next),
+    remove: (name) => removeDamageType(doc, name),
+  });
 }
 
 function openDamageMatrixModal(api, doc) {
@@ -2355,9 +2468,12 @@ function openDamageMatrixModal(api, doc) {
 
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.style.fontSize = '14px';
-  note.textContent = 'Rows are Damage Types (Attacker) · Columns are Armor Types (Defender). Values are multiplier factors (e.g. 1.0 = normal, 1.25 = +25% damage, 0.75 = -25% damage).';
+  note.style.fontSize = '13px';
+  note.textContent = 'Rows: Damage (Attacker) · Columns: Armor (Defender).';
   body.appendChild(note);
+
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'editor-matrix-scroll';
 
   const table = document.createElement('table');
   table.className = 'editor-matrix';
@@ -2369,13 +2485,13 @@ function openDamageMatrixModal(api, doc) {
   group.appendChild(blank);
   const span = document.createElement('th');
   span.colSpan = cols.length || 1;
-  span.textContent = 'Armor Types (Defender)';
+  span.textContent = 'Armor (Defender)';
   group.appendChild(span);
   thead.appendChild(group);
 
   const head = document.createElement('tr');
   const corner = document.createElement('th');
-  corner.textContent = 'Damage Type (Attacker)';
+  corner.textContent = 'Damage \\ Armor';
   head.appendChild(corner);
   for (let c = 0; c < cols.length; c++) {
     const th = document.createElement('th');
@@ -2416,7 +2532,8 @@ function openDamageMatrixModal(api, doc) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
-  body.appendChild(table);
+  scrollWrap.appendChild(table);
+  body.appendChild(scrollWrap);
 
   modal.hidden = false;
 

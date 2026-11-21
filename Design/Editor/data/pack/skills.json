@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "skills": {
+    "FIST": {
+      "id": "FIST",
+      "label": "Fist",
+      "castTimeSec": 0,
+      "activeDurationSec": 0.1,
+      "cooldownSec": 0.3,
+      "effect": {
+        "type": "MELEE_SWING",
+        "damage": 18,
+        "hitUnits": true,
+        "hitBlocks": true,
+        "vfxSize": 54,
+        "color": "#e8dcc0"
+      }
+    },
+    "TAUNT_ROAR": {
+      "id": "TAUNT_ROAR",
+      "label": "Taunt Roar",
+      "castTimeSec": 0.35,
+      "activeDurationSec": 0.5,
+      "cooldownSec": 12,
+      "effect": {
+        "type": "TAUNT_PULSE",
+        "radius": 288,
+        "durationSec": 5
+      }
+    },
+    "SPEED_BOOST": {
+      "id": "SPEED_BOOST",
+      "label": "Speed Boost",
+      "castTimeSec": 0,
+      "activeDurationSec": 3,
+      "cooldownSec": 10,
+      "effect": {
+        "type": "SPEED_BOOST",
+        "speedMult": 1.35
+      }
+    },
+    "SHIELD_OVERCHARGE": {
+      "id": "SHIELD_OVERCHARGE",
+      "label": "Shield Overcharge",
+      "castTimeSec": 0.2,
+      "activeDurationSec": 0.1,
+      "cooldownSec": 14,
+      "effect": {
+        "type": "SHIELD_OVERCHARGE",
+        "shieldBonus": 60
+      }
+    },
+    "SELF_HEAL": {
+      "id": "SELF_HEAL",
+      "label": "Self Heal",
+      "castTimeSec": 0,
+      "activeDurationSec": 0,
+      "cooldownSec": 1,
+      "effect": {
+        "type": "HEAL_SELF",
+        "amount": 5
+      }
+    }
+  }
+}

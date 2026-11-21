@@ -1,0 +1,36 @@
+{
+  "id": "flatland_survival",
+  "name": "FlatLand Survival (Wave 1-7)",
+  "type": "FLATLAND",
+  "gameMode": "FLAT_SURVIVAL",
+  "worldPick": "flat",
+  "maxroom": 1,
+  "currentroom": 1,
+  "lore": "Tactical base defense survival on flat ground. Defend your base block (1,000 HP) against 7 waves of enemies.",
+  "image": "img_training",
+  "difficulty": "Normal",
+  "rules": {
+    "targetWaveToWin": 7,
+    "setupPhaseDurationSec": 60,
+    "waveCountdownSec": 60,
+    "enemiesPerWaveBase": 3,
+    "enemiesPerWaveScale": 1,
+    "waveGroupCount": 3,
+    "loseMode": 2,
+    "lastStand": true,
+    "dodgeQuota": 4
+  },
+  "base": {
+    "maxHp": 1000,
+    "footprintL3": 5,
+    "blockId": "BASE_CORE"
+  },
+  "world": {
+    "type": "flat",
+    "width": 3072,
+    "height": 3072,
+    "pathSize": 1024,
+    "cellsW": 3,
+    "cellsH": 3
+  }
+}

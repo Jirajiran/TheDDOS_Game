@@ -1,0 +1,40 @@
+{
+  "version": "1",
+  "description": "Map areas. EnterArea has a team. The command runs when the unit team matches. target is another area id.",
+  "areas": [
+    { "id": "player_start", "x": 1408, "y": 1408, "w": 256, "h": 256 },
+    { "id": "enemy_middle", "x": 1408, "y": 1408, "w": 256, "h": 256 },
+    {
+      "id": "enemy_north",
+      "action": "MoveTo",
+      "condition": "EnterArea",
+      "team": 2,
+      "target": "enemy_middle",
+      "x": 40, "y": 40, "w": 2992, "h": 80
+    },
+    {
+      "id": "enemy_south",
+      "action": "MoveTo",
+      "condition": "EnterArea",
+      "team": 2,
+      "target": "enemy_middle",
+      "x": 40, "y": 2952, "w": 2992, "h": 80
+    },
+    {
+      "id": "enemy_west",
+      "action": "MoveTo",
+      "condition": "EnterArea",
+      "team": 2,
+      "target": "enemy_middle",
+      "x": 40, "y": 120, "w": 80, "h": 2832
+    },
+    {
+      "id": "enemy_east",
+      "action": "MoveTo",
+      "condition": "EnterArea",
+      "team": 2,
+      "target": "enemy_middle",
+      "x": 2952, "y": 120, "w": 80, "h": 2832
+    }
+  ]
+}

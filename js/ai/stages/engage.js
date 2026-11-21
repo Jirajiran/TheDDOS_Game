@@ -2,6 +2,9 @@
  * ENGAGE — fight reserved combatTarget: standoff MOVE, AIM, FIRE.
  * Standoff / fire gate = weapon.maxDistancePath * PATH_SIZE (same as sim),
  * optionally scaled by archetype preferredRange mult — never a separate L3 band.
+ *
+ * FIRE requires a real combatTarget (hostile unit/block). pathGoal alone
+ * (Area / idle point) is walk-only — never shoot empty space.
  */
 
 import { ActionType } from '../../player/actions.js';
@@ -23,23 +26,37 @@ export function runEngage(ctx) {
   } = ctx;
   const actions = [];
 
-  let tx = pathGoal.x;
-  let ty = pathGoal.y;
-  let targetDist = Math.hypot(tx - unit.x, ty - unit.y);
+  const hasCombat = !!(
+    combatTarget &&
+    (combatTarget.kind === 'unit' ||
+      combatTarget.kind === 'block' ||
+      combatTarget.kind === 'base')
+  );
 
-  if (combatTarget) {
-    tx = combatTarget.x;
-    ty = combatTarget.y;
-    targetDist = combatTarget.dist;
+  // No reserved hostile → walk toward pathGoal only (no FIRE at Area/idle).
+  if (!hasCombat) {
+    const len =
+      Math.hypot(pathGoal.x - unit.x, pathGoal.y - unit.y) || 1;
+    const dx = (pathGoal.x - unit.x) / len;
+    const dy = (pathGoal.y - unit.y) / len;
+    actions.push({ type: ActionType.MOVE, unitId: unit.id, dx, dy });
+    actions.push({
+      type: ActionType.AIM,
+      unitId: unit.id,
+      aimRad: Math.atan2(pathGoal.y - unit.y, pathGoal.x - unit.x),
+    });
+    return actions;
   }
 
+  const tx = combatTarget.x;
+  const ty = combatTarget.y;
+  const targetDist = combatTarget.dist;
+
   const weapon = unit.weaponId ? getWeaponDef(unit.weaponId) : null;
-  // Bullet max vs AI fire-decision band (pack aiFireRangePath) — separate.
   const weaponRange = getWeaponMaxRangePx(weapon);
   const aiFireRange = getAiFireDecisionRangePx(weapon, match, unit);
   const flags = unit.behaviorFlags || {};
   const prefKey = flags.preferredRange || 'MEDIUM';
-  // Hold near fire-decision band so bots do not stand outside shoot gate.
   let pref = getPreferredStandoffPx(weapon, prefKey, aiFireRange);
   if (pref <= 0) pref = Math.max(80, (aiFireRange || weaponRange) * 0.75);
 

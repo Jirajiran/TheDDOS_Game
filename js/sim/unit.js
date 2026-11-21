@@ -53,7 +53,14 @@ import {
 import {
   ensureUnitSkills,
 } from '../combat/skills.js';
-import { ensureBlackboard } from '../ai/blackboard.js';
+import { ensureBlackboard, TargetKind } from '../ai/blackboard.js';
+import {
+  isHostileTeam,
+  queryHostileInSense,
+  registerSenseUnit,
+  syncSenseIndexPositions,
+  unregisterSenseUnit,
+} from '../ai/senseIndex.js';
 import { playSfx } from '../audio/sfx.js';
 import { noteHitEvent } from '../ai/events.js';
 import { decideUnitViaMediator } from '../ai/mediator.js';
@@ -103,6 +110,7 @@ export function spawnPlayerNearWorldCenter(match) {
   match.cameraFreeFly = false;
   match.respawnTimer = 0;
   match.cameraSnapPending = true;
+  registerSenseUnit(match, u);
   return u;
 }
 
@@ -208,6 +216,7 @@ export function spawnPlayer(match) {
   match.cameraFreeFly = false;
   match.respawnTimer = 0;
   match.cameraSnapPending = true;
+  registerSenseUnit(match, u);
   return u;
 }
 
@@ -267,15 +276,19 @@ export function separateUnits(match) {
   for (let i = 0; i < units.length; i++) {
     if (units[i].active) active.push(units[i]);
   }
-  const soft = GAME_PACK.unitPushSeparation;
-  for (let pass = 0; pass < 3; pass++) {
+  // Stronger soft push so AI squads do not death-ball into one cell.
+  const soft = Math.max(
+    0.65,
+    GAME_PACK.unitPushSeparation != null ? GAME_PACK.unitPushSeparation : 0.4
+  );
+  for (let pass = 0; pass < 5; pass++) {
     for (let i = 0; i < active.length; i++) {
       for (let j = i + 1; j < active.length; j++) {
         const a = active[i];
         const b = active[j];
         let dx = b.x - a.x;
         let dy = b.y - a.y;
-        const minDist = a.radius + b.radius;
+        const minDist = a.radius + b.radius + 4;
         let dist = Math.hypot(dx, dy);
         if (dist < 1e-6) {
           const nudge = minDist * 0.5;
@@ -341,11 +354,12 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
   if (ctx.impact && dmg > 0) playSfx('combat.hit.body');
   noteMoralePressure(unit, 2);
 
-  // Player-team projectile / turret hit → sticky aggro + HIT Event for Mediator.
+  // Hostile-team hit → sticky aggro (any hostile team, not Player-hardcoded).
   if (
-    unit.role === 'enemy' &&
+    unit.role !== 'player' &&
     unit.hp > 0 &&
-    ctx.sourceTeam === TEAM.PLAYER
+    ctx.sourceTeam != null &&
+    isHostileTeam(match, unit.team, ctx.sourceTeam)
   ) {
     unit.aggroChase = true;
     unit.aiStage = 'engage';
@@ -369,12 +383,16 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
         return;
       }
     }
-    const player = getPlayerUnit(match);
-    if (player && player.active) {
+    const srcId = ctx.sourceUnitId != null ? ctx.sourceUnitId | 0 : -1;
+    const srcUnit =
+      srcId >= 0 && match.pools && match.pools.units[srcId]
+        ? match.pools.units[srcId]
+        : null;
+    if (srcUnit && srcUnit.active) {
       unit.combatTargetKind = 'unit';
-      unit.combatTargetId = player.id;
+      unit.combatTargetId = srcUnit.id;
       unit.combatLockTimer = 8;
-      unit.targetAimRad = Math.atan2(player.y - unit.y, player.x - unit.x);
+      unit.targetAimRad = Math.atan2(srcUnit.y - unit.y, srcUnit.x - unit.x);
     } else if (typeof ctx.sourceX === 'number') {
       unit.targetAimRad = Math.atan2(ctx.sourceY - unit.y, ctx.sourceX - unit.x);
     }
@@ -399,79 +417,128 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
     match.respawnTimer =
       pack.respawnBaseSec + (wave - 1) * pack.respawnExtraPerWave;
   }
+  unregisterSenseUnit(match, unit);
   deactivateUnit(unit);
 }
 
+/** AI-controlled unit (not the human input seat). Hostility is Team-based. */
+export function isAiControlledUnit(unit) {
+  return !!(unit && unit.active && unit.role !== 'player');
+}
+
+function teamCentroidMap(units) {
+  const map = Object.create(null);
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!isAiControlledUnit(u)) continue;
+    const t = u.team | 0;
+    if (!map[t]) map[t] = { x: 0, y: 0, n: 0 };
+    map[t].x += u.x;
+    map[t].y += u.y;
+    map[t].n += 1;
+  }
+  const keys = Object.keys(map);
+  for (let k = 0; k < keys.length; k++) {
+    const row = map[keys[k]];
+    if (row.n > 0) {
+      row.x /= row.n;
+      row.y /= row.n;
+    }
+  }
+  return map;
+}
+
+function idleWorldGoal(match, unit) {
+  const world = match.world;
+  if (world && world.worldW > 0) {
+    // Spread idle goals on a ring so bots do not all path to one world center.
+    const cx = world.worldW * 0.5;
+    const cy = world.worldH * 0.5;
+    const ang = ((unit.id * 2.399963) % (Math.PI * 2));
+    const ring = 140 + (unit.id % 6) * 48;
+    return {
+      x: cx + Math.cos(ang) * ring,
+      y: cy + Math.sin(ang) * ring,
+      radius: 96,
+    };
+  }
+  return { x: unit.x, y: unit.y, radius: 80 };
+}
+
+/**
+ * Bot brain tick — Mediator + path prep.
+ * Base is a high-value target when present/hostile, NOT a hard on/off for thinking.
+ * Editor Areas are collider/spawn settings — not auto patrol / shoot targets.
+ */
 export function decideEnemyActions(match, dt) {
   const actions = [];
+  if (!match || match.outcome) return actions;
   const pack = getBalancePack();
-  const loseMode = pack.loseMode === 2 ? 2 : 1;
   const baseAlive = !!(match.base && match.base.alive);
-  if (!match.basePlaced) return actions;
-  if (!baseAlive && loseMode !== 2) return actions;
+
+  syncSenseIndexPositions(match);
 
   const player = getPlayerUnit(match);
   const base = match.base;
-  let bx = null;
-  let by = null;
+  let globalBx = null;
+  let globalBy = null;
   if (baseAlive) {
-    bx = base.x + base.w / 2;
-    by = base.y + base.h / 2;
-    updateGeneralTarget(match, bx, by);
+    globalBx = base.x + base.w / 2;
+    globalBy = base.y + base.h / 2;
+    updateGeneralTarget(match, globalBx, globalBy);
   }
 
   const units = match.pools.units;
-
-  let allyX = 0;
-  let allyY = 0;
-  let allyN = 0;
-  for (let i = 0; i < units.length; i++) {
-    const e = units[i];
-    if (!e.active || e.role !== 'enemy') continue;
-    allyX += e.x;
-    allyY += e.y;
-    allyN += 1;
-  }
-  if (allyN > 0) {
-    allyX /= allyN;
-    allyY /= allyN;
-  }
+  const centroids = teamCentroidMap(units);
 
   for (let i = 0; i < units.length; i++) {
     const e = units[i];
-    if (!e.active || e.role !== 'enemy') continue;
+    if (!isAiControlledUnit(e)) continue;
 
     ensureBlackboard(e);
+
+    const teamRow = centroids[e.team | 0];
+    const allyX = teamRow ? teamRow.x : e.x;
+    const allyY = teamRow ? teamRow.y : e.y;
+    const allyN = teamRow ? teamRow.n : 1;
+
+    const hostileBase =
+      baseAlive && isHostileTeam(match, e.team, base.team) ? base : null;
+    let bx = hostileBase ? globalBx : null;
+    let by = hostileBase ? globalBy : null;
 
     let pathGoal = null;
     let marchBlock = null;
     let holdGoal = false;
-    if (baseAlive && match.baseChunk) {
+    if (hostileBase && match.baseChunk) {
       const march = marchIntoBaseChunk(match, e);
       if (march) {
         pathGoal = march.goal;
         marchBlock = march.attackBlock;
         holdGoal = true;
       }
-    } else if (!baseAlive) {
-      pathGoal = huntAreaGoal(match, e);
-      if (pathGoal) holdGoal = true;
-      if (!pathGoal) pathGoal = territoryWalkGoal(match, e) || nextOpenEdgeGoal(match, e);
     }
     if (!pathGoal) {
       pathGoal = advanceUnitAlongChain(match, e);
     }
+    if (!pathGoal && !hostileBase) {
+      pathGoal = huntAreaGoal(match, e);
+      if (pathGoal) holdGoal = true;
+      if (!pathGoal) {
+        // FlatLand rim / territory only — do NOT hard-walk Editor mapAreas.
+        pathGoal = territoryWalkGoal(match, e) || nextOpenEdgeGoal(match, e);
+      }
+    }
     if (!pathGoal) {
-      pathGoal = baseAlive
+      pathGoal = hostileBase
         ? { x: bx, y: by, radius: 160 }
-        : { x: e.x, y: e.y, radius: 80 };
+        : idleWorldGoal(match, e);
       e.pathGoalX = pathGoal.x;
       e.pathGoalY = pathGoal.y;
     }
     const group = match.general && match.general.groups[e.groupId];
     writeGeneralPathToBlackboard(e, group, pathGoal);
 
-    // Sector leave → Event LEFT_GENERAL_SECTOR (Mediator prefers REACH_PATH_GOAL).
     const leftSector =
       group &&
       e.aiStage === 'engage' &&
@@ -482,7 +549,6 @@ export function decideEnemyActions(match, dt) {
       e.combatLockTimer = 0;
     }
 
-    // Local: raycast fan + steering budget dodge around real obstacles.
     const local = applyLocalPathLayer(match, e, pathGoal, {
       baseX: bx,
       baseY: by,
@@ -514,7 +580,11 @@ export function decideEnemyActions(match, dt) {
     if (!combatTarget) {
       e.combatTargetKind = null;
       e.combatTargetId = -1;
+      e.combatTargetEnum = null;
       e.combatLockTimer = 0;
+      // Drop sticky engage so Mediator returns to REACH_PATH_GOAL (walk, no shoot).
+      e.aggroChase = false;
+      e.aggroBlockId = -1;
     }
 
     const unitActions = decideUnitViaMediator(match, e, {
@@ -536,11 +606,11 @@ export function decideEnemyActions(match, dt) {
       actions.push(unitActions[a]);
     }
 
-    // Melee-only bots may contact-damage blockers (parity with pre-Mediator loop).
     if (
       !e.weaponId &&
       combatTarget &&
       combatTarget.kind === 'block' &&
+      combatTarget.block &&
       combatTarget.dist < e.radius + 80
     ) {
       applyDamageToBlock(
@@ -548,7 +618,7 @@ export function decideEnemyActions(match, dt) {
         combatTarget.block,
         pack.enemyContactDps * dt,
         'DEFAULT',
-        { sourceTeam: TEAM.ENEMY, damageKind: 'CONTACT' }
+        { sourceTeam: e.team, damageKind: 'CONTACT' }
       );
     }
   }
@@ -557,11 +627,12 @@ export function decideEnemyActions(match, dt) {
 }
 
 function nextOpenEdgeGoal(match, unit) {
+  // Only FlatLand handmade rim — Editor mapAreas are not movement goals here.
   const areas = match.world && match.world.edgeAreas;
   if (!areas || !areas.length) return null;
   const open = [];
   for (let i = 0; i < areas.length; i++) {
-    if (areas[i].open) open.push(areas[i]);
+    if (areas[i].open !== false) open.push(areas[i]);
   }
   if (!open.length) return null;
   if (unit.edgeWalkIndex == null) unit.edgeWalkIndex = unit.id % open.length;
@@ -583,18 +654,22 @@ function nextOpenEdgeGoal(match, unit) {
 
 /** Score candidate: higher = better. Invalid / too far → negative. */
 
-export function scoreCombatCandidate(kind, dist, sensePx, isPathBlocker, aggroChase) {
+export function scoreCombatCandidate(kind, dist, sensePx, isPathBlocker, aggroChase, priorityScore) {
   const engage =
     typeof sensePx === 'number' && sensePx > 0
       ? sensePx
       : GAME_PACK.enemyEngageRadius;
-  // Aggro chase ignores normal engage radius (sticky pursuit of player).
+  // Aggro chase ignores normal engage radius (sticky pursuit).
   if (!aggroChase && dist > engage * 1.25) return -1;
   let bias = 0;
   if (kind === 'block' && isPathBlocker) bias = 110;
   else if (kind === 'unit') bias = aggroChase ? 200 : 90;
   else if (kind === 'block') bias = 45;
-  else if (kind === 'base') bias = 25;
+  else if (kind === 'base') {
+    // Base value from data (priorityScore), not a hard gate for AI thinking.
+    const pri = typeof priorityScore === 'number' ? priorityScore : 120;
+    bias = 40 + Math.min(160, pri);
+  }
   return bias + (engage - Math.min(dist, engage));
 }
 
@@ -607,12 +682,29 @@ export function targetPriorityBias(unit, candidate) {
   const list = unit && unit.targetPriorityList;
   if (!list || !list.length || !candidate) return 0;
   let label = null;
-  if (candidate.kind === 'unit') label = 'PLAYER';
-  else if (candidate.kind === 'base') label = 'BLOCK_BASE';
-  else if (candidate.kind === 'block' && candidate.block) {
-    if (candidate.block.isTurret) label = 'BLOCK_TURRET';
-    else if (candidate.block.isDefeatCondition) label = 'BLOCK_BASE';
-    else label = 'BLOCK_OTHER';
+  if (candidate.kind === 'unit') {
+    // Hostile unit — Enum TargetKind; PLAYER is one hostile kind, not the only lock.
+    const tk = candidate.targetKind;
+    if (tk === TargetKind.PLAYER || list.indexOf('PLAYER') >= 0) {
+      label = list.indexOf('PLAYER') >= 0 ? 'PLAYER' : 'ENEMY_UNIT';
+    } else if (list.indexOf('ENEMY_UNIT') >= 0) {
+      label = 'ENEMY_UNIT';
+    } else {
+      label = 'PLAYER';
+    }
+    if (list.indexOf(label) < 0 && list.indexOf('ENEMY_UNIT') >= 0) {
+      label = 'ENEMY_UNIT';
+    }
+  } else if (candidate.kind === 'base' || candidate.targetKind === TargetKind.BLOCK_BASE) {
+    label = 'BLOCK_BASE';
+  } else if (candidate.kind === 'block' && candidate.block) {
+    if (candidate.block.isTurret || candidate.targetKind === TargetKind.BLOCK_TURRET) {
+      label = 'BLOCK_TURRET';
+    } else if (candidate.block.isDefeatCondition) {
+      label = 'BLOCK_BASE';
+    } else {
+      label = 'BLOCK_OTHER';
+    }
   }
   if (!label) return 0;
   const idx = list.indexOf(label);
@@ -638,7 +730,7 @@ export function recountTurretAttackers(match) {
   const units = match.pools.units;
   for (let i = 0; i < units.length; i++) {
     const e = units[i];
-    if (!e.active || e.role !== 'enemy') continue;
+    if (!isAiControlledUnit(e)) continue;
     if (e.combatTargetKind === 'block' && e.combatTargetId >= 0) {
       const b = getBlock(match, e.combatTargetId);
       if (b && b.alive && (b.isTurret || b.isDefeatCondition)) {
@@ -658,7 +750,9 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
   const candidates = [];
   const aggro = !!e.aggroChase;
   const sense = getSenseRadiusPx(e) || pack.enemyEngageRadius;
+  const queryR = aggro ? sense * 2.5 : sense * 1.25;
 
+  // Path-blocker reserved by local steering (already known id — not a world scan).
   if (e.attackBlockId >= 0) {
     const blk = getBlock(match, e.attackBlockId);
     if (blk && blk.alive) {
@@ -672,6 +766,7 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         y,
         dist,
         block: blk,
+        targetKind: TargetKind.BLOCK_OTHER,
         score: scoreCombatCandidate('block', dist, sense, true, false),
       });
     } else {
@@ -679,7 +774,6 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
     }
   }
 
-  // Aggro turret that damaged this unit — strong sticky bias.
   if (e.aggroBlockId >= 0) {
     const ab = getBlock(match, e.aggroBlockId);
     if (ab && ab.alive) {
@@ -694,6 +788,7 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         y,
         dist,
         block: ab,
+        targetKind: TargetKind.BLOCK_TURRET,
         score: 250 + dog * 100,
       });
     } else {
@@ -701,51 +796,94 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
     }
   }
 
-  // All armed player turrets / base — dogpile priority formula.
-  for (let i = 0; i < match.blocks.length; i++) {
-    const blk = match.blocks[i];
-    if (!blk.alive) continue;
-    if (!(blk.isTurret || (blk.isDefeatCondition && blk.weaponId))) continue;
-    if (blk.id === e.aggroBlockId) continue;
-    const x = blk.x + blk.w / 2;
-    const y = blk.y + blk.h / 2;
-    const dist = Math.hypot(x - e.x, y - e.y);
-    if (dist > sense * 1.4 && !aggro) continue;
-    const dog = scoreTurretPriority(blk, dist, blk.currentAttackers || 0);
-    candidates.push({
-      kind: 'block',
-      id: blk.id,
-      x,
-      y,
-      dist,
-      block: blk,
-      score: 40 + dog * 80,
-    });
+  // Sense Field: binary-search hostile team buckets only (Enum TargetKind on entries).
+  const sensed = queryHostileInSense(match, e, queryR);
+  const seen = Object.create(null);
+  for (let i = 0; i < candidates.length; i++) {
+    seen[candidates[i].kind + ':' + candidates[i].id] = true;
+  }
+  for (let i = 0; i < sensed.length; i++) {
+    const hit = sensed[i];
+    const key = hit.kind + ':' + hit.id;
+    if (seen[key]) continue;
+    seen[key] = true;
+    if (hit.kind === 'unit') {
+      candidates.push({
+        kind: 'unit',
+        id: hit.id,
+        x: hit.x,
+        y: hit.y,
+        dist: hit.dist,
+        unit: hit.unit,
+        targetKind: hit.targetKind || TargetKind.ENEMY_UNIT,
+        score: scoreCombatCandidate(
+          'unit',
+          hit.dist,
+          sense,
+          false,
+          aggro && hit.unit && player && hit.unit.id === player.id
+        ),
+      });
+    } else if (hit.kind === 'base') {
+      const dog = hit.block
+        ? scoreTurretPriority(hit.block, hit.dist, hit.block.currentAttackers || 0)
+        : 0;
+      const pri = hit.block && hit.block.priorityScore;
+      candidates.push({
+        kind: 'base',
+        id: hit.id,
+        x: hit.x,
+        y: hit.y,
+        dist: hit.dist,
+        block: hit.block,
+        targetKind: TargetKind.BLOCK_BASE,
+        score:
+          scoreCombatCandidate('base', hit.dist, sense, false, false, pri) +
+          dog * 20,
+      });
+    } else {
+      const dog = hit.block
+        ? scoreTurretPriority(hit.block, hit.dist, hit.block.currentAttackers || 0)
+        : 0;
+      candidates.push({
+        kind: 'block',
+        id: hit.id,
+        x: hit.x,
+        y: hit.y,
+        dist: hit.dist,
+        block: hit.block,
+        targetKind: hit.targetKind || TargetKind.BLOCK_OTHER,
+        score:
+          40 +
+          dog * 80 +
+          scoreCombatCandidate('block', hit.dist, sense, false, false) * 0.25,
+      });
+    }
   }
 
-  if (player && player.active) {
-    const dist = Math.hypot(player.x - e.x, player.y - e.y);
-    candidates.push({
-      kind: 'unit',
-      id: player.id,
-      x: player.x,
-      y: player.y,
-      dist,
-      unit: player,
-      score: scoreCombatCandidate('unit', dist, sense, false, aggro),
-    });
-  }
-
-  const bd = Math.hypot(bx - e.x, by - e.y);
-  if (bx != null && by != null) {
-    candidates.push({
-      kind: 'base',
-      id: -1,
-      x: bx,
-      y: by,
-      dist: bd,
-      score: scoreCombatCandidate('base', bd, sense, false, false),
-    });
+  // Strategic base goal (path layer) — only if still outside sense index hit.
+  if (bx != null && by != null && match.base && match.base.alive) {
+    const baseId = match.base.id;
+    if (!seen['base:' + baseId] && !seen['block:' + baseId]) {
+      const bd = Math.hypot(bx - e.x, by - e.y);
+      candidates.push({
+        kind: 'base',
+        id: baseId,
+        x: bx,
+        y: by,
+        dist: bd,
+        block: match.base,
+        targetKind: TargetKind.BLOCK_BASE,
+        score: scoreCombatCandidate(
+          'base',
+          bd,
+          sense,
+          false,
+          false,
+          match.base.priorityScore
+        ),
+      });
+    }
   }
 
   let sticky = null;
@@ -757,7 +895,6 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         break;
       }
     }
-    // Hysteresis: keep lock a bit past engage; aggro chase never drops for distance.
     if (sticky && !aggro && sticky.dist > sense * 1.3) {
       sticky = null;
     }
@@ -795,9 +932,11 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
   if (chosen) {
     e.combatTargetKind = chosen.kind;
     e.combatTargetId = chosen.id;
+    e.combatTargetEnum = chosen.targetKind || null;
   } else {
     e.combatTargetKind = null;
     e.combatTargetId = -1;
+    e.combatTargetEnum = null;
     e.combatLockTimer = 0;
   }
   return chosen;
@@ -806,24 +945,34 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
 export function applyEnemyContactDamage(match, dt) {
   const pack = GAME_PACK;
   const units = match.pools.units;
-  const player = getPlayerUnit(match);
-  const base = match.base;
 
   for (let i = 0; i < units.length; i++) {
     const e = units[i];
-    if (!e.active || e.role !== 'enemy') continue;
+    if (!isAiControlledUnit(e)) continue;
 
-    // Melee contact only if no gun or very close
-    if (player) {
-      const d = Math.hypot(player.x - e.x, player.y - e.y);
-      if (d < player.radius + e.radius + 2) {
-        applyDamageToUnit(match, player, pack.enemyContactDps * dt);
+    // Contact any hostile unit in melee range (multi-team, not Player-only).
+    for (let j = 0; j < units.length; j++) {
+      const other = units[j];
+      if (!other.active || other.id === e.id) continue;
+      if (!isHostileTeam(match, e.team, other.team)) continue;
+      const d = Math.hypot(other.x - e.x, other.y - e.y);
+      if (d < (other.radius || 20) + (e.radius || 20) + 2) {
+        applyDamageToUnit(match, other, pack.enemyContactDps * dt, {
+          sourceTeam: e.team,
+          sourceUnitId: e.id,
+          damageKind: 'CONTACT',
+        });
       }
     }
 
-    if (base && base.alive && pointInRectExpanded(e.x, e.y, base, e.radius)) {
-      applyDamageToBlock(match, base, pack.enemyBaseContactDps * dt, 'DEFAULT', {
-        sourceTeam: TEAM.ENEMY,
+    const blocks = match.blocks || [];
+    for (let b = 0; b < blocks.length; b++) {
+      const blk = blocks[b];
+      if (!blk || !blk.alive || !blk.isDefeatCondition) continue;
+      if (!isHostileTeam(match, e.team, blk.team)) continue;
+      if (!pointInRectExpanded(e.x, e.y, blk, e.radius)) continue;
+      applyDamageToBlock(match, blk, pack.enemyBaseContactDps * dt, 'DEFAULT', {
+        sourceTeam: e.team,
         damageKind: 'CONTACT',
       });
     }

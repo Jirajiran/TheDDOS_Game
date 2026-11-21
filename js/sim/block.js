@@ -37,6 +37,10 @@ import {
   getPlayerUnit,
   slewAngle,
 } from './unit.js';
+import {
+  registerSenseBlock,
+  unregisterSenseBlock,
+} from '../ai/senseIndex.js';
 export function getBlock(match, id) {
   return match.blockById[id] || null;
 }
@@ -44,6 +48,7 @@ export function getBlock(match, id) {
 export function registerBlock(match, block) {
   match.blocks.push(block);
   match.blockById[block.id] = block;
+  registerSenseBlock(match, block);
 }
 
 export function initGeneratorList(list) {
@@ -408,9 +413,9 @@ export function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {
     if (!block.isHarvest) return;
   }
 
-  // Team grief: player cannot destroy own BaseBlock (any weapon / tool).
-  // Own-team blocks: only TOOL damage allowed. Enemies may damage as designed.
-  if (sourceTeam === TEAM.PLAYER && block.team === TEAM.PLAYER) {
+  // Team grief: same team cannot destroy own BaseBlock; own blocks only TOOL.
+  // Hostility is Team-based — not a Player-only special case.
+  if (sourceTeam != null && (sourceTeam | 0) === (block.team | 0)) {
     if (block.isDefeatCondition) return;
     if (damageKind !== 'TOOL') return;
   }
@@ -437,6 +442,7 @@ export function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {
 export function destroyBlock(match, block, opts = {}) {
   if (!block || !block.alive) return;
   block.alive = false;
+  unregisterSenseBlock(match, block);
   playSfx('world.broken');
   block.hp = 0;
   if (block.isGen) {

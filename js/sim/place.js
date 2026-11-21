@@ -294,6 +294,8 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
     tauntTimer: 0,
     tauntedById: -1,
     blackboard: null,
+    priorityScore:
+      typeof blockDef.priorityScore === 'number' ? blockDef.priorityScore : 0,
   };
   attachAreaTriggerFromDef(block, blockDef);
   ensureBlackboardStub(block);

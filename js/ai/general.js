@@ -1,4 +1,5 @@
 import { L1_SIZE, PATH_SIZE, TEAM } from '../config.js';
+import { isHostileTeam } from './senseIndex.js';
 
 /**
  * AI General — Path/L1 pivot chains, lane booking, segment handoff.
@@ -116,10 +117,12 @@ export function rerouteAroundBaseChunk(match, x, y) {
 }
 
 function pathAt(world, col, row) {
-  if (col < 0 || row < 0 || col >= world.pathGridN || row >= world.pathGridN) {
+  const cols = (world.pathCols || world.pathGridN) | 0;
+  const rows = (world.pathRows || world.pathGridN) | 0;
+  if (col < 0 || row < 0 || col >= cols || row >= rows) {
     return null;
   }
-  return world.paths[row * world.pathGridN + col];
+  return world.paths[row * cols + col];
 }
 
 function pathIndexOf(world, x, y) {
@@ -402,7 +405,7 @@ export function resolveObstacleOnPath(match, unit, goal) {
     const y = unit.y + (goal.y - unit.y) * t;
     const block = findSolidBlockAt(match, x, y);
     if (!block) continue;
-    if (!isPathBlockingTarget(block)) continue;
+    if (!isPathBlockingTarget(match, unit, block)) continue;
     // Sub-pivot: offset perpendicular at Path/L1 scale (Local spends steering budget).
     const dx = goal.x - unit.x;
     const dy = goal.y - unit.y;
@@ -423,14 +426,15 @@ export function resolveObstacleOnPath(match, unit, goal) {
 }
 
 /**
- * Real walk blockers for Local (nature + player-built).
- * General clear-corridor planning never calls this.
+ * Real walk blockers (nature + hostile-team structures).
+ * Hostility from map teams / Sense — not a hardcoded Player lock.
  */
-function isPathBlockingTarget(block) {
+function isPathBlockingTarget(match, unit, block) {
   if (!block.alive || block.isOpen) return false;
   if (block.walkSolid === false) return false;
   if (block.isHarvest) return true;
-  if (block.team === TEAM.PLAYER) return true;
+  const selfTeam = unit && unit.team != null ? unit.team : TEAM.ENEMY;
+  if (isHostileTeam(match, selfTeam, block.team)) return true;
   return false;
 }
 

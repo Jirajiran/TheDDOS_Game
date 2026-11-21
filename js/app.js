@@ -26,6 +26,8 @@ import { createInput } from './player/input.js';
 import { runBootPreload } from './session/boot.js';
 import { runLoading } from './session/loading.js';
 import { createLoadingUi } from './session/loadingUi.js';
+import { hasPendingEditorTestPlay } from './session/editorTestPlay.js';
+import { resolvePlayMap } from './session/resolvePlayMap.js';
 import { createMainMenuUi } from './mainMenuUi.js';
 import { createPlayerUiGamePlay } from './playerUiGamePlay.js';
 import { injectMenuSkinPreviews, isUnitVisualReady } from './view/unitVisual.js';
@@ -334,8 +336,40 @@ export function createApp(dom) {
         if (saveFileInput) saveFileInput.click();
       },
       onAudioToggle: () => {},
-      onLink: () => {
-        window.location.href = 'editor.html';
+      onLink: async () => {
+        if (state.loadingLocked) return;
+        state.loadingLocked = true;
+        try {
+          hub.setAppState(AppState.LOADING);
+          hub.setLoadingTitle('Opening editor');
+          if (loadingBootPanel) loadingBootPanel.hidden = true;
+          screens.menu.hidden = true;
+          screens.menu.classList.remove('is-active');
+          screens.loading.hidden = false;
+          screens.loading.classList.add('is-active');
+          loadingUi.showMain();
+          loadingUi.setMeta({
+            worldPick: 'editor',
+            playerNames: [(mainMenuUi && mainMenuUi.getPlayerName()) || 'Player'],
+            progress: 0,
+          });
+          const steps = [
+            [12, 'Pack contract…'],
+            [35, 'Art pool pipeline…'],
+            [62, 'Editor shell…'],
+            [88, 'Hand-off…'],
+            [100, 'Ready'],
+          ];
+          for (let i = 0; i < steps.length; i++) {
+            hub.reportLoadProgress(steps[i][0], steps[i][1]);
+            loadingUi.setMeta({ progress: steps[i][0] / 100 });
+            await new Promise((r) => setTimeout(r, 90));
+          }
+          window.location.href = 'editor.html';
+        } finally {
+          // Navigation may cancel; unlock if still here.
+          state.loadingLocked = false;
+        }
       },
     });
   }
@@ -497,7 +531,14 @@ export function createApp(dom) {
       hub.reportLoadProgress(100, 'Ready');
       loadingUi.hide();
       hub.setMenuInteractable(true);
+      if (hasPendingEditorTestPlay()) {
+        // Hand off lock to startMatch — do not clear in finally.
+        state.loadingLocked = false;
+        await startMatch({ fromEditor: true, autoEditor: true, restore: false });
+        return true;
+      }
       hub.enterMenu();
+      state.loadingLocked = false;
       return true;
     } catch (err) {
       console.error(err);
@@ -506,9 +547,8 @@ export function createApp(dom) {
       );
       state.bootReady = false;
       hub.setMenuInteractable(false);
-      return false;
-    } finally {
       state.loadingLocked = false;
+      return false;
     }
   }
 
@@ -524,32 +564,58 @@ export function createApp(dom) {
       clearLocalSnapshot();
     }
 
-    if (mainMenuUi && mainMenuUi.isReady()) {
-      state.host.gameMode = mainMenuUi.gameModeFromPick();
-      if (selMode) selMode.value = state.host.gameMode;
-    } else if (selMode) {
-      state.host.gameMode = selMode.value;
-    }
-    if (restoreSnap && restoreSnap.gameMode) {
-      state.host.gameMode = restoreSnap.gameMode;
-      if (selMode) selMode.value = restoreSnap.gameMode;
-    }
-
-    hub.setAppState(AppState.LOADING);
-    hub.setLoadingTitle('Loading match');
-    progressFill.style.width = '0%';
-    progressLabel.textContent = '0% — Starting…';
-    if (playerUi && playerUi.clearChat) playerUi.clearChat();
-
-    const worldPick = mainMenuUi ? mainMenuUi.getWorldPick() : 'flat';
-    const playerNames = ((state.host && state.host.players) || []).map(
-      (p) => (p && p.name) || 'Player'
-    );
+    const selectedRoom =
+      opts.room ||
+      (mainMenuUi && mainMenuUi.getSelectedRoom && mainMenuUi.getSelectedRoom()) ||
+      null;
 
     const MATCH_LOADING_MIN_MS = 1100;
     const loadUiStartedAt = performance.now();
+    let playMap = null;
 
     try {
+      // Resolve map BEFORE world alloc — no JSON ⇒ cannot play (1 file = 1 map).
+      playMap = await resolvePlayMap({
+        editorPayload: opts.editorTestPlay || null,
+        room: selectedRoom,
+        usePendingEditor: !!(
+          opts.fromEditor ||
+          opts.autoEditor ||
+          opts.usePendingEditor
+        ),
+      });
+
+      if (playMap && playMap.gameMode) {
+        state.host.gameMode = playMap.gameMode;
+        if (selMode) selMode.value = playMap.gameMode;
+      } else if (mainMenuUi && mainMenuUi.isReady()) {
+        state.host.gameMode = mainMenuUi.gameModeFromPick();
+        if (selMode) selMode.value = state.host.gameMode;
+      } else if (selMode) {
+        state.host.gameMode = selMode.value;
+      }
+      if (restoreSnap && restoreSnap.gameMode) {
+        state.host.gameMode = restoreSnap.gameMode;
+        if (selMode) selMode.value = restoreSnap.gameMode;
+      }
+
+      hub.setAppState(AppState.LOADING);
+      hub.setLoadingTitle(
+        playMap.roomMeta && playMap.roomMeta.name
+          ? 'Loading ' + playMap.roomMeta.name
+          : 'Loading match'
+      );
+      progressFill.style.width = '0%';
+      progressLabel.textContent = '0% — Starting…';
+      if (playerUi && playerUi.clearChat) playerUi.clearChat();
+
+      const worldPick =
+        playMap.worldPick ||
+        (mainMenuUi ? mainMenuUi.getWorldPick() : 'flat');
+      const playerNames = ((state.host && state.host.players) || []).map(
+        (p) => (p && p.name) || 'Player'
+      );
+
       if (loadingBootPanel) loadingBootPanel.hidden = true;
 
       screens.menu.hidden = true;
@@ -559,7 +625,8 @@ export function createApp(dom) {
       screens.loading.hidden = false;
       screens.loading.classList.add('is-active');
 
-      loadingUi.showGameplay();
+      // Brand loading (THE DDOS + red bar) — same as boot / image-2 design.
+      loadingUi.showMain();
       loadingUi.setMeta({
         worldPick,
         playerNames,
@@ -570,9 +637,16 @@ export function createApp(dom) {
       screens.playing.hidden = false;
       screens.playing.classList.add('is-active', 'is-warming');
 
-      const match = await runLoading((pct, label) => {
-        hub.reportLoadProgress(pct * 0.9, label);
-      });
+      const match = await runLoading(
+        (pct, label) => {
+          hub.reportLoadProgress(pct * 0.9, label);
+        },
+        {
+          playMap,
+          pathCols: playMap.pathCols,
+          pathRows: playMap.pathRows,
+        }
+      );
 
       if (!match || !match.pools || !match.world) {
         throw new Error('Loading incomplete');
@@ -583,9 +657,11 @@ export function createApp(dom) {
         match.host = state.host;
       } else {
         initMatchGameplay(match, {
-          gameMode: state.host.gameMode,
+          gameMode: playMap.gameMode || state.host.gameMode,
           host: state.host,
           menuSkinId: mainMenuUi ? mainMenuUi.getSkinId() : 'Skin_Default_1',
+          playMap,
+          fromEditor: playMap.source === 'editor',
         });
       }
       state.match = match;
@@ -611,8 +687,6 @@ export function createApp(dom) {
       if (held < MATCH_LOADING_MIN_MS) {
         await new Promise((r) => setTimeout(r, MATCH_LOADING_MIN_MS - held));
       }
-
-      await loadingUi.waitForHostConfirm();
 
       loadingUi.hide();
       hub.setAppState(AppState.PLAYING);

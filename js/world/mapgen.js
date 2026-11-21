@@ -15,7 +15,14 @@ export function generateWorldObjects(match) {
   if (match.gameMode !== 'WORLD_TYPE') return;
 
   const pack = GAME_PACK;
-  const quotas = pack.worldGenPerPath;
+  const fromMap = match.mapResources;
+  const quotas = fromMap
+    ? {
+        trees: fromMap.trees != null ? fromMap.trees | 0 : pack.worldGenPerPath.trees,
+        stones: fromMap.stones != null ? fromMap.stones | 0 : pack.worldGenPerPath.stones,
+        ores: fromMap.ores != null ? fromMap.ores | 0 : pack.worldGenPerPath.ores,
+      }
+    : pack.worldGenPerPath;
   const { world, occupancy } = match;
   const cellsPerSide = Math.round(world.pathSize / L3_SIZE); // 16
   /** Leave center clear for Base 5×5 + pad on 16×16. */

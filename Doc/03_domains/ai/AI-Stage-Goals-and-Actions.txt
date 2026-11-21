@@ -94,6 +94,28 @@ TargetKind / UnitKind (ตัวอย่าง)
 Perception / Damage pipeline แปลง entity → TargetKind + id
 แล้ว Event / Mediator ใช้ id + kind — Stage เห็นแค่ combatTargetKind/Id หรือ seekX/Y
 
+Sense Field (js/ai/senseIndex.js) — 2026-11
+- ลงทะเบียนเฉพาะ entity ที่มี Team (ไม่ NEUTRAL) เข้าถัง byTeam
+- ถังเรียงตาม x → query ด้วย binary search ในรัศมี sense; เปิดเฉพาะทีมใน hostileTo
+- ไม่กวาด pools ทั้งแมพเพื่อหาเป้า; Player เป็นหนึ่งชนิด hostile ไม่ใช่ soft-lock เดียว
+- พอมี hostile ใน sense → Mediator ติด ELIMINATE_* / ENGAGE ทันที (ไม่รอว่างฐาน)
+
+Unlock hard gates (2026-11) — ตามคติ data-driven
+- decideEnemyActions ไม่ return เมื่อ !basePlaced · ฐาน = candidate คะแนนสูง (priorityScore) ไม่ใช่สวิตช์สมอง
+- AI loop = role !== 'player' (ที่นั่งคน) · ศัตรู = hostileTo ตามแมพ
+- Aggro / turret / path blocker / contact = isHostileTeam ไม่ล็อก TEAM.PLAYER
+- ทีมอื่นที่ไม่มิตรโจมตีกันได้เมื่อ Editor ตั้ง hostileTo
+
+Skin / muzzle / separation (2026-11)
+- skinGroupId จากชีต `model` · ไม่ผูก team1→Default_skin_1
+- Player ที่นั่งคนใช้ menu skin · บอทอ่านชีต · shownUnitModel ไม่ hard Player→default_1
+- กระสุนจาก Arm_1 pivot · separateUnits แข็งขึ้น · idle กระจายเป็นวง
+
+Area ≠ shoot target (2026-11)
+- ENGAGE ยิงได้เฉพาะมี combatTarget (unit/block/base) · pathGoal/Area อย่างเดียว = เดินอย่างเดียว
+- ไม่ hard-patrol ไป match.mapAreas · Area มาจาก Settings (spawn/collider/คำสั่ง)
+- ไม่มีเป้า → เคลียร์ aggro · กลับ REACH_PATH_GOAL
+
 ────────────────────────────────────────
 Goals (ความต้องการ — มี priority int · Mediator จัดอันดับ)
 ────────────────────────────────────────

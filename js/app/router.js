@@ -76,7 +76,14 @@ export function buildRouteHash(appState, host, match) {
 
     case AppState.PLAYING: {
       const mode = (match && match.gameMode) || (host && host.gameMode) || GameMode.FLAT_SURVIVAL;
-      const mapName = mode === GameMode.WORLD_TYPE ? 'WorldType' : 'FlatSurvival';
+      const rawName =
+        (match && match.roomMeta && match.roomMeta.name) ||
+        (match && match.playMap && match.playMap.roomMeta && match.playMap.roomMeta.name) ||
+        (mode === GameMode.WORLD_TYPE ? 'WorldType' : 'FlatSurvival');
+      const mapName = String(rawName)
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 48) || 'Map';
       return `#/game/${mapName}${roomSuffix}`;
     }
 

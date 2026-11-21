@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "matrix": {
+    "DEFAULT": {
+      "DEFAULT": 1,
+      "BULLET": 1.25,
+      "EXPLOSION": 0.9,
+      "LAZER": 0.75
+    },
+    "BULLET": {
+      "DEFAULT": 0.5,
+      "BULLET": 0.75,
+      "EXPLOSION": 0.85,
+      "LAZER": 0.5
+    },
+    "EXPLOSION": {
+      "DEFAULT": 1.4,
+      "BULLET": 0.9,
+      "EXPLOSION": 0.7,
+      "LAZER": 0.8
+    },
+    "LAZER": {
+      "DEFAULT": 1.6,
+      "BULLET": 1.4,
+      "EXPLOSION": 1.1,
+      "LAZER": 0.6
+    }
+  }
+}

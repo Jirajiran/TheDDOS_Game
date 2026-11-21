@@ -15,16 +15,33 @@ import { createOccupancy } from '../world/occupancy.js';
 import { runParallelStages, timed, wait } from './loadPipeline.js';
 import { preloadEquipArtCache } from '../view/cosmetics.js';
 import { warmSfxPool } from '../audio/sfx.js';
-
+import {
+  buildGameplayLayerArtPool,
+  isUnitVisualReady,
+} from '../view/unitVisual.js';
+import { getGameplayArtPool } from '../view/artPool.js';
 const STAGE_TIMEOUT_MS = 10000;
 
 /**
  * @param {(pct: number, label: string) => void} onProgress
+ * @param {{ pathCols?: number, pathRows?: number, pathGridN?: number, playMap?: object|null }} [opts]
  */
-export async function runLoading(onProgress) {
+export async function runLoading(onProgress, opts = {}) {
   const report = (pct, label) => {
     onProgress(Math.max(0, Math.min(100, pct)), label);
   };
+
+  const playMap = opts.playMap || null;
+  const pathCols =
+    (opts.pathCols | 0) ||
+    (playMap && playMap.pathCols) ||
+    (opts.pathGridN | 0) ||
+    (playMap && playMap.pathGridN) ||
+    PATH_GRID_N;
+  const pathRows =
+    (opts.pathRows | 0) ||
+    (playMap && playMap.pathRows) ||
+    pathCols;
 
   report(5, 'Match load — parallel pools + world…');
 
@@ -40,13 +57,40 @@ export async function runLoading(onProgress) {
         id: 'world',
         required: true,
         timeoutMs: STAGE_TIMEOUT_MS,
-        run: () => createWorld(PATH_GRID_N),
+        run: () =>
+          createWorld({
+            cols: pathCols,
+            rows: pathRows,
+            // Editor / theddos-map: no FlatLand handmade red edgeAreas.
+            skipEdgeAreas: !!(
+              playMap &&
+              (playMap.source === 'editor' ||
+                playMap.mapDoc ||
+                (playMap.roomMap && playMap.roomMap.kind === 'theddos-map'))
+            ),
+          }),
       },
       {
         id: 'equip_art_cache',
         required: true,
         timeoutMs: 60000,
         run: () => preloadEquipArtCache(),
+      },
+      {
+        id: 'art_pool',
+        required: true,
+        timeoutMs: 120000,
+        run: async () => {
+          if (isUnitVisualReady() && getGameplayArtPool() && getGameplayArtPool().size) {
+            return getGameplayArtPool();
+          }
+          return buildGameplayLayerArtPool((label, done, total) => {
+            report(
+              5 + Math.round(((done || 0) / Math.max(1, total || 1)) * 20),
+              label || 'Art pool…'
+            );
+          });
+        },
       },
       {
         id: 'sfx_pool',
@@ -101,6 +145,10 @@ export async function runLoading(onProgress) {
     world,
     occupancy,
     placeSlots,
+    playMap: playMap || null,
+    pathCols,
+    pathRows,
+    pathGridN: Math.max(pathCols, pathRows),
     loadedAt: Date.now(),
     warnings: wave1.warnings.slice(),
   };

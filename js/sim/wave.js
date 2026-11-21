@@ -25,7 +25,7 @@ import {
   acquireUnit,
 } from '../world/pools.js';
 import {
-  enemySkinGroupId,
+  skinGroupIdFromSheet,
   UNIT_VISUAL_ACTIONS,
 } from '../view/unitVisual.js';
 import {
@@ -50,8 +50,30 @@ import {
   readLoadoutOrders,
 } from '../player/inventory.js';
 import { claimAreaOrder } from './areaOrders.js';
-export function updateWaves(match, dt) {
+import { registerSenseUnit } from '../ai/senseIndex.js';
+function balanceForMatch(match) {
   const pack = getBalancePack();
+  const rules = match && match.mapRules;
+  if (!rules) return pack;
+  return Object.assign({}, pack, {
+    targetWaveToWin:
+      rules.targetWaveToWin != null ? rules.targetWaveToWin : pack.targetWaveToWin,
+    setupPhaseDurationSec:
+      rules.setupPhaseDurationSec != null
+        ? rules.setupPhaseDurationSec
+        : pack.setupPhaseDurationSec,
+    waveCountdownSec:
+      rules.waveCountdownSec != null
+        ? rules.waveCountdownSec
+        : pack.waveCountdownSec,
+    waveGroupCount:
+      rules.waveGroupCount != null ? rules.waveGroupCount : pack.waveGroupCount,
+    lastStand: rules.lastStand != null ? rules.lastStand : pack.lastStand,
+  });
+}
+
+export function updateWaves(match, dt) {
+  const pack = balanceForMatch(match);
   if (!match.basePlaced || !match.base) return;
   if (!match.base.alive && !pack.lastStand) return;
   if (match.outcome) return;
@@ -100,7 +122,11 @@ function parseUnitSpec(spec) {
   };
 }
 
-function areaById(id) {
+function areaById(match, id) {
+  const mapped = (match && match.mapAreas) || [];
+  for (let i = 0; i < mapped.length; i++) {
+    if (mapped[i] && mapped[i].id === id) return mapped[i];
+  }
   const areas = GAME_PACK.areas || [];
   for (let i = 0; i < areas.length; i++) {
     if (areas[i] && areas[i].id === id) return areas[i];
@@ -108,8 +134,13 @@ function areaById(id) {
   return null;
 }
 
-function rowsForWave(waveIndex) {
-  const rows = GAME_PACK.spawns || [];
+function rowsForWave(match, waveIndex) {
+  // Editor / map-file spawn rail wins over default pack schedule.
+  const custom =
+    match && Array.isArray(match.editorSpawns) && match.editorSpawns.length
+      ? match.editorSpawns
+      : null;
+  const rows = custom || GAME_PACK.spawns || [];
   const next = [];
   for (let i = 0; i < rows.length; i++) {
     if (rows[i] && rows[i].wave === waveIndex) next.push(rows[i]);
@@ -118,7 +149,7 @@ function rowsForWave(waveIndex) {
 }
 
 export function spawnWave(match, waveIndex) {
-  const rows = rowsForWave(waveIndex);
+  const rows = rowsForWave(match, waveIndex);
   const now = [];
   if (!match.pendingSpawns) match.pendingSpawns = [];
   for (let i = 0; i < rows.length; i++) {
@@ -148,7 +179,7 @@ export function tickPendingSpawns(match) {
   if (due.length) spawnRows(match, due);
 }
 
-function expandSpawnSlots(rows) {
+function expandSpawnSlots(match, rows) {
   const slots = [];
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
@@ -156,13 +187,18 @@ function expandSpawnSlots(rows) {
     const flat = [];
     for (let s = 0; s < specs.length; s++) {
       const spec = parseUnitSpec(specs[s]);
-      for (let n = 0; n < spec.count; n++) flat.push(spec.id);
+      // Editor may store Title_Case ids — upper for pack lookup.
+      const archId = String(spec.id || '').toUpperCase();
+      for (let n = 0; n < spec.count; n++) flat.push(archId || spec.id);
     }
-    const area = areaById(row.areaId);
+    const area = areaById(match, row.areaId);
     for (let i = 0; i < flat.length; i++) {
-      const point = area
-        ? pointInArea(area, i, flat.length)
-        : { x: 0, y: 0 };
+      let point;
+      if (area) {
+        point = pointInArea(area, i, flat.length);
+      } else {
+        point = pickSpawnOutsideBaseChunk(match, i, flat.length);
+      }
       slots.push({
         archId: flat[i],
         team: row.team,
@@ -175,8 +211,8 @@ function expandSpawnSlots(rows) {
 }
 
 function spawnRows(match, rows) {
-  const pack = getBalancePack();
-  const slots = expandSpawnSlots(rows);
+  const pack = balanceForMatch(match);
+  const slots = expandSpawnSlots(match, rows);
   if (!slots.length || !match.base) return;
   const positions = [];
   for (let i = 0; i < slots.length; i++) {
@@ -227,7 +263,7 @@ function spawnRows(match, rows) {
       u.role = 'enemy';
       u.collisionLayer = deriveCollisionLayer({ team, role: 'enemy' });
       u.pierceCost = 1;
-      u.skinGroupId = enemySkinGroupId();
+      u.skinGroupId = skinGroupIdFromSheet(archetype);
       u.visualAction = UNIT_VISUAL_ACTIONS.idle;
       u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
       u.visualActionT = 0;
@@ -307,6 +343,7 @@ function spawnRows(match, rows) {
       u.weaponId = weaponId;
       claimAreaOrder(u);
       attachUnitToGroup(group, u);
+      registerSenseUnit(match, u);
       match.enemiesAlive += 1;
       unitSeq += 1;
     }
@@ -339,15 +376,34 @@ export function pickSpawnOutsideBaseChunk(match, index, total) {
 }
 
 function pickOpenEdgeAreaPosition(match, slot) {
-  const areas = match.world && match.world.edgeAreas;
+  // FlatLand handmade rim, then editor map areas (same pipe).
+  const rim = match.world && match.world.edgeAreas;
+  const mapped = match.mapAreas;
+  const areas =
+    rim && rim.length ? rim : mapped && mapped.length ? mapped : null;
   if (!areas || !areas.length) return null;
   const open = [];
   for (let i = 0; i < areas.length; i++) {
-    if (areas[i].open) open.push(areas[i]);
+    if (areas[i].open !== false) open.push(areas[i]);
   }
   if (!open.length) return null;
   const waveIndex = match.waveIndex | 0;
   const area = open[(waveIndex + slot) % open.length];
+  if (area.fromEditor) {
+    // Editor areas are free rects — spawn inside, not on FlatLand outer-edge midpoints.
+    const inset = 16;
+    const slotN = ((slot % 5) - 2) * 36;
+    return {
+      x: Math.max(
+        area.x + inset,
+        Math.min(area.x + area.w - inset, area.x + area.w * 0.5 + slotN)
+      ),
+      y: Math.max(
+        area.y + inset,
+        Math.min(area.y + area.h - inset, area.y + area.h * 0.5)
+      ),
+    };
+  }
   return edgeSpawnAnchor(area, match.world, slot);
 }
 

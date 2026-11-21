@@ -24,6 +24,15 @@ import {
   makeSlotFromItem,
 } from './player/inventory.js';
 import { generateWorldObjects } from './world/mapgen.js';
+import {
+  applyEditorPlayerSpawn,
+  applyResolvedPlayMap,
+} from './world/applyEditorMap.js';
+import { consumeEditorTestPlay } from './session/editorTestPlay.js';
+import {
+  installSenseTeams,
+  rebuildSenseIndexFromMatch,
+} from './ai/senseIndex.js';
 import { refreshEdgeAreas } from './world/world.js';
 import { rebuildTerritories } from './sim/territory.js';
 import { openHuntArea } from './sim/huntArea.js';
@@ -149,7 +158,12 @@ export function initMatchGameplay(match, options = {}) {
   const pack = getBalancePack();
   const { world } = match;
 
-  match.gameMode = options.gameMode || match.gameMode || 'FLAT_SURVIVAL';
+  const playMap = options.playMap || match.playMap || null;
+  match.gameMode =
+    (playMap && playMap.gameMode) ||
+    options.gameMode ||
+    match.gameMode ||
+    'FLAT_SURVIVAL';
   match.host = options.host || match.host || null;
   match.playerSkinGroupId =
     options.playerSkinGroupId ||
@@ -224,8 +238,41 @@ export function initMatchGameplay(match, options = {}) {
   match.simTime = 0;
   match.nightBlend = 0;
 
+  // Stash room/editor map meta before world-gen (quotas read mapResources).
+  if (playMap) {
+    match.playMap = playMap;
+    match.mapSource = playMap.source;
+    match.mapFile = playMap.mapFile || '';
+    match.roomMeta = playMap.roomMeta || null;
+    match.mapRules = playMap.rules || null;
+    match.mapBase = playMap.base || null;
+    match.mapResources = playMap.resources || null;
+    if (playMap.gameMode) match.gameMode = playMap.gameMode;
+  }
+
   generateWorldObjects(match);
+
+  // Sense Field index — team buckets (Enum TargetKind); map teams if present.
+  const mapTeams =
+    (playMap && playMap.mapDoc && playMap.mapDoc.teams) ||
+    (playMap && playMap.roomMap && playMap.roomMap.teams) ||
+    null;
+  installSenseTeams(match, mapTeams);
+
+  // Deploy placed objects / areas from the same resolved map (menu or Test Play).
+  if (playMap) applyResolvedPlayMap(match, playMap);
+
   spawnPlayerNearWorldCenter(match);
+  if (playMap && playMap.mapDoc) applyEditorPlayerSpawn(match, playMap.mapDoc);
+  rebuildSenseIndexFromMatch(match);
+
+  if (
+    (playMap && playMap.source === 'editor') ||
+    (options.editorTestPlay && !options.keepEditorTestPlayKey)
+  ) {
+    consumeEditorTestPlay();
+  }
+
   return match;
 }
 

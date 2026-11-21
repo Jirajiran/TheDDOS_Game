@@ -77,7 +77,7 @@ export function updateWeaponReloads(match, dt) {
   const units = match.pools.units;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
-    if (!u.active || u.role !== 'enemy' || !u.weaponId) continue;
+    if (!u.active || u.role === 'player' || !u.weaponId) continue;
     const def = getWeaponDef(u.weaponId);
     if (tickReload(u, def, dt, null)) {
       continueShellReload(u, def, null);

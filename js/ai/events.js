@@ -156,11 +156,14 @@ export function processUnitEvents(match, unit, ctx) {
   if (combat && combat.kind === 'unit') {
     const engage = getSenseRadiusPx(unit) || pack.enemyEngageRadius;
     if (combat.dist <= engage * 1.25 || unit.aggroChase) {
+      // Any hostile unit in sense (Player is one hostile kind).
       applyBoostMap(bb, table.SPOTTED_PLAYER);
       bb.flags.SPOTTED_PLAYER = true;
+      bb.flags.SPOTTED_HOSTILE = true;
     }
   } else {
     bb.flags.SPOTTED_PLAYER = false;
+    bb.flags.SPOTTED_HOSTILE = false;
   }
 
   if (combat && (combat.kind === 'base' || (combat.block && combat.block.isDefeatCondition))) {

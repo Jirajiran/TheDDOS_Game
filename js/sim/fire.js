@@ -33,9 +33,11 @@ import {
 import {
   acquireProjectile,
 } from '../world/pools.js';
+import { isHostileTeam } from '../ai/senseIndex.js';
 import {
   clearReloadVisual,
   cutUnitVisualAction,
+  getUnitArm1PivotWorld,
   shotVisualAction,
 } from '../view/unitVisual.js';
 import {
@@ -397,21 +399,35 @@ export function tickMuzzleLead(match, dt) {
   }
 }
 
+/** Muzzle origin: arm pivot when unit visual ready, else body center + radius. */
+function unitMuzzleOrigin(owner, aimRad) {
+  const cos = Math.cos(aimRad);
+  const sin = Math.sin(aimRad);
+  const piv =
+    owner && owner.role !== undefined ? getUnitArm1PivotWorld(owner) : null;
+  if (piv && Number.isFinite(piv.x) && Number.isFinite(piv.y)) {
+    const barrel = Math.max(10, (owner.radius || 20) * 0.45);
+    return { x: piv.x + cos * barrel, y: piv.y + sin * barrel };
+  }
+  const ox = owner.x != null ? owner.x : owner.cx;
+  const oy = owner.y != null ? owner.y : owner.cy;
+  const muzzle = (owner.radius || 20) + 2;
+  return { x: ox + cos * muzzle, y: oy + sin * muzzle };
+}
+
 export function spawnProjectile(match, owner, weapon, aimRad) {
   const proj = acquireProjectile(match.pools);
   if (!proj) return null;
 
   const cos = Math.cos(aimRad);
   const sin = Math.sin(aimRad);
-  const muzzle = (owner.radius || 20) + 2;
   const maxRange = (weapon.maxDistancePath || 1) * PATH_SIZE;
   const speed = weapon.bulletSpeedPxSec || 400;
-  const ox = owner.x != null ? owner.x : owner.cx;
-  const oy = owner.y != null ? owner.y : owner.cy;
+  const origin = unitMuzzleOrigin(owner, aimRad);
 
   proj.active = true;
-  proj.x = ox + cos * muzzle;
-  proj.y = oy + sin * muzzle;
+  proj.x = origin.x;
+  proj.y = origin.y;
   proj.prevX = proj.x;
   proj.prevY = proj.y;
   proj.speed = speed;
@@ -458,14 +474,12 @@ export function spawnBeam(match, owner, weapon, aimRad) {
   if (!match.beams) match.beams = [];
   const cos = Math.cos(aimRad);
   const sin = Math.sin(aimRad);
-  const ox = owner.x != null ? owner.x : owner.cx;
-  const oy = owner.y != null ? owner.y : owner.cy;
-  const muzzle = (owner.radius || 20) + 2;
   const maxRange = (weapon.maxDistancePath || 1) * PATH_SIZE;
   const team = owner.team != null ? owner.team : TEAM.PLAYER;
   const targetFaction = weapon.targetFaction || 'ENEMY';
-  const x0 = ox + cos * muzzle;
-  const y0 = oy + sin * muzzle;
+  const origin = unitMuzzleOrigin(owner, aimRad);
+  const x0 = origin.x;
+  const y0 = origin.y;
   match.beams.push({
     active: true,
     x0,
@@ -535,7 +549,9 @@ export function decideTurretActions(match) {
     let bestD = b.detectRadius || PATH_SIZE;
     for (let u = 0; u < units.length; u++) {
       const e = units[u];
-      if (!e.active || e.team === TEAM.PLAYER) continue;
+      if (!e.active) continue;
+      // Fire at hostile teams only (map hostileTo) — not a hardcoded anti-Player skip.
+      if (!isHostileTeam(match, b.team, e.team)) continue;
       const d = Math.hypot(e.x - cx, e.y - cy);
       if (d < bestD) {
         bestD = d;
@@ -687,6 +703,7 @@ export function updateProjectiles(match, dt) {
           );
           applyDamageToUnit(match, unit, dmg, {
             sourceTeam: p.team,
+            sourceUnitId: p.ownerId,
             fromTurret: !!p.fromTurret,
             sourceBlockId: p.sourceBlockId,
             sourceX: p.prevX,
@@ -715,6 +732,7 @@ export function updateProjectiles(match, dt) {
       );
       applyDamageToUnit(match, unit, dmg, {
         sourceTeam: p.team,
+        sourceUnitId: p.ownerId,
         fromTurret: !!p.fromTurret,
         sourceBlockId: p.sourceBlockId,
         sourceX: p.prevX,
@@ -827,10 +845,10 @@ export function syncBeamToOwner(match, b) {
       return false;
     }
     const aim = owner.aimRad || 0;
-    const muzzle = (owner.radius || 20) + 2;
+    const origin = unitMuzzleOrigin(owner, aim);
     b.aimRad = aim;
-    b.x0 = owner.x + Math.cos(aim) * muzzle;
-    b.y0 = owner.y + Math.sin(aim) * muzzle;
+    b.x0 = origin.x;
+    b.y0 = origin.y;
     return true;
   }
   return true;
@@ -913,6 +931,7 @@ export function castBeamRay(match, b, units, applyDamage) {
         );
         applyDamageToUnit(match, unit, dmg, {
           sourceTeam: b.team,
+          sourceUnitId: b.ownerId,
           fromTurret: !!b.fromTurret,
           sourceBlockId: b.sourceBlockId,
           sourceX: b.x0,

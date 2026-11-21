@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "description": "Spawn schedule for this map. units entries are UnitId:count. The unit's own startingLoadout supplies gear.",
+  "spawns": [
+    { "wave": 1, "timeStart": 0, "team": 2, "areaId": "enemy_north", "units": ["GRUNT_BASIC:3"] },
+    { "wave": 2, "timeStart": 0, "team": 2, "areaId": "enemy_east", "units": ["GRUNT_BASIC:3", "SUICIDE_BERSERKER:1"] },
+    { "wave": 3, "timeStart": 0, "team": 2, "areaId": "enemy_south", "units": ["GRUNT_BASIC:3", "STEALTH_SNIPER:1", "STEALTH_SHADOW_MELEE:1"] },
+    { "wave": 4, "timeStart": 0, "team": 2, "areaId": "enemy_west", "units": ["GRUNT_BASIC:3", "SUPPORT_MEDIC:1", "COWARD_UNIT:2"] },
+    { "wave": 5, "timeStart": 0, "team": 2, "areaId": "enemy_north", "units": ["COMMANDER_LEADER:1", "GRUNT_BASIC:3", "SHIELD_VANGUARD:1", "COWARD_UNIT:2"] },
+    { "wave": 6, "timeStart": 0, "team": 2, "areaId": "enemy_east", "units": ["COMBAT_ENGINEER:2", "FLANK_SKIRMISHER:3", "SHIELD_VANGUARD:2", "STEALTH_ASSAULT_HEAVY:1"] },
+    { "wave": 7, "timeStart": 0, "team": 2, "areaId": "enemy_south", "units": ["DYNAMIC_PHASE_BOSS:1", "GRUNT_BASIC:5", "FLANK_SKIRMISHER:3"] },
+    { "wave": 8, "timeStart": 0, "team": 2, "areaId": "enemy_west", "units": ["GRUNT_BASIC:6", "SUICIDE_BERSERKER:2", "STEALTH_SNIPER:2"] },
+    { "wave": 9, "timeStart": 0, "team": 2, "areaId": "enemy_north", "units": ["GRUNT_BASIC:6", "SHIELD_VANGUARD:3", "SUPPORT_MEDIC:2"] },
+    { "wave": 10, "timeStart": 0, "team": 2, "areaId": "enemy_east", "units": ["DYNAMIC_PHASE_BOSS:1", "GRUNT_BASIC:7", "FLANK_SKIRMISHER:4"] }
+  ]
+}

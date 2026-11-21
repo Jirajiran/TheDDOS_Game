@@ -13,6 +13,7 @@ import {
   ensureBlackboard,
   writePathGoal,
 } from './blackboard.js';
+import { isHostileTeam } from './senseIndex.js';
 
 /** Default Local perception / steering (overridable via AI_LOCAL_PATH in config). */
 export const DEFAULT_LOCAL_PATH = Object.freeze({
@@ -46,11 +47,12 @@ function applyChunkDodge(match, unit, goal) {
   }
   const col = Math.floor(unit.x / world.pathSize);
   const row = Math.floor(unit.y / world.pathSize);
-  const n = world.pathGridN;
-  if (col < 0 || row < 0 || col >= n || row >= n) {
+  const cols = (world.pathCols || world.pathGridN) | 0;
+  const rows = (world.pathRows || world.pathGridN) | 0;
+  if (col < 0 || row < 0 || col >= cols || row >= rows) {
     return { goal: straight, blocked: false, blocker: null, dodging: false };
   }
-  const path = world.paths[row * n + col];
+  const path = world.paths[row * cols + col];
   const quotaMax = Math.max(0, getBalancePack().dodgeQuota | 0);
   if (unit.dodgePathIndex !== path.index) {
     unit.dodgePathIndex = path.index;
@@ -77,7 +79,7 @@ function applyChunkDodge(match, unit, goal) {
   const aim = Math.atan2(aimY, aimX);
   const dist = Math.hypot(aimX, aimY);
   const range = Math.max(32, Math.min(dist || path.w * 0.5, path.w * 0.5));
-  const hit = castRay(match, unit.x, unit.y, aim, range);
+  const hit = castRay(match, unit, unit.x, unit.y, aim, range);
   const inside =
     hit.hit &&
     hit.x >= path.x &&
@@ -254,13 +256,31 @@ export function castRaycastFan(match, unit, facingRad, cfg = DEFAULT_LOCAL_PATH)
   const stages = cfg.fanStages || DEFAULT_LOCAL_PATH.fanStages;
 
   let lineCount = stages[0] || 1;
-  let hits = castFanLines(match, unit.x, unit.y, facingRad, half, range, lineCount);
+  let hits = castFanLines(
+    match,
+    unit,
+    unit.x,
+    unit.y,
+    facingRad,
+    half,
+    range,
+    lineCount
+  );
   let blocker = firstBlocker(hits);
 
   // Escalate fan detail only when center/near rays hit something solid.
   for (let s = 1; s < stages.length && blocker; s++) {
     lineCount = stages[s];
-    hits = castFanLines(match, unit.x, unit.y, facingRad, half, range, lineCount);
+    hits = castFanLines(
+      match,
+      unit,
+      unit.x,
+      unit.y,
+      facingRad,
+      half,
+      range,
+      lineCount
+    );
     blocker = firstBlocker(hits);
   }
 
@@ -276,22 +296,22 @@ export function castRaycastFan(match, unit, facingRad, cfg = DEFAULT_LOCAL_PATH)
   };
 }
 
-function castFanLines(match, ox, oy, facing, halfSpan, range, count) {
+function castFanLines(match, unit, ox, oy, facing, halfSpan, range, count) {
   const out = [];
   if (count <= 1) {
-    out.push(castRay(match, ox, oy, facing, range));
+    out.push(castRay(match, unit, ox, oy, facing, range));
     return out;
   }
   for (let i = 0; i < count; i++) {
     const t = (i / (count - 1)) * 2 - 1; // -1..1
     const ang = facing + t * halfSpan;
-    out.push(castRay(match, ox, oy, ang, range));
+    out.push(castRay(match, unit, ox, oy, ang, range));
   }
   return out;
 }
 
-/** Sample along ray for solid walk blockers (nature + player-built). */
-function castRay(match, ox, oy, ang, range) {
+/** Sample along ray for solid walk blockers (nature + hostile structures). */
+function castRay(match, unit, ox, oy, ang, range) {
   const samples = 8;
   const dx = Math.cos(ang);
   const dy = Math.sin(ang);
@@ -300,7 +320,7 @@ function castRay(match, ox, oy, ang, range) {
     const x = ox + dx * t;
     const y = oy + dy * t;
     const block = findSolidBlockAt(match, x, y);
-    if (block && isLocalObstacle(block)) {
+    if (block && isLocalObstacle(match, unit, block)) {
       return { hit: true, x, y, dist: t, block };
     }
   }
@@ -364,12 +384,13 @@ function buildDodgeGoal(unit, goal, blocker, cfg) {
   };
 }
 
-/** Real obstacles Local must respect (nature + player structures). */
-function isLocalObstacle(block) {
+/** Real obstacles Local must respect (nature + hostile-team structures). */
+function isLocalObstacle(match, unit, block) {
   if (!block || !block.alive || block.isOpen) return false;
   if (block.walkSolid === false) return false;
   if (block.isHarvest) return true;
-  if (block.team === TEAM.PLAYER) return true;
+  const selfTeam = unit && unit.team != null ? unit.team : TEAM.ENEMY;
+  if (isHostileTeam(match, selfTeam, block.team)) return true;
   return false;
 }
 

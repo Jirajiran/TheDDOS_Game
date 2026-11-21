@@ -1,0 +1,18 @@
+{
+  "version": "1",
+  "targetWaveToWin": 10,
+  "setupPhaseDurationSec": 144,
+  "waveCountdownSec": 144,
+  "enemiesPerWaveBase": 3,
+  "enemiesPerWaveScale": 1,
+  "waveGroupCount": 3,
+  "loseMode": 2,
+  "lastStand": true,
+  "dodgeQuota": 4,
+  "area": { "cellsW": 3, "cellsH": 3 },
+  "territory": {
+    "base": { "padL3": 4, "importance": 3 },
+    "turret": { "padL3": 2, "importance": 2 },
+    "gen": { "padL3": 2, "importance": 1 }
+  }
+}

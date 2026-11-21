@@ -84,6 +84,7 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
 
   if (match) {
     drawBotAreas(ctx, world);
+    drawEditorMapAreas(ctx, match.mapAreas);
     if (match.territories && match.territories.length) drawTerritories(ctx, match.territories);
     else drawBaseChunk(ctx, match.baseChunk, zoom);
     drawBlockBodies(ctx, match.blocks, zoom);
@@ -133,6 +134,13 @@ function drawBotAreas(ctx, world) {
   if (!areas || !areas.length) return;
   fillAreaGroups(ctx, areas, true, 'rgba(220, 48, 40, 0.34)');
   fillAreaGroups(ctx, areas, false, 'rgba(220, 48, 40, 0.12)');
+}
+
+/** Editor / map-file areas (not FlatLand red rim). */
+function drawEditorMapAreas(ctx, areas) {
+  if (!areas || !areas.length) return;
+  fillAreaGroups(ctx, areas, true, 'rgba(48, 160, 220, 0.28)');
+  fillAreaGroups(ctx, areas, false, 'rgba(48, 160, 220, 0.10)');
 }
 
 function fillAreaGroups(ctx, areas, open, fillStyle) {

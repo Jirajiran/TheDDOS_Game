@@ -16,6 +16,7 @@ import {
   Goal,
   STAGE_TO_LEGACY,
   StageId,
+  TargetKind,
   ensureBlackboard,
   syncCombatToBlackboard,
   writePathGoal,
@@ -111,16 +112,30 @@ function factorScores(unit, combat, pack, bb, base, match) {
     const nearFire = combat.dist <= fireR * 1.15;
 
     if (combat.kind === 'unit') {
+      // Hostile unit in sense → Engage immediately (any hostile team, not Player-only lock).
+      const isPlayerKind =
+        combat.targetKind === TargetKind.PLAYER ||
+        (combat.unit && combat.unit.role === 'player');
       if (inEngage || unit.aggroChase) {
-        playerArmed = true;
-        f[Goal.ELIMINATE_PLAYER] += 180;
+        if (isPlayerKind) {
+          playerArmed = true;
+          f[Goal.ELIMINATE_PLAYER] += 180;
+        } else {
+          targetArmed = true;
+          f[Goal.ELIMINATE_TARGET] += 180;
+        }
         f[Goal.SUICIDE_ATTACK] += 160;
       }
       if (nearFire) {
-        f[Goal.ELIMINATE_PLAYER] += 80;
+        if (isPlayerKind) {
+          playerArmed = true;
+          f[Goal.ELIMINATE_PLAYER] += 80;
+        } else {
+          targetArmed = true;
+          f[Goal.ELIMINATE_TARGET] += 80;
+        }
         f[Goal.SUICIDE_ATTACK] += 60;
       }
-      // Sniper fleeOnApproach: prefer retreat when player inside preferred standoff.
       const fleeDist =
         getPreferredStandoffPx(weapon, flags.preferredRange || 'LONG_RANGE') *
         0.55;
@@ -381,6 +396,9 @@ export function decideUnitViaMediator(match, unit, ctx) {
   const pack = ctx.pack;
   const pathGoal = ctx.pathGoal;
   const combatTarget = ctx.combatTarget;
+  if (combatTarget && !combatTarget.targetKind && unit.combatTargetEnum) {
+    combatTarget.targetKind = unit.combatTargetEnum;
+  }
 
   writePathGoal(unit, pathGoal.x, pathGoal.y, pathGoal.radius);
   bb.allyCentroidX = ctx.allyX || 0;
