@@ -307,10 +307,23 @@ export function createPlayLoop(hub) {
 
   function startLoop() {
     stopLoop();
+    if (state.appState !== AppState.PLAYING) {
+      console.error('[TheDDOS] startLoop refused — not PLAYING');
+      return;
+    }
+    if (!state.match || !state.match.world || !state.match.pools) {
+      console.error('[TheDDOS] startLoop refused — match not ready');
+      return;
+    }
     state.lastTs = 0;
     const tick = (ts) => {
       if (state.appState !== AppState.PLAYING) {
         stopAmbience();
+        return;
+      }
+      if (!state.match || !state.match.world) {
+        stopAmbience();
+        stopLoop();
         return;
       }
       if (!state.lastTs) state.lastTs = ts;

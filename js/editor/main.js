@@ -369,6 +369,7 @@ function updateTrayUi() {
   }
 
   if (work) work.classList.toggle('has-tools-open', state.toolsOpen);
+  if (view && typeof view.syncInsets === 'function') view.syncInsets();
 }
 
 function updateToolUi() {

@@ -125,14 +125,20 @@ export async function runBootPreload(onProgress, options = {}) {
 
   report(92, 'Unit visuals…');
   const unitAsset = assets.unit_template;
-  if (unitAsset && unitAsset.ok && unitAsset.text) {
-    try {
-      await initUnitVisualFromSvgText(unitAsset.text);
-    } catch (err) {
-      warnings.push(`unit_visual: ${err && err.message ? err.message : err}`);
+  if (!(unitAsset && unitAsset.ok && unitAsset.text)) {
+    throw new Error(
+      'Boot failed: unit_template missing — cannot enter play without art'
+    );
+  }
+  const visualOk = await initUnitVisualFromSvgText(
+    unitAsset.text,
+    (label, done, total) => {
+      const pct = 92 + Math.round(((done || 0) / Math.max(1, total || 1)) * 5);
+      report(pct, label || 'Unit visuals…');
     }
-  } else {
-    warnings.push('unit_template missing — circle fallback');
+  );
+  if (!visualOk) {
+    throw new Error('Boot failed: unit visual bake returned empty');
   }
 
   report(95, 'Finalizing boot…');

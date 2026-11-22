@@ -26,10 +26,12 @@ import {
   skillEffectNames,
   weaponPreviewSpec,
 } from './sheetForm.js';
+import { scheduleMapVisibleInsets } from './mapView.js';
 import {
   ensureUnitPoolEntry,
   getParsedUnitArt,
   heldLoadout,
+  heldWeaponId,
   mountModelPreview,
   mountPoolPreview,
   mountStructurePreviewSvg,
@@ -86,6 +88,7 @@ function syncTrailVisibility(trayEl) {
   const helpOn = !!(bar && !bar.hidden && String(bar.textContent || '').trim());
   const panelOn = !!(panel && panel.childNodes.length);
   trayEl.hidden = !(helpOn || panelOn || trailClaim.source);
+  scheduleMapVisibleInsets();
 }
 
 /** Field help lives on the left tray (near placed-panel), not inside settings. */
@@ -428,6 +431,66 @@ export function renderPanel(root, api) {
   fitPreviewArt(root);
 }
 
+/** Resolve Trail/catalog target — WEAPON items use weapon art, not color swatch. */
+function resolveCatalogPreviewTarget(doc, kind, templateId) {
+  if (!doc || !templateId) {
+    return { previewKey: 'itemId', def: null, noteText: 'Object place preview' };
+  }
+  if (kind === 'unit') {
+    return {
+      previewKey: 'unitId',
+      def: doc.units && doc.units[templateId],
+      noteText: 'Unit place preview',
+    };
+  }
+  if (kind === 'weapon' && doc.weapons && doc.weapons[templateId]) {
+    return {
+      previewKey: 'weaponId',
+      def: doc.weapons[templateId],
+      noteText: 'Weapon / loadout preview',
+    };
+  }
+
+  const item = doc.items && doc.items[templateId];
+  if (item) {
+    const cat = itemCategory(item);
+    if (cat === 'Weapon') {
+      const wid =
+        (typeof item.weaponId === 'string' && item.weaponId) || templateId;
+      const weapon = weaponRecordOf(doc, wid) || item;
+      return {
+        previewKey: 'weaponId',
+        def: weapon,
+        noteText: 'Weapon / loadout preview',
+      };
+    }
+    let noteText = 'Object place preview';
+    if (cat === 'Turret') noteText = 'Turret place preview';
+    else if (cat === 'Block' || cat === 'Base' || cat === 'Door') {
+      noteText = 'Block place preview';
+    }
+    return { previewKey: 'itemId', def: item, noteText: noteText };
+  }
+
+  if (doc.weapons && doc.weapons[templateId]) {
+    return {
+      previewKey: 'weaponId',
+      def: doc.weapons[templateId],
+      noteText: 'Weapon / loadout preview',
+    };
+  }
+
+  if (doc.units && doc.units[templateId]) {
+    return {
+      previewKey: 'unitId',
+      def: doc.units[templateId],
+      noteText: 'Unit place preview',
+    };
+  }
+
+  return { previewKey: 'itemId', def: null, noteText: 'Object place preview' };
+}
+
 function fillCatalogPreview(trayEl, api, kind, templateId) {
   const doc = api.getDoc();
   const panel = trayEl.querySelector('#editor-placed-panel') || trayEl;
@@ -435,21 +498,10 @@ function fillCatalogPreview(trayEl, api, kind, templateId) {
     panel.replaceChildren();
     return;
   }
-  let previewKey = 'itemId';
-  let def = null;
-  let noteText = 'Object place preview';
-  if (kind === 'unit') {
-    def = doc.units && doc.units[templateId];
-    previewKey = 'unitId';
-    noteText = 'Unit place preview';
-  } else if (doc.items && doc.items[templateId]) {
-    def = doc.items[templateId];
-    previewKey = 'itemId';
-  } else if (doc.weapons && doc.weapons[templateId]) {
-    def = doc.weapons[templateId];
-    previewKey = 'weaponId';
-    noteText = 'Weapon / loadout preview';
-  }
+  const resolved = resolveCatalogPreviewTarget(doc, kind, templateId);
+  const previewKey = resolved.previewKey;
+  const def = resolved.def;
+  const noteText = resolved.noteText;
   panel.replaceChildren();
   if (!def) return;
 
@@ -462,6 +514,8 @@ function fillCatalogPreview(trayEl, api, kind, templateId) {
   header.appendChild(title);
   panel.appendChild(header);
   panel.appendChild(previewFor(api, previewKey, def));
+  const stats = previewStatusBlock(api, previewKey, def);
+  if (stats) panel.appendChild(stats);
   const note = document.createElement('p');
   note.className = 'editor-note';
   note.textContent = noteText;
@@ -567,7 +621,10 @@ export function renderPlacedTray(trayEl, api) {
       ? (doc.units && doc.units[primary.templateId])
       : (doc.items && doc.items[primary.templateId]);
     if (def) {
-      panel.appendChild(previewFor(api, primary.kind === 'unit' ? 'unitId' : 'itemId', def));
+      const pKey = primary.kind === 'unit' ? 'unitId' : 'itemId';
+      panel.appendChild(previewFor(api, pKey, def));
+      const stats = previewStatusBlock(api, pKey, def);
+      if (stats) panel.appendChild(stats);
     }
   } else {
     const note = document.createElement('p');
@@ -1566,6 +1623,8 @@ function renderSheet(body, api, doc, map, selectedKey) {
     return;
   }
   body.appendChild(previewFor(api, selectedKey, record));
+  const sheetStats = previewStatusBlock(api, selectedKey, record);
+  if (sheetStats) body.appendChild(sheetStats);
   const shape = unionShape(rows);
   const ctx = {
     canWear: (itemId) => {
@@ -1972,14 +2031,129 @@ function rewriteRefs(node, prev, next) {
 function previewFor(api, key, record) {
   if (key === 'unitId') return unitPreview(api, record);
   if (key === 'weaponId') {
-    if (record && record.pending && record.pendingCategory === 'Melee') return colorPreview(recordSwatch(record));
+    if (record && record.pending && record.pendingCategory === 'Melee') {
+      return colorPreview(recordSwatch(record));
+    }
     return weaponPreview(api, record);
   }
   if (key === 'itemId') {
-    const category = record && record.pending ? record.pendingCategory || 'Block' : itemCategory(record);
-    if (category === 'Block' || category === 'Turret' || category === 'Base') return structurePreview(api, record);
+    const category =
+      record && record.pending
+        ? record.pendingCategory || 'Block'
+        : itemCategory(record);
+    if (category === 'Weapon') {
+      const doc = api.getDoc ? api.getDoc() : null;
+      const wid =
+        (record && typeof record.weaponId === 'string' && record.weaponId) ||
+        (record && record.id) ||
+        '';
+      const weapon = weaponRecordOf(doc, wid) || record;
+      return weaponPreview(api, weapon);
+    }
+    if (
+      category === 'Block' ||
+      category === 'Turret' ||
+      category === 'Base' ||
+      category === 'Door' ||
+      category === 'Generator' ||
+      category === 'Factory'
+    ) {
+      return structurePreview(api, record);
+    }
   }
   return colorPreview(recordSwatch(record));
+}
+
+function pushStat(lines, label, value) {
+  if (value == null || value === '') return;
+  lines.push(label + ': ' + value);
+}
+
+function previewStatusLines(api, key, record) {
+  if (!record) return [];
+  const doc = api.getDoc ? api.getDoc() : null;
+  const lines = [];
+
+  if (key === 'unitId') {
+    if (Array.isArray(record.hpRange) && record.hpRange.length >= 2) {
+      pushStat(lines, 'HP', record.hpRange[0] + ' – ' + record.hpRange[1]);
+    } else if (record.maxHp != null) {
+      pushStat(lines, 'HP', record.maxHp);
+    }
+    if (record.speed != null) pushStat(lines, 'Speed', record.speed);
+    if (record.armorType) pushStat(lines, 'Armor', record.armorType);
+    const skills =
+      (Array.isArray(record.activeSkills) && record.activeSkills) ||
+      (Array.isArray(record.skills) && record.skills) ||
+      [];
+    if (skills.length) pushStat(lines, 'Skills', skills.join(', '));
+    const held = heldLoadout(record);
+    if (held.row && held.row.itemId) {
+      pushStat(lines, 'Held', held.row.itemId);
+      const wid = heldWeaponId(doc, held.row.itemId);
+      if (wid) {
+        const w = weaponRecordOf(doc, wid);
+        if (w && w.baseDamage != null) pushStat(lines, 'Weapon dmg', w.baseDamage);
+      }
+    } else if (record.defaultWeapon) {
+      pushStat(lines, 'Weapon', record.defaultWeapon);
+    }
+    return lines;
+  }
+
+  if (key === 'weaponId') {
+    if (record.baseDamage != null) pushStat(lines, 'Damage', record.baseDamage);
+    if (record.cooldownSec != null) pushStat(lines, 'Cooldown', record.cooldownSec + 's');
+    if (record.damageType) pushStat(lines, 'Dmg type', record.damageType);
+    if (record.magCapacity != null) pushStat(lines, 'Mag', record.magCapacity);
+    if (record.maxDistancePath != null) {
+      pushStat(lines, 'Range (path)', record.maxDistancePath);
+    }
+    if (record.spreadDeg != null) pushStat(lines, 'Spread', record.spreadDeg + '°');
+    return lines;
+  }
+
+  // itemId — Block / Turret / Base / other
+  const cat =
+    record.pending ? record.pendingCategory || 'Block' : itemCategory(record);
+  if (record.maxHp != null) pushStat(lines, 'HP', record.maxHp);
+  if (record.armorType) pushStat(lines, 'Armor', record.armorType);
+  if (cat === 'Turret' || record.isTurret) {
+    pushStat(lines, 'Type', 'Turret');
+    if (record.weaponId) {
+      pushStat(lines, 'Weapon', record.weaponId);
+      const w = weaponRecordOf(doc, record.weaponId);
+      if (w && w.baseDamage != null) pushStat(lines, 'Damage', w.baseDamage);
+      if (w && w.cooldownSec != null) pushStat(lines, 'Cooldown', w.cooldownSec + 's');
+    }
+    if (record.detectRadius != null) pushStat(lines, 'Detect', record.detectRadius);
+  } else if (cat === 'Weapon') {
+    const wid = record.weaponId || record.id;
+    const w = weaponRecordOf(doc, wid);
+    if (w) return previewStatusLines(api, 'weaponId', w);
+  } else {
+    pushStat(lines, 'Type', cat);
+    if (record.pierceCost != null) pushStat(lines, 'Pierce cost', record.pierceCost);
+    if (record.footprint) {
+      const fp = record.footprint;
+      pushStat(lines, 'Footprint', (fp.w || 1) + '×' + (fp.h || 1));
+    }
+  }
+  return lines;
+}
+
+function previewStatusBlock(api, key, record) {
+  const lines = previewStatusLines(api, key, record);
+  if (!lines.length) return null;
+  const box = document.createElement('div');
+  box.className = 'editor-preview-stats';
+  for (let i = 0; i < lines.length; i++) {
+    const row = document.createElement('div');
+    row.className = 'editor-preview-stat';
+    row.textContent = lines[i];
+    box.appendChild(row);
+  }
+  return box;
 }
 
 function previewFrame() {
@@ -2044,6 +2218,11 @@ function weaponPreview(api, record) {
   if (svg) {
     frame.box.appendChild(svg);
     requestAnimationFrame(() => fitPreviewArt(frame.wrap));
+  } else {
+    const swatch = document.createElement('div');
+    swatch.className = 'editor-preview-swatch';
+    swatch.style.background = cssColor(recordSwatch(record));
+    frame.box.appendChild(swatch);
   }
   return frame.wrap;
 }

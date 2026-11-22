@@ -20,7 +20,51 @@ import {
   isUnitVisualReady,
 } from '../view/unitVisual.js';
 import { getGameplayArtPool } from '../view/artPool.js';
+
 const STAGE_TIMEOUT_MS = 10000;
+
+function playerSpawnedOnMatch(match) {
+  if (!match || match.playerUnitId < 0 || !match.pools || !match.pools.units) {
+    return false;
+  }
+  const u = match.pools.units[match.playerUnitId];
+  return !!(u && u.active && u.role === 'player');
+}
+
+/**
+ * Hard gate before AppState.PLAYING — load + paint + UI must already be done.
+ * @param {object} match
+ * @param {{ playerUiReady?: boolean, firstPaintOk?: boolean }} [opts]
+ */
+export function assertMatchPlayReady(match, opts = {}) {
+  if (!match) throw new Error('Play gate: match missing');
+  if (!match.pools) throw new Error('Play gate: pools missing');
+  if (!match.world) throw new Error('Play gate: world missing');
+  if (!match.world.paths || !match.world.paths.length) {
+    throw new Error('Play gate: world paths empty');
+  }
+  if (!match.occupancy) throw new Error('Play gate: occupancy missing');
+  if (!Array.isArray(match.placeSlots)) {
+    throw new Error('Play gate: placeSlots missing');
+  }
+  if (!isUnitVisualReady()) {
+    throw new Error('Play gate: unit visual not ready');
+  }
+  const pool = getGameplayArtPool();
+  if (!pool || !pool.size) {
+    throw new Error('Play gate: gameplay art pool empty');
+  }
+  if (!playerSpawnedOnMatch(match)) {
+    throw new Error('Play gate: player not spawned');
+  }
+  if (opts.playerUiReady === false) {
+    throw new Error('Play gate: Player UI not ready');
+  }
+  if (opts.firstPaintOk === false) {
+    throw new Error('Play gate: first world paint not confirmed');
+  }
+  return true;
+}
 
 /**
  * @param {(pct: number, label: string) => void} onProgress
@@ -81,15 +125,24 @@ export async function runLoading(onProgress, opts = {}) {
         required: true,
         timeoutMs: 120000,
         run: async () => {
-          if (isUnitVisualReady() && getGameplayArtPool() && getGameplayArtPool().size) {
-            return getGameplayArtPool();
-          }
-          return buildGameplayLayerArtPool((label, done, total) => {
-            report(
-              5 + Math.round(((done || 0) / Math.max(1, total || 1)) * 20),
-              label || 'Art pool…'
+          if (!isUnitVisualReady()) {
+            throw new Error(
+              'Unit visual not ready — boot must finish unit_template bake'
             );
-          });
+          }
+          let pool = getGameplayArtPool();
+          if (!pool || !pool.size) {
+            pool = await buildGameplayLayerArtPool((label, done, total) => {
+              report(
+                5 + Math.round(((done || 0) / Math.max(1, total || 1)) * 20),
+                label || 'Art pool…'
+              );
+            });
+          }
+          if (!pool || !pool.size) {
+            throw new Error('Art pool empty after bake');
+          }
+          return pool;
         },
       },
       {
@@ -118,6 +171,17 @@ export async function runLoading(onProgress, opts = {}) {
 
   const pools = wave1.results.pools.value;
   const world = wave1.results.world.value;
+  if (!pools) throw new Error('Match load: pools missing');
+  if (!world || !world.paths || !world.paths.length) {
+    throw new Error('Match load: world paths empty');
+  }
+  if (!isUnitVisualReady()) {
+    throw new Error('Match load: unit visual not ready');
+  }
+  const artPool = getGameplayArtPool();
+  if (!artPool || !artPool.size) {
+    throw new Error('Match load: art pool empty');
+  }
 
   report(60, 'Occupancy + place slots…');
 

@@ -54,6 +54,76 @@ export function clientToWorld(svg, clientX, clientY) {
   return { x: p.x, y: p.y };
 }
 
+/**
+ * Shrink the map SVG content box so overlays (Trail / Panel / Tools) do not
+ * steal world space — fixes click/ghost offset when preview trays open.
+ */
+export function syncMapVisibleInsets() {
+  const wrap = document.querySelector('.editor-map-wrap');
+  const map = wrap && wrap.querySelector('.editor-map');
+  if (!wrap || !map) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  if (!(wrapRect.width > 0) || !(wrapRect.height > 0)) return;
+
+  let padL = 0;
+  let padR = 0;
+  let padB = 0;
+
+  const tray = document.getElementById('editor-placed-tray');
+  if (tray && !tray.hidden) {
+    const r = tray.getBoundingClientRect();
+    if (r.width > 0 && r.right > wrapRect.left && r.left < wrapRect.right) {
+      padL = Math.max(0, Math.min(r.right, wrapRect.right) - wrapRect.left + 8);
+    }
+  }
+
+  const panel = document.getElementById('editor-panel-tray');
+  if (panel && !panel.classList.contains('is-collapsed')) {
+    const r = panel.getBoundingClientRect();
+    if (r.width > 0) {
+      padR = Math.max(0, wrapRect.right - Math.max(r.left, wrapRect.left));
+    }
+  }
+
+  const tools = document.getElementById('editor-tools-tray');
+  const toolsInner = document.getElementById('editor-map-tools');
+  if (
+    tools &&
+    !tools.classList.contains('is-collapsed') &&
+    toolsInner
+  ) {
+    const r = toolsInner.getBoundingClientRect();
+    if (r.height > 0 && r.top < wrapRect.bottom) {
+      padB = Math.max(0, wrapRect.bottom - r.top);
+    }
+  }
+
+  // Leave a usable strip if overlays are huge.
+  const maxL = Math.floor(wrapRect.width * 0.42);
+  const maxR = Math.floor(wrapRect.width * 0.48);
+  const maxB = Math.floor(wrapRect.height * 0.35);
+  if (padL > maxL) padL = maxL;
+  if (padR > maxR) padR = maxR;
+  if (padB > maxB) padB = maxB;
+
+  map.style.boxSizing = 'border-box';
+  map.style.paddingLeft = padL + 'px';
+  map.style.paddingRight = padR + 'px';
+  map.style.paddingBottom = padB + 'px';
+  map.style.paddingTop = '0px';
+}
+
+/** After DOM/tray layout settles (Trail open/close). */
+export function scheduleMapVisibleInsets() {
+  syncMapVisibleInsets();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      syncMapVisibleInsets();
+      requestAnimationFrame(syncMapVisibleInsets);
+    });
+  }
+}
+
 function hitArea(doc, x, y) {
   const areas = doc.areas;
   for (let i = areas.length - 1; i >= 0; i--) {
@@ -1174,5 +1244,23 @@ export function mountMapView(svg, api) {
     refreshCursor();
   });
 
-  return { paint, zoomIn, zoomOut, resetView, refreshCursor };
+  scheduleMapVisibleInsets();
+  if (typeof ResizeObserver !== 'undefined') {
+    const wrap = svg.closest('.editor-map-wrap') || svg.parentElement;
+    if (wrap) {
+      const ro = new ResizeObserver(() => scheduleMapVisibleInsets());
+      ro.observe(wrap);
+    }
+  } else {
+    window.addEventListener('resize', scheduleMapVisibleInsets);
+  }
+
+  return {
+    paint,
+    zoomIn,
+    zoomOut,
+    resetView,
+    refreshCursor,
+    syncInsets: scheduleMapVisibleInsets,
+  };
 }

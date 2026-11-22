@@ -24,7 +24,7 @@ import { createScreen } from './app/screen.js';
 import { createPlayLoop } from './app/playLoop.js';
 import { createInput } from './player/input.js';
 import { runBootPreload } from './session/boot.js';
-import { runLoading } from './session/loading.js';
+import { assertMatchPlayReady, runLoading } from './session/loading.js';
 import { createLoadingUi } from './session/loadingUi.js';
 import { hasPendingEditorTestPlay } from './session/editorTestPlay.js';
 import { resolvePlayMap } from './session/resolvePlayMap.js';
@@ -641,8 +641,9 @@ export function createApp(dom) {
       });
       await new Promise((r) => requestAnimationFrame(() => r()));
 
-      screens.playing.hidden = false;
-      screens.playing.classList.add('is-active', 'is-warming');
+      // Keep playing off-screen until warm paint — loading stays on top.
+      screens.playing.hidden = true;
+      screens.playing.classList.remove('is-active', 'is-warming');
 
       const match = await runLoading(
         (pct, label) => {
@@ -688,6 +689,14 @@ export function createApp(dom) {
       } else {
         throw new Error('PlayerUI mount missing — SVG HUD required');
       }
+      if (!playerUi.isReady()) {
+        throw new Error('Player UI mount incomplete');
+      }
+
+      assertMatchPlayReady(match, {
+        playerUiReady: true,
+        firstPaintOk: true,
+      });
 
       hub.reportLoadProgress(100, 'Ready');
       const held = performance.now() - loadUiStartedAt;
@@ -695,9 +704,22 @@ export function createApp(dom) {
         await new Promise((r) => setTimeout(r, MATCH_LOADING_MIN_MS - held));
       }
 
+      // Final gate — still LOADING until this moment.
+      assertMatchPlayReady(match, {
+        playerUiReady: playerUi.isReady(),
+        firstPaintOk: true,
+      });
+      if (state.appState !== AppState.LOADING) {
+        throw new Error('Play gate: left LOADING before ready');
+      }
+
       loadingUi.hide();
-      hub.setAppState(AppState.PLAYING);
+      screens.playing.hidden = false;
+      screens.playing.classList.add('is-active');
       screens.playing.classList.remove('is-warming');
+      screens.loading.hidden = true;
+      screens.loading.classList.remove('is-active');
+      hub.setAppState(AppState.PLAYING);
       hub.syncDebugHudButtons(match);
       hub.startLoop();
     } catch (err) {
