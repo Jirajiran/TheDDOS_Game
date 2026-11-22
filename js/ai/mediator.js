@@ -8,6 +8,7 @@ import { ActionType } from '../player/actions.js';
 import {
   getPreferredStandoffPx,
   getSenseRadiusPx,
+  getSkillDef,
   getWeaponDef,
   getWeaponMaxRangePx,
 } from '../config.js';
@@ -100,6 +101,18 @@ function factorScores(unit, combat, pack, bb, base, match) {
   let playerArmed = false;
   let targetArmed = false;
   let baseArmed = false;
+
+  // Anti-Pattern Prevention: Target-Lock Baseline Guarantee Factor
+  const hasReservedTarget = bb.combatTargetId != null && bb.combatTargetId >= 0;
+  if (hasReservedTarget) {
+    if (bb.combatTargetKind === TargetKind.PLAYER || (combat && combat.targetKind === TargetKind.PLAYER)) {
+      playerArmed = true;
+      f[Goal.ELIMINATE_PLAYER] += 220; // Guarantee higher than REACH_PATH_GOAL (100)
+    } else {
+      targetArmed = true;
+      f[Goal.ELIMINATE_TARGET] += 220;
+    }
+  }
 
   if (combat) {
     const engage = getSenseRadiusPx(unit) || pack.enemyEngageRadius;
@@ -312,36 +325,19 @@ function mapGoalToStage(goal, goalToStage) {
 }
 
 /**
- * Archetype-agnostic: cast READY skills while engaging (Unified CAST_SKILL).
- * Prefer named archetype skills; FIST only when gun not viable or in melee band.
+ * Cast first READY skill from unit.skillIds (sheet/archetype data).
+ * No hard-coded skill names — melee-gated skills use def.effect.type.
  */
 function maybeEmitReadySkill(unit, combatTarget, actions, ctx) {
   if (!unit || !unit.skillIds || !unit.skillIds.length || !unit.skills) return;
   if (!combatTarget && !(unit.aggroChase || unit.tauntTimer > 0)) return;
 
-  let fistReady = null;
-  for (let i = 0; i < unit.skillIds.length; i++) {
-    const id = unit.skillIds[i];
-    const rt = unit.skills[id];
-    if (!rt || rt.phase !== SkillPhase.READY) continue;
-    if (id === 'FIST') {
-      fistReady = id;
-      continue;
-    }
-    actions.push({
-      type: ActionType.CAST_SKILL,
-      unitId: unit.id,
-      skillId: id,
-    });
-    return;
-  }
-
-  if (!fistReady) return;
   const pack = ctx && ctx.pack;
   const meleeR = pack && pack.meleeReach ? pack.meleeReach * 1.25 : 90;
-  const weapon = unit.weaponId && ctx && ctx.getWeaponDef
-    ? ctx.getWeaponDef(unit.weaponId)
-    : null;
+  const weapon =
+    unit.weaponId && ctx && ctx.getWeaponDef
+      ? ctx.getWeaponDef(unit.weaponId)
+      : null;
   const canShoot =
     weapon &&
     ctx &&
@@ -351,13 +347,24 @@ function maybeEmitReadySkill(unit, combatTarget, actions, ctx) {
     combatTarget && typeof combatTarget.dist === 'number'
       ? combatTarget.dist <= meleeR
       : false;
-  const wantFist = !unit.weaponId || !canShoot || close;
-  if (!wantFist) return;
-  actions.push({
-    type: ActionType.CAST_SKILL,
-    unitId: unit.id,
-    skillId: fistReady,
-  });
+
+  for (let i = 0; i < unit.skillIds.length; i++) {
+    const id = unit.skillIds[i];
+    const rt = unit.skills[id];
+    if (!rt || rt.phase !== SkillPhase.READY) continue;
+    const def = getSkillDef(id);
+    const effect = def && def.effect ? def.effect : null;
+    if (effect && effect.type === 'MELEE_SWING') {
+      const wantMelee = !unit.weaponId || !canShoot || close;
+      if (!wantMelee) continue;
+    }
+    actions.push({
+      type: ActionType.CAST_SKILL,
+      unitId: unit.id,
+      skillId: id,
+    });
+    return;
+  }
 }
 
 /**
@@ -393,6 +400,21 @@ export function decideUnitViaMediator(match, unit, ctx) {
   tickArchetypePhase(unit);
 
   const bb = ensureBlackboard(unit);
+
+  // Anti-Pattern Prevention: Pre-Score Target Validation
+  if (bb.combatTargetId != null && bb.combatTargetId >= 0) {
+    if (
+      !ctx.combatTarget ||
+      ctx.combatTarget.dead ||
+      (ctx.combatTarget.unit && ctx.combatTarget.unit.hp <= 0)
+    ) {
+      bb.combatTargetId = -1;
+      bb.combatTargetKind = null;
+      unit.combatTargetId = -1;
+      unit.combatTargetKind = null;
+    }
+  }
+
   const pack = ctx.pack;
   const pathGoal = ctx.pathGoal;
   const combatTarget = ctx.combatTarget;
@@ -406,32 +428,47 @@ export function decideUnitViaMediator(match, unit, ctx) {
   bb.allyCount = ctx.allyN || 0;
   syncCombatToBlackboard(unit);
 
-  processUnitEvents(match, unit, {
-    pack,
-    combatTarget,
-    pathGoal,
-    leftSector: ctx.leftSector,
-    eventBoostTable: ctx.eventBoostTable || DEFAULT_EVENT_BOOSTS,
-  });
+  // AI LOD: combat every frame; otherwise stagger by match.aiTick (deterministic).
+  const tickCount = match.aiTick | 0;
+  const inCombat = bb.combatTargetId >= 0 || unit.aggroChase;
+  const lodInterval = inCombat ? 1 : 4;
+  const shouldThink = ((unit.id + tickCount) % lodInterval) === 0;
 
-  // Burst accum uses previous stage; flag arms FLANK_POSITION this frame.
-  tickBurstRelocate(unit, bb, combatTarget, ctx.dt || 0, bb.activeStage);
+  let activeGoal = bb.activeGoal || Goal.REACH_PATH_GOAL;
+  let activeStage = bb.activeStage || StageId.APPROACH_PATH;
 
-  const activeGoal = selectGoal(
-    unit,
-    bb,
-    combatTarget,
-    pack,
-    ctx.goalBaseWeights || DEFAULT_GOAL_BASE_WEIGHTS,
-    match
-  );
-  const activeStage = mapGoalToStage(
-    activeGoal,
-    ctx.goalToStage || DEFAULT_GOAL_TO_STAGE
-  );
+  if (shouldThink) {
+    processUnitEvents(match, unit, {
+      pack,
+      combatTarget,
+      pathGoal,
+      leftSector: ctx.leftSector,
+      eventBoostTable: ctx.eventBoostTable || DEFAULT_EVENT_BOOSTS,
+    });
 
-  bb.activeGoal = activeGoal;
-  bb.activeStage = activeStage;
+    // Drain after process — clearing before would drop taunt/hit this tick.
+    if (bb.events) bb.events.length = 0;
+
+    // Burst accum uses previous stage; flag arms FLANK_POSITION this frame.
+    tickBurstRelocate(unit, bb, combatTarget, ctx.dt || 0, bb.activeStage);
+
+    activeGoal = selectGoal(
+      unit,
+      bb,
+      combatTarget,
+      pack,
+      ctx.goalBaseWeights || DEFAULT_GOAL_BASE_WEIGHTS,
+      match
+    );
+    activeStage = mapGoalToStage(
+      activeGoal,
+      ctx.goalToStage || DEFAULT_GOAL_TO_STAGE
+    );
+
+    bb.activeGoal = activeGoal;
+    bb.activeStage = activeStage;
+  }
+
   unit.aiStage = STAGE_TO_LEGACY[activeStage] || 'approach';
 
   const runner = STAGE_RUNNERS[activeStage] || runApproach;

@@ -183,14 +183,13 @@ export function resetPlayerStats(u, pack, match) {
       (playerBody ? bal.playerArmorType : bal.enemyArmorType);
     u.archetypeId =
       hostId || (sheet.id ? String(sheet.id) : null) || u.archetypeId;
-    if (Array.isArray(sheet.activeSkills)) {
+    // Skills from Host/unit sheet only — no hard FIST/SELF_HEAL invent.
+    if (Array.isArray(sheet.activeSkills) && sheet.activeSkills.length) {
       u.skillIds = sheet.activeSkills.slice();
-    } else if (Array.isArray(sheet.skills)) {
+    } else if (Array.isArray(sheet.skills) && sheet.skills.length) {
       u.skillIds = sheet.skills.slice();
-    } else if (Array.isArray(sheet.skillIds)) {
+    } else if (Array.isArray(sheet.skillIds) && sheet.skillIds.length) {
       u.skillIds = sheet.skillIds.slice();
-    } else if (playerBody && Array.isArray(bal.playerActiveSkills)) {
-      u.skillIds = bal.playerActiveSkills.slice();
     } else {
       u.skillIds = [];
     }
@@ -201,9 +200,10 @@ export function resetPlayerStats(u, pack, match) {
     u.speed = bal.playerSpeed;
     u.radius = bal.playerRadius;
     u.armorType = bal.playerArmorType;
+    // FlatLand / no Host sheet: pack rules list if present, else none.
     u.skillIds = Array.isArray(bal.playerActiveSkills)
       ? bal.playerActiveSkills.slice()
-      : ['FIST', 'SELF_HEAL'];
+      : [];
   }
 
   const weaponId = match && match.startingWeaponId;
@@ -556,6 +556,8 @@ function idleWorldGoal(match, unit) {
 export function decideEnemyActions(match, dt) {
   const actions = [];
   if (!match || match.outcome) return actions;
+  // Deterministic AI LOD counter (Mediator stagger); one step per bot brain tick.
+  match.aiTick = (match.aiTick | 0) + 1;
   const pack = getBalancePack();
   const baseAlive = !!(match.base && match.base.alive);
 

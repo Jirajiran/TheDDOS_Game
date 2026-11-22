@@ -265,7 +265,7 @@ export function installPlayButtons(api) {
         e.stopPropagation();
         playSfx('ui.click');
         if (api.opts.onCastFist) api.opts.onCastFist();
-        else if (api.opts.onCastSkill) api.opts.onCastSkill('FIST');
+        else if (api.opts.onCastSkillSlot) api.opts.onCastSkillSlot(0);
       });
     }
     const skill2 = api.$('Skill_Show_2');
@@ -275,6 +275,9 @@ export function installPlayButtons(api) {
       skill2.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        playSfx('ui.click');
+        if (api.opts.onCastHeal) api.opts.onCastHeal();
+        else if (api.opts.onCastSkillSlot) api.opts.onCastSkillSlot(1);
       });
     }
   

@@ -2,13 +2,14 @@
  * APPROACH_PATH — walk toward pathGoal (or sticky combat while closing if reserved).
  * Single job: MOVE (+ light AIM). No Goal selection.
  * Fire while approaching uses AI fire-decision range (night mul; bullet range unchanged).
+ * When inside pathGoal.radius with no chase → hold (idle), no MOVE jitter.
  */
 
 import { ActionType } from '../../player/actions.js';
 import { getAiFireDecisionRangePx } from '../../view/dayCycle.js';
 
 export function runApproach(ctx) {
-  const { unit, pathGoal, combatTarget, dt } = ctx;
+  const { unit, pathGoal, combatTarget, dt, blackboard: bb } = ctx;
   const actions = [];
   let dx = 0;
   let dy = 0;
@@ -38,13 +39,24 @@ export function runApproach(ctx) {
     const m = Math.hypot(dx, dy) || 1;
     dx /= m;
     dy /= m;
+    actions.push({ type: ActionType.MOVE, unitId: unit.id, dx, dy });
   } else {
-    const len = Math.hypot(pathGoal.x - unit.x, pathGoal.y - unit.y) || 1;
-    dx = (pathGoal.x - unit.x) / len;
-    dy = (pathGoal.y - unit.y) / len;
+    const dist = Math.hypot(pathGoal.x - unit.x, pathGoal.y - unit.y);
+    const arriveR =
+      pathGoal.radius != null
+        ? pathGoal.radius
+        : bb && bb.pathGoalRadius != null
+          ? bb.pathGoalRadius
+          : 48;
+    if (dist > arriveR) {
+      const len = dist || 1;
+      dx = (pathGoal.x - unit.x) / len;
+      dy = (pathGoal.y - unit.y) / len;
+      actions.push({ type: ActionType.MOVE, unitId: unit.id, dx, dy });
+    }
+    // else: arrived — idle hold (no MOVE)
   }
 
-  actions.push({ type: ActionType.MOVE, unitId: unit.id, dx, dy });
   actions.push({
     type: ActionType.AIM,
     unitId: unit.id,

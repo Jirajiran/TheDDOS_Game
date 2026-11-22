@@ -242,6 +242,7 @@ export function initMatchGameplay(match, options = {}) {
   match.beams = [];
   match.pathPipeMask = { active: false, maskedKeys: new Set(), navPoints: [] };
   match.simTime = 0;
+  match.aiTick = 0;
   match.nightBlend = 0;
 
   // Stash room/editor map meta before world-gen (quotas read mapResources).
@@ -504,7 +505,6 @@ function applyActions(match, actions, mouseWorld, dt) {
     } else if (a.type === ActionType.EQUIP_WORN) {
       if (unit.role === 'player') tryEquipWornFromActive(match, unit);
     } else if (a.type === ActionType.CAST_SKILL) {
-      if (a.skillId === 'SELF_HEAL') continue;
       tryBeginCastSkill(unit, {
         skillId: a.skillId,
         targetPosVec2: a.targetPosVec2,

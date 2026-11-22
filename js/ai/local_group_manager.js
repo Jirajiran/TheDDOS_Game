@@ -157,16 +157,10 @@ export function applyLocalPathLayer(match, unit, generalGoal, opts = {}) {
     };
   }
 
-  // Sector / off-path rejoin (Local General stub → blackboard goal).
+  // Off-path rejoin → shared pivot/base (no promote-to-leader).
   let goal = generalGoal;
-  const leftSector = !!opts.leftSector;
-  if (leftSector) {
-    const localGoal = applyLocalGeneralStub(match, unit, baseX, baseY);
-    if (localGoal) goal = localGoal;
-  } else {
-    const localGoal = applyLocalGeneralStub(match, unit, baseX, baseY);
-    if (localGoal && unit.localGeneral) goal = localGoal;
-  }
+  const localGoal = applyLocalGeneralStub(match, unit, baseX, baseY);
+  if (localGoal) goal = localGoal;
 
   const dodge = applyChunkDodge(match, unit, goal);
   goal = dodge.goal;
@@ -182,7 +176,7 @@ export function applyLocalPathLayer(match, unit, generalGoal, opts = {}) {
 
   writePathGoal(unit, goal.x, goal.y, goal.radius != null ? goal.radius : 80);
   bb.steeringBudgetLeft = unit.dodgeQuotaLeft != null ? unit.dodgeQuotaLeft : 0;
-  bb.localAdjusted = !!(dodge.dodging || unit.localGeneral);
+  bb.localAdjusted = !!(dodge.dodging || localGoal);
 
   return {
     goal,

@@ -722,9 +722,9 @@ export function installPlayPanels(api) {
     const fl = api.$('Anchor_Left_Bottom_FL');
     if (fl) api.setVisible(fl, true);
     for (let i = 1; i <= 3; i++) api.setVisible(api.$(`BackPack_tyle_${i}`), t === i);
-    api.setVisible(api.$('Skill_Show_1'), true);
-    api.ensureIconOverlay(api.$('Skill_Show_1'), FIST_ICON_COLOR, true);
-    api.setVisible(api.$('Skill_Show_2'), true);
+    // Skill_Show visibility/colors come from syncSkills (Host sheet).
+    api.setVisible(api.$('Skill_Show_1'), false);
+    api.setVisible(api.$('Skill_Show_2'), false);
   }
   
   api.setInteractiveVisible = function setInteractiveVisible(on) {
@@ -1257,28 +1257,14 @@ export function installPlayPanels(api) {
   }
   
   api.syncSkills = function syncSkills(skills) {
-    // skills: [{ id, cooldownSec }] — slot0 FIST · slot1 SELF_HEAL · hide unused
+    // skills: [{ id, cooldownSec }] from Host/unit sheet — hide empty slots
+    const list = Array.isArray(skills) ? skills : [];
+    api.state.hudSkills = list;
     for (let i = 0; i < SKILL_IDS.length; i++) {
       const el = api.$(SKILL_IDS[i]);
       if (!el) continue;
-      const sk = skills[i];
-      if (i === 0) {
-        api.setVisible(el, true);
-        const num = api.findNumberHost(el);
-        const cd = sk ? sk.cooldownSec || 0 : 0;
-        api.setCountOnHost(num, Math.ceil(cd), cd > 0.05);
-        api.ensureIconOverlay(el, FIST_ICON_COLOR, true);
-        continue;
-      }
-      if (sk && (sk.id === 'SELF_HEAL' || i === 1)) {
-        api.setVisible(el, true);
-        const num = api.findNumberHost(el);
-        const cd = sk.cooldownSec || 0;
-        api.setCountOnHost(num, Math.ceil(cd), cd > 0.05);
-        api.ensureIconOverlay(el, HEAL_ICON_COLOR, true);
-        continue;
-      }
-      if (!sk) {
+      const sk = list[i];
+      if (!sk || !sk.id) {
         api.setVisible(el, false);
         api.ensureIconOverlay(el, null, false);
         continue;
@@ -1287,7 +1273,10 @@ export function installPlayPanels(api) {
       const num = api.findNumberHost(el);
       const cd = sk.cooldownSec || 0;
       api.setCountOnHost(num, Math.ceil(cd), cd > 0.05);
-      api.ensureIconOverlay(el, '#7a8a9a', true);
+      let color = '#7a8a9a';
+      if (sk.id === 'FIST') color = FIST_ICON_COLOR;
+      else if (sk.id === 'SELF_HEAL') color = HEAL_ICON_COLOR;
+      api.ensureIconOverlay(el, color, true);
     }
   }
   

@@ -403,8 +403,15 @@ export function createApp(dom) {
       onGenTake: (resId) => dispatchUi('genTake', resId),
       onGenClose: () => dispatchUi('genClose'),
       onCastFist: () => dispatchUi('castFist'),
+      onCastHeal: () => dispatchUi('castHeal'),
+      onCastSkillSlot: (slotIndex) => {
+        if ((slotIndex | 0) === 0) dispatchUi('castFist');
+        else if ((slotIndex | 0) === 1) dispatchUi('castHeal');
+      },
       onCastSkill: (skillId) => {
+        // Legacy: map named skills to Host skill slots 0/1
         if (skillId === 'FIST') dispatchUi('castFist');
+        else if (skillId === 'SELF_HEAL') dispatchUi('castHeal');
       },
       onChatOpen: (open) => {
         if (state.input && state.input.setChatMode) {

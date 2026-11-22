@@ -21,6 +21,13 @@ export function runSeekPoint(ctx) {
   if (dist <= arriveR) {
     pushAiEvent(unit, 'ARRIVED_SEEK_POINT', { seekKind: bb.seekKind });
     bb.seekKind = null;
+    // Idle hold at seek point — no MOVE jitter.
+    actions.push({
+      type: ActionType.AIM,
+      unitId: unit.id,
+      aimRad: unit.aimRad || 0,
+    });
+    return actions;
   }
 
   const len = dist || 1;

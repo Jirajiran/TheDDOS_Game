@@ -123,7 +123,7 @@ export function teamSelectOptions(doc, opts, packTeams) {
     });
   }
   if (opts && opts.includeNeutral) {
-    options.push({ value: '0', label: 'Neutral' });
+    options.push({ value: '0', label: 'nature' });
   }
   return options;
 }

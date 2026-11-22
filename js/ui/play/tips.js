@@ -84,8 +84,14 @@ export function installPlayTips(api) {
       }
       const slot = /^Panel_item_(\d+)/.exec(id);
       if (slot) return slotTip(id, Number(slot[1]) - 1);
-      if (id === 'Skill_Show_1') return { key: id, lines: ['Fist', skillLore('FIST')] };
-      if (id === 'Skill_Show_2') return { key: id, lines: ['Self Heal', skillLore('SELF_HEAL')] };
+      if (id === 'Skill_Show_1' || id === 'Skill_Show_2' || id === 'Skill_Show_3') {
+        const slot = id === 'Skill_Show_1' ? 0 : id === 'Skill_Show_2' ? 1 : 2;
+        const sk = (api.state.hudSkills || [])[slot];
+        if (!sk || !sk.id) return null;
+        const def = getSkillDef(sk.id);
+        const name = (def && (def.label || def.name)) || sk.id;
+        return { key: id, lines: [name, skillLore(sk.id)] };
+      }
       if (BUTTON_TIPS[id]) return { key: id, lines: BUTTON_TIPS[id] };
       el = el.parentNode;
     }

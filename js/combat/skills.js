@@ -36,12 +36,33 @@ export function createSkillRuntime(skillId) {
   };
 }
 
-/** Ensure FIST is always present, then seed from archetype / unit.skillIds. */
+/** Resolve skill id after Editor Title_Case remap (Speed_Boost → SPEED_BOOST). */
+export function resolveSkillId(skillId) {
+  if (!skillId) return '';
+  const raw = String(skillId);
+  if (getSkillDef(raw)) return raw;
+  const upper = raw.toUpperCase();
+  if (upper !== raw && getSkillDef(upper)) return upper;
+  return raw;
+}
+
+/**
+ * Seed runtime slots from unit.skillIds only (data-driven).
+ * Does not invent FIST/SELF_HEAL — Host/archetype sheet lists skills.
+ */
 export function ensureUnitSkills(unit) {
   if (!unit) return;
   if (!unit.skills) unit.skills = Object.create(null);
-  const ids = Array.isArray(unit.skillIds) ? unit.skillIds.slice() : [];
-  if (ids.indexOf('FIST') < 0) ids.push('FIST');
+  const raw = Array.isArray(unit.skillIds) ? unit.skillIds : [];
+  const ids = [];
+  const seen = Object.create(null);
+  for (let i = 0; i < raw.length; i++) {
+    const id = resolveSkillId(raw[i]);
+    if (!id || seen[id]) continue;
+    if (!getSkillDef(id)) continue;
+    seen[id] = true;
+    ids.push(id);
+  }
   unit.skillIds = ids;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
@@ -57,7 +78,7 @@ export function ensureUnitSkills(unit) {
 export function tryBeginCastSkill(unit, payload = {}) {
   if (!unit || !unit.active) return { ok: false, reason: 'dead' };
   ensureUnitSkills(unit);
-  const skillId = payload.skillId;
+  const skillId = resolveSkillId(payload.skillId);
   if (!skillId) return { ok: false, reason: 'no_skillId' };
   const def = getSkillDef(skillId);
   if (!def) return { ok: false, reason: 'unknown_skill' };
@@ -154,7 +175,7 @@ function applySkillOnActivate(unit, rt, def) {
   }
   if (effect.type === 'MELEE_SWING') {
     tryBeginMeleeSwing(unit, {
-      source: 'FIST',
+      source: rt.skillId || def.id || 'MELEE',
       activeDurationSec: def.activeDurationSec || 0.1,
       cooldownSec: def.cooldownSec || 0.3,
       damage: effect.damage != null ? effect.damage : 18,
@@ -205,13 +226,6 @@ export function tickUnitSkills(match, unit, dt) {
         rt.cooldownTimer = 0;
         rt.phase = SkillPhase.READY;
       }
-    }
-  }
-
-  if (unit.role === 'player') {
-    const heal = unit.skills.SELF_HEAL;
-    if (heal && heal.phase === SkillPhase.READY) {
-      tryBeginCastSkill(unit, { skillId: 'SELF_HEAL' });
     }
   }
 

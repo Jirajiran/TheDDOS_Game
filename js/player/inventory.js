@@ -116,8 +116,18 @@ export function emptySlot() {
   };
 }
 
+/** Resolve item id after Editor Title_Case remap (Lazer → LAZER). */
+export function resolveItemId(itemId) {
+  if (!itemId) return '';
+  const raw = String(itemId);
+  if (getItemDef(raw)) return raw;
+  const upper = raw.toUpperCase();
+  if (upper !== raw && getItemDef(upper)) return upper;
+  return raw;
+}
+
 export function makeSlotFromItem(itemId, count = 1) {
-  const def = getItemDef(itemId);
+  const def = getItemDef(resolveItemId(itemId));
   if (!def) return emptySlot();
   const slot = {
     itemId: def.id,
@@ -148,7 +158,7 @@ export function readLoadoutOrders(loadout, currentSlot = 0) {
   for (let i = 0; i < rows.length; i++) {
     const entry = rows[i];
     if (!entry || !entry.active) continue;
-    const def = getItemDef(entry.itemId);
+    const def = getItemDef(resolveItemId(entry.itemId));
     const kind = def && def.kind;
     if (kind !== ItemKind.ARMOR && kind !== ItemKind.SHIELD) continue;
     if (seen[kind]) {
@@ -163,7 +173,7 @@ export function readLoadoutOrders(loadout, currentSlot = 0) {
   let weaponId = null;
   const current = slot >= 0 && slot < rows.length ? rows[slot] : null;
   if (current) {
-    const def = getItemDef(current.itemId);
+    const def = getItemDef(resolveItemId(current.itemId));
     if (def && def.kind === ItemKind.WEAPON) {
       weaponId = def.weaponId || def.id;
     }

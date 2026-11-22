@@ -31,6 +31,10 @@ import { formatCatalogId } from './recordForm.js';
 import { isBlockTabKind, itemCategory } from './sheetForm.js';
 import { buildArtPool, renderTemplateThumb } from './unitArt.js';
 import { writeEditorTestPlay } from '../session/editorTestPlay.js';
+import {
+  firstTeamId,
+  teamSelectOptions,
+} from '../defs/teams.js';
 
 const PACK_BASE = 'data/pack/';
 const MAX_HISTORY = 60;
@@ -475,14 +479,64 @@ function fillToolPicker(kind, ids, currentId) {
   }
 }
 
+function packTeamsFallback() {
+  const pack = state.pack;
+  if (!pack) return null;
+  if (Array.isArray(pack.teams)) return pack.teams;
+  const gp = pack.gamePack && pack.gamePack.pack;
+  return gp && Array.isArray(gp.teams) ? gp.teams : null;
+}
+
+/** Tools Team selects = Rules teams only + nature (0). */
+function fillToolTeamSelect(selectEl, currentTeam, fallbackTeam) {
+  if (!selectEl || !state.doc) return fallbackTeam | 0;
+  const opts = teamSelectOptions(state.doc, { includeNeutral: true }, packTeamsFallback());
+  const allowed = Object.create(null);
+  selectEl.innerHTML = '';
+  for (let i = 0; i < opts.length; i++) {
+    const row = opts[i];
+    allowed[row.value] = true;
+    const opt = document.createElement('option');
+    opt.value = row.value;
+    opt.textContent = row.label;
+    selectEl.appendChild(opt);
+  }
+  let next = currentTeam != null ? currentTeam | 0 : fallbackTeam | 0;
+  if (!allowed[String(next)]) {
+    next = fallbackTeam | 0;
+    if (!allowed[String(next)]) {
+      next = firstTeamId(state.doc, packTeamsFallback()) || 0;
+    }
+  }
+  selectEl.value = String(next);
+  return next;
+}
+
+function syncToolTeamSelects() {
+  if (!state.doc) return;
+  const fallback = firstTeamId(state.doc, packTeamsFallback()) || 1;
+  const objTeam = document.getElementById('tool-obj-team');
+  const unitTeam = document.getElementById('tool-unit-team');
+  state.toolObjTeam = fillToolTeamSelect(objTeam, state.toolObjTeam, fallback);
+  state.toolUnitTeam = fillToolTeamSelect(
+    unitTeam,
+    state.toolUnitTeam,
+    fallback
+  );
+}
+
 function syncToolDropdownsIfChanged() {
   if (!state.doc) return;
   const itemIds = toolObjectIds(state.doc);
   const unitIds = nonPendingIds(state.doc.units);
-  const sig = itemIds.join(',') + '|' + unitIds.join(',');
+  const teamIds = (state.doc.teams || [])
+    .map((row) => (row && row.id != null ? row.id : ''))
+    .join(',');
+  const sig = itemIds.join(',') + '|' + unitIds.join(',') + '|t:' + teamIds;
   if (sig !== lastDropdownSig) {
     syncToolDropdowns();
   } else {
+    syncToolTeamSelects();
     refreshSlotPreview('object');
     refreshSlotPreview('unit');
   }
@@ -492,7 +546,10 @@ function syncToolDropdowns() {
   if (!state.doc) return;
   const itemIds = toolObjectIds(state.doc);
   const unitIds = nonPendingIds(state.doc.units);
-  lastDropdownSig = itemIds.join(',') + '|' + unitIds.join(',');
+  const teamIds = (state.doc.teams || [])
+    .map((row) => (row && row.id != null ? row.id : ''))
+    .join(',');
+  lastDropdownSig = itemIds.join(',') + '|' + unitIds.join(',') + '|t:' + teamIds;
 
   if (!state.toolObjTemplate || itemIds.indexOf(state.toolObjTemplate) < 0) {
     state.toolObjTemplate = itemIds[0] || '';
@@ -505,11 +562,7 @@ function syncToolDropdowns() {
   fillToolPicker('unit', unitIds, state.toolUnitTemplate);
   refreshSlotPreview('object');
   refreshSlotPreview('unit');
-
-  const objTeam = document.getElementById('tool-obj-team');
-  const unitTeam = document.getElementById('tool-unit-team');
-  if (objTeam) objTeam.value = String(state.toolObjTeam != null ? state.toolObjTeam : 1);
-  if (unitTeam) unitTeam.value = String(state.toolUnitTeam != null ? state.toolUnitTeam : 2);
+  syncToolTeamSelects();
 }
 
 function openWork() {

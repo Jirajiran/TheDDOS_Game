@@ -156,9 +156,45 @@ function resolveHostUnitSheet(doc, unitId) {
     ? resolved.def
     : getUnitArchetype(raw) || null;
   if (docRow && packDef) {
-    return Object.assign({}, packDef, docRow, {
+    const merged = Object.assign({}, packDef, docRow, {
       id: docRow.id || (resolved && resolved.id) || packDef.id || raw,
     });
+    // Editor sheet may omit / empty loadout or set speed 0 — keep pack body gear.
+    const docLoad = docRow.startingLoadout;
+    const packLoad = packDef.startingLoadout;
+    if (
+      Array.isArray(packLoad) &&
+      packLoad.length &&
+      (!Array.isArray(docLoad) || docLoad.length < 1)
+    ) {
+      merged.startingLoadout = packLoad.slice();
+      if (docRow.currentSlot == null && packDef.currentSlot != null) {
+        merged.currentSlot = packDef.currentSlot;
+      }
+    }
+    const docSkills =
+      (Array.isArray(docRow.activeSkills) && docRow.activeSkills) ||
+      (Array.isArray(docRow.skills) && docRow.skills) ||
+      null;
+    const packSkills =
+      (Array.isArray(packDef.activeSkills) && packDef.activeSkills) ||
+      (Array.isArray(packDef.skills) && packDef.skills) ||
+      null;
+    if (packSkills && packSkills.length && (!docSkills || !docSkills.length)) {
+      merged.activeSkills = packSkills.slice();
+    }
+    if (
+      (merged.speed == null || Number(merged.speed) === 0) &&
+      !(packDef.speed > 0)
+    ) {
+      delete merged.speed;
+    } else if (
+      (docRow.speed == null || Number(docRow.speed) === 0) &&
+      packDef.speed > 0
+    ) {
+      merged.speed = packDef.speed;
+    }
+    return merged;
   }
   if (docRow) {
     if (!docRow.id) {

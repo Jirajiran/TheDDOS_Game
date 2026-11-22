@@ -15,7 +15,19 @@ export function runRegroup(ctx) {
     ty = allyY;
   }
 
-  const len = Math.hypot(tx - unit.x, ty - unit.y) || 1;
+  const dist = Math.hypot(tx - unit.x, ty - unit.y);
+  const arriveR = 64;
+  if (dist <= arriveR) {
+    // At rally — idle hold.
+    actions.push({
+      type: ActionType.AIM,
+      unitId: unit.id,
+      aimRad: unit.aimRad || 0,
+    });
+    return actions;
+  }
+
+  const len = dist || 1;
   const dx = (tx - unit.x) / len;
   const dy = (ty - unit.y) / len;
 

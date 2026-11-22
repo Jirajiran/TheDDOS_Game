@@ -1,4 +1,5 @@
 import { L1_SIZE, PATH_SIZE, TEAM } from '../config.js';
+import { ensureBlackboard } from './blackboard.js';
 import { isHostileTeam } from './senseIndex.js';
 
 /**
@@ -331,6 +332,9 @@ export function deployPreparedGroups(match, prepared, targetX, targetY) {
       spotted: false,
       sectorStart: 0,
       sectorEnd: Math.PI * 2,
+      groupRadius: 110,
+      groupX: p.positions && p.positions[0] ? p.positions[0].x : 0,
+      groupY: p.positions && p.positions[0] ? p.positions[0].y : 0,
       /** Shared Local steering budget (~10 dodge pivots). */
       steeringBudgetMax: 10,
       steeringUsed: 0,
@@ -349,11 +353,7 @@ export function deployPreparedGroups(match, prepared, targetX, targetY) {
   return groups;
 }
 
-/**
- * Register a spawn group with shared pivot chain.
- * @returns group object
- * @deprecated prefer prepareGroupPathsSequential + deployPreparedGroups per wave
- */
+/** Register a spawn group with shared pivot chain. */
 export function registerGroup(match, spawnPositions, targetX, targetY) {
   const prepared = prepareGroupPathsSequential(
     match,
@@ -369,11 +369,21 @@ export function attachUnitToGroup(group, unit) {
   group.unitIds.push(unit.id);
   unit.groupId = group.id;
   unit.pivotIndex = 0;
-  unit.pathGoalX = group.pivots[0].x;
-  unit.pathGoalY = group.pivots[0].y;
+  if (group.groupRadius == null) group.groupRadius = 110;
+
+  // Group = shared centroid (no designated formation leader / slot ring).
+  const bb = ensureBlackboard(unit);
+  bb.navigation.groupId = group.id;
+
+  const pivot = (group.pivots && group.pivots[0]) || {
+    x: group.groupX || unit.x,
+    y: group.groupY || unit.y,
+  };
+  unit.pathGoalX = pivot.x;
+  unit.pathGoalY = pivot.y;
 }
 
-/** Advance unit along pivot chain when near current pivot. */
+/** Advance unit along pivot chain — all members share the same centroid goal. */
 export function advanceUnitAlongChain(match, unit) {
   const group = match.general && match.general.groups[unit.groupId];
   if (!group || !group.pivots.length) return null;
@@ -385,10 +395,13 @@ export function advanceUnitAlongChain(match, unit) {
       unit.pivotIndex = idx + 1;
     }
   }
-  const goal = group.pivots[Math.min(unit.pivotIndex, group.pivots.length - 1)];
-  unit.pathGoalX = goal.x;
-  unit.pathGoalY = goal.y;
-  return goal;
+  const goalPivot = group.pivots[Math.min(unit.pivotIndex, group.pivots.length - 1)];
+  group.groupX = goalPivot.x;
+  group.groupY = goalPivot.y;
+
+  unit.pathGoalX = goalPivot.x;
+  unit.pathGoalY = goalPivot.y;
+  return goalPivot;
 }
 
 /**
@@ -488,30 +501,27 @@ export function isUnitInsideSector(group, unitX, unitY) {
 }
 
 /**
- * Local General stub — when unit falls off group path / leaves sector,
- * mark localGeneral and retarget nearest remaining pivot or base.
- * Foundation only (not full AskKeep depth).
+ * Off-path / left-sector rejoin — retarget nearest pivot or base centroid.
+ * Does NOT invent localGeneral: that flag is data-only (Commander isLocalGeneral /
+ * isGroupLeader via applyArchetypeMoraleFlags).
  */
 export function applyLocalGeneralStub(match, unit, baseX, baseY) {
   if (!unit || !match.general) return null;
   const group = match.general.groups[unit.groupId];
   if (!group) {
-    unit.localGeneral = true;
     unit.pathGoalX = baseX;
     unit.pathGoalY = baseY;
     return { x: baseX, y: baseY, radius: 120 };
   }
 
   const inSector = isUnitInsideSector(group, unit.x, unit.y);
-  // Far from current pivot → off path
   const idx = Math.min(unit.pivotIndex | 0, group.pivots.length - 1);
   const pivot = group.pivots[idx];
   const dist = Math.hypot(pivot.x - unit.x, pivot.y - unit.y);
   const offPath = dist > (pivot.radius || 80) * 4;
 
   if (!inSector || offPath) {
-    unit.localGeneral = true;
-    // Rejoin: snap goal to nearest later pivot, else base
+    // Rejoin: shared centroid toward nearest later pivot, else base
     let best = { x: baseX, y: baseY, radius: 120 };
     let bestD = Infinity;
     for (let i = idx; i < group.pivots.length; i++) {
@@ -529,6 +539,5 @@ export function applyLocalGeneralStub(match, unit, baseX, baseY) {
     return { x: routed.x, y: routed.y, radius: best.radius || 100 };
   }
 
-  unit.localGeneral = false;
   return null;
 }

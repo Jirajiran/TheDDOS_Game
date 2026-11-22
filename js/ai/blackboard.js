@@ -13,6 +13,13 @@ export const TargetKind = Object.freeze({
   POINT_SEEK: 'POINT_SEEK',
 });
 
+export const GroupTacticKind = Object.freeze({
+  ADVANCE_PATH: 'ADVANCE_PATH',
+  FLANK_SECTOR: 'FLANK_SECTOR',
+  HOLD_AND_SYNC: 'HOLD_AND_SYNC',
+  REINFORCE_GROUP: 'REINFORCE_GROUP',
+});
+
 export const Goal = Object.freeze({
   DESTROY_BASE: 'DESTROY_BASE',
   ELIMINATE_PLAYER: 'ELIMINATE_PLAYER',
@@ -70,6 +77,58 @@ export function ensureBlackboard(ent) {
     ent.blackboard = createBlackboard();
   } else {
     const bb = ent.blackboard;
+    if (!bb.decision) bb.decision = { activeGoal: Goal.REACH_PATH_GOAL, activeStage: StageId.APPROACH_PATH, priorityScratch: Object.create(null), eventBoost: emptyPriorityMap(), priority: emptyPriorityMap(), combatTargetKind: null, combatTargetId: -1, combatLockTimer: 0, aggroChase: false, aggroBlockId: -1 };
+    if (!bb.navigation) {
+      bb.navigation = {
+        pathGoalX: 0,
+        pathGoalY: 0,
+        pathGoalRadius: 160,
+        pathPivots: null,
+        localAdjusted: false,
+        steeringBudgetLeft: 10,
+        perception: null,
+        pivotIndex: 0,
+        groupId: -1,
+        slotAngle: 0,
+        slotDistRatio: 1.0,
+        isGroupOverridden: false,
+        leftSector: false,
+        sectorStart: null,
+        sectorEnd: null,
+        localSteering: {
+          strafeSign: 1,
+          virtualWaypoint: null,
+          stuckTimer: 0,
+        },
+      };
+    } else {
+      if (bb.navigation.slotAngle == null) bb.navigation.slotAngle = 0;
+      if (bb.navigation.slotDistRatio == null) bb.navigation.slotDistRatio = 1;
+      if (bb.navigation.isGroupOverridden == null) {
+        bb.navigation.isGroupOverridden = false;
+      }
+    }
+    if (!bb.survival) {
+      bb.survival = {
+        hpRatio: 1.0,
+        retreatHpRatio: 0.3,
+        recoverHpRatio: 0.55,
+        isRetreatLatched: false,
+        threatSourceX: null,
+        threatSourceY: null,
+        seekX: 0,
+        seekY: 0,
+        seekKind: null,
+        allyCentroidX: 0,
+        allyCentroidY: 0,
+        allyCount: 0,
+      };
+    } else {
+      if (bb.survival.recoverHpRatio == null) bb.survival.recoverHpRatio = 0.55;
+      if (bb.survival.isRetreatLatched == null) {
+        bb.survival.isRetreatLatched = false;
+      }
+    }
     if (!bb.events) bb.events = [];
     if (!bb.priorityScratch) bb.priorityScratch = Object.create(null);
     if (!bb.flags) bb.flags = Object.create(null);
@@ -102,25 +161,74 @@ export function ensureBlackboard(ent) {
 
 export function createBlackboard() {
   return {
+    // แกนที่ 1: Decision & Priority Axis (ความสำคัญ · Goal · Event · Target Lock)
+    decision: {
+      activeGoal: Goal.REACH_PATH_GOAL,
+      activeStage: StageId.APPROACH_PATH,
+      priorityScratch: Object.create(null),
+      eventBoost: emptyPriorityMap(),
+      priority: emptyPriorityMap(),
+      combatTargetKind: null,
+      combatTargetId: -1,
+      combatLockTimer: 0,
+      aggroChase: false,
+      aggroBlockId: -1,
+    },
+
+    // แกนที่ 2: Navigation & Spatial Axis (การเดินทาง · Pivot · PathGoal · Area)
+    navigation: {
+      pathGoalX: 0,
+      pathGoalY: 0,
+      pathGoalRadius: 160,
+      pathPivots: null,
+      localAdjusted: false,
+      steeringBudgetLeft: 10,
+      perception: null,
+      pivotIndex: 0,
+      groupId: -1,
+      slotAngle: 0,
+      slotDistRatio: 1.0,
+      isGroupOverridden: false,
+      leftSector: false,
+      sectorStart: null,
+      sectorEnd: null,
+      localSteering: {
+        strafeSign: 1,
+        virtualWaypoint: null,
+        stuckTimer: 0,
+      },
+    },
+
+    // แกนที่ 3: Survival & Tactical Axis (การถอย · จุดยุทธวิธี · การรวมกลุ่ม)
+    survival: {
+      hpRatio: 1.0,
+      retreatHpRatio: 0.30,
+      recoverHpRatio: 0.55,
+      isRetreatLatched: false,
+      threatSourceX: null,
+      threatSourceY: null,
+      seekX: 0,
+      seekY: 0,
+      seekKind: null,
+      allyCentroidX: 0,
+      allyCentroidY: 0,
+      allyCount: 0,
+    },
+
+    // Top-level mirrors / legacy backward-compatibility accessors
     events: [],
     flags: Object.create(null),
-    /** Scratch for taunt / external writers (legacy key→id). */
     priorityScratch: Object.create(null),
-    /** Per-frame Goal Δpriority from Events (cleared each decide tick). */
     eventBoost: emptyPriorityMap(),
-    /** Last scored priorities (debug / memento-friendly). */
     priority: emptyPriorityMap(),
     activeGoal: Goal.REACH_PATH_GOAL,
     activeStage: StageId.APPROACH_PATH,
     pathGoalX: 0,
     pathGoalY: 0,
     pathGoalRadius: 160,
-    /** Shared ref to General group pivots (read-only for Stages). */
     pathPivots: null,
-    /** True when Local adjusted near-term goal this frame. */
     localAdjusted: false,
     steeringBudgetLeft: 10,
-    /** Last Local raycast fan summary (debug / Events). */
     perception: null,
     pivotIndex: 0,
     groupId: -1,
@@ -136,11 +244,9 @@ export function createBlackboard() {
     allyCentroidY: 0,
     allyCount: 0,
     leftSector: false,
-    /** Place intent — typeId + L3 cell (footprint snap target). */
     placeBlockTypeId: null,
     placeGx: -1,
     placeGy: -1,
-    /** Repair intent — reserved friendly block id. */
     repairTargetId: -1,
   };
 }

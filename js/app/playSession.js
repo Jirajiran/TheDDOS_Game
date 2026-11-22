@@ -120,7 +120,9 @@ export function createPlaySession(hub) {
       const skillIds =
         player && Array.isArray(player.skillIds) && player.skillIds.length
           ? player.skillIds
-          : getBalancePack().playerActiveSkills || ['FIST', 'SELF_HEAL'];
+          : Array.isArray(getBalancePack().playerActiveSkills)
+            ? getBalancePack().playerActiveSkills
+            : [];
       for (let si = 0; si < skillIds.length; si++) {
         const sid = skillIds[si];
         const rt = player && player.skills ? player.skills[sid] : null;
@@ -132,7 +134,6 @@ export function createPlaySession(hub) {
               : 0;
         skills.push({ id: sid, cooldownSec: cd });
       }
-      if (!skills.length) skills.push({ id: 'FIST', cooldownSec: 0 });
       const effects = Array.isArray(match.playerEffects)
         ? match.playerEffects
         : player && Array.isArray(player.effects)
@@ -258,9 +259,20 @@ export function createPlaySession(hub) {
       }
       if (state.pendingFistCast) {
         state.pendingFistCast = false;
-        actions = actions.concat([makeCastSkillAction(playerId, 'FIST')]);
+        const sid0 =
+          player && Array.isArray(player.skillIds) ? player.skillIds[0] : null;
+        if (sid0) {
+          actions = actions.concat([makeCastSkillAction(playerId, sid0)]);
+        }
       }
-      if (state.pendingHealCast) state.pendingHealCast = false;
+      if (state.pendingHealCast) {
+        state.pendingHealCast = false;
+        const sid1 =
+          player && Array.isArray(player.skillIds) ? player.skillIds[1] : null;
+        if (sid1) {
+          actions = actions.concat([makeCastSkillAction(playerId, sid1)]);
+        }
+      }
       if (state.pendingInteract) {
         state.pendingInteract = false;
         actions = actions.concat([makeInteractAction(playerId)]);
