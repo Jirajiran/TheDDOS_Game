@@ -35,6 +35,20 @@ export {
 } from './damageResolver.js';
 
 export {
+  TEAM_ROW_CAP,
+  normalizeTeamRows,
+  teamsFromDoc,
+  teamIdsFromDoc,
+  teamSelectOptions,
+  playerTeamId,
+  enemyTeamId,
+  firstTeamId,
+  teamIdByRole,
+  clampTeamId,
+  collisionLayerForTeam,
+} from './teams.js';
+
+export {
   pickEdgeSpawnPosition,
   buildBaseSpawnMask,
   perimeterPoint,

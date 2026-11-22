@@ -95,7 +95,7 @@ export function renderWorld(ctx, world, camera, match, dpr = 1, viewCssW, viewCs
     drawUnits(ctx, match.pools && match.pools.units, zoom, match);
     drawMeleeVfx(ctx, match.meleeVfx, zoom);
     drawExplosionVfx(ctx, match.explosionVfx, zoom);
-    drawProjectiles(ctx, match.pools && match.pools.projectiles, zoom);
+    drawProjectiles(ctx, match.pools, zoom, match);
     drawBeams(ctx, match.beams);
     drawBlockHpBars(ctx, match);
   }
@@ -390,7 +390,7 @@ function drawUnits(ctx, units, zoom, match) {
     const u = units[i];
     if (!u.active) continue;
 
-    const isPlayer = u.role === 'player' || u.team === TEAM.PLAYER;
+    const isPlayer = u.role === 'player';
     // Z: AssetBottom → Arm → Weapon → Body → AssetTop
     const drewBack = drawUnitVisualBack(ctx, u, zoom);
     if (!drewBack) {
@@ -489,13 +489,20 @@ function stageColor(u) {
   return '#a05050';
 }
 
-function drawProjectiles(ctx, projectiles, zoom) {
+function drawProjectiles(ctx, pools, zoom, match) {
+  const projectiles = pools && pools.projectiles;
   if (!projectiles) return;
   const z = zoom > 0 ? zoom : 1;
   const strokeW = Math.max(2.5, 3.5 / z);
-  for (let i = 0; i < projectiles.length; i++) {
+  const playerTeam =
+    match && match.playerTeam != null ? match.playerTeam | 0 : null;
+  const n =
+    pools.projectileActiveCount != null
+      ? pools.projectileActiveCount | 0
+      : projectiles.length;
+  for (let i = 0; i < n; i++) {
     const p = projectiles[i];
-    if (!p.active) continue;
+    if (!p || !p.active) continue;
     // World-space length — do NOT scale() then divide lineWidth (that made ~0.2px strokes).
     const len = Math.max(10, (p.radius || 4) * 3.2);
     const aim =
@@ -503,7 +510,8 @@ function drawProjectiles(ctx, projectiles, zoom) {
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     const half = len * 0.5;
-    const color = p.team === TEAM.PLAYER ? '#ffe08a' : '#ff8866';
+    const color =
+      playerTeam != null && p.team === playerTeam ? '#ffe08a' : '#ff8866';
     if (p.weaponId === 'GRENADE_LAUNCHER') {
       const rocket = getProjectileArt('Bullet_Rpg');
       const lay = rocket && rocket._layout;

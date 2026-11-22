@@ -12,6 +12,7 @@ import {
   getSenseRadiusPx,
   getWeaponDef,
 } from '../config.js';
+import { playerTeamId } from '../defs/teams.js';
 import {
   advanceUnitAlongChain,
   isUnitInsideSector,
@@ -49,6 +50,7 @@ import {
 import { pickPlayerSpawnPoint } from '../defs/spawnPolicy.js';
 import {
   absorbDamageWithShield,
+  seedShieldFromArchetype,
 } from '../combat/shield.js';
 import {
   ensureUnitSkills,
@@ -83,6 +85,7 @@ import {
   tryPlace,
 } from './place.js';
 import {
+  skinGroupIdFromSheet,
   UNIT_VISUAL_ACTIONS,
 } from '../view/unitVisual.js';
 export function spawnPlayerNearWorldCenter(match) {
@@ -99,10 +102,7 @@ export function spawnPlayerNearWorldCenter(match) {
   }
 
   resetPlayerStats(u, pack, match);
-  u.skinGroupId =
-    match.playerSkinGroupId ||
-    (pack && pack.playerDefaultSkinGroupId) ||
-    'Default_skin_1';
+  fillHostSkinIfMissing(u, match, pack);
   const start = pickPlayerSpawnPoint(world);
   u.x = start.x;
   u.y = start.y;
@@ -114,19 +114,98 @@ export function spawnPlayerNearWorldCenter(match) {
   return u;
 }
 
+/** Host body id "PLAYER" may use menu cosmetic; any other unitId keeps its sheet look. */
+function isHostPlayerBody(sheet, unitId) {
+  const id = String((sheet && sheet.id) || unitId || '').toUpperCase();
+  return id === 'PLAYER';
+}
+
+function fillHostSkinIfMissing(u, match, pack) {
+  if (!u || u.skinGroupId) return;
+  const sheet = match && match.hostUnitSheet;
+  const allowMenu =
+    !sheet || isHostPlayerBody(sheet, match && match.hostUnitId);
+  u.skinGroupId = allowMenu
+    ? (match && match.playerSkinGroupId) ||
+      (pack && pack.playerDefaultSkinGroupId) ||
+      'Default_skin_1'
+    : skinGroupIdFromSheet(sheet);
+}
+
 export function resetPlayerStats(u, pack, match) {
   const bal = pack || getBalancePack();
+  const sheet = match && match.hostUnitSheet;
+  const hostId = match && match.hostUnitId;
+  const playerBody = !sheet || isHostPlayerBody(sheet, hostId);
+  const team = playerTeamId(match, GAME_PACK && GAME_PACK.teams);
   u.active = true;
   u.typeId = 1;
-  u.team = TEAM.PLAYER;
+  u.team = team;
+  // role player = human input seat only — body comes from Host sheet / pack unit.
   u.role = 'player';
-  u.collisionLayer = deriveCollisionLayer({ team: TEAM.PLAYER, role: 'player' });
+  u.collisionLayer = deriveCollisionLayer({ team, role: 'player' });
   u.pierceCost = 1;
-  u.maxHp = bal.playerMaxHp;
-  u.hp = bal.playerMaxHp;
-  u.speed = bal.playerSpeed;
-  u.radius = bal.playerRadius;
-  u.armorType = bal.playerArmorType;
+
+  if (sheet) {
+    const hpLo = sheet.hpRange ? sheet.hpRange[0] : null;
+    const hpHi = sheet.hpRange ? sheet.hpRange[1] : null;
+    const maxHp =
+      sheet.maxHp != null
+        ? sheet.maxHp | 0
+        : hpLo != null && hpHi != null
+          ? Math.round((hpLo + hpHi) / 2)
+          : playerBody
+            ? bal.playerMaxHp
+            : bal.enemyMaxHp;
+    u.sizeScale =
+      sheet.sizeScale != null
+        ? Number(sheet.sizeScale)
+        : sheet.isBoss
+          ? 1.5
+          : 1;
+    u.maxHp = Math.max(1, maxHp);
+    u.hp = u.maxHp;
+    u.speed =
+      sheet.speed != null
+        ? Number(sheet.speed)
+        : playerBody
+          ? bal.playerSpeed
+          : bal.enemySpeed;
+    u.radius =
+      sheet.radius != null
+        ? Number(sheet.radius)
+        : Math.round(
+            (playerBody ? bal.playerRadius : bal.enemyRadius) *
+              (u.sizeScale || 1)
+          );
+    u.armorType =
+      sheet.armorType ||
+      (playerBody ? bal.playerArmorType : bal.enemyArmorType);
+    u.archetypeId =
+      hostId || (sheet.id ? String(sheet.id) : null) || u.archetypeId;
+    if (Array.isArray(sheet.activeSkills)) {
+      u.skillIds = sheet.activeSkills.slice();
+    } else if (Array.isArray(sheet.skills)) {
+      u.skillIds = sheet.skills.slice();
+    } else if (Array.isArray(sheet.skillIds)) {
+      u.skillIds = sheet.skillIds.slice();
+    } else if (playerBody && Array.isArray(bal.playerActiveSkills)) {
+      u.skillIds = bal.playerActiveSkills.slice();
+    } else {
+      u.skillIds = [];
+    }
+  } else {
+    u.sizeScale = 1;
+    u.maxHp = bal.playerMaxHp;
+    u.hp = bal.playerMaxHp;
+    u.speed = bal.playerSpeed;
+    u.radius = bal.playerRadius;
+    u.armorType = bal.playerArmorType;
+    u.skillIds = Array.isArray(bal.playerActiveSkills)
+      ? bal.playerActiveSkills.slice()
+      : ['FIST', 'SELF_HEAL'];
+  }
+
   const weaponId = match && match.startingWeaponId;
   u.weaponId = weaponId || null;
   u.vx = 0;
@@ -144,9 +223,6 @@ export function resetPlayerStats(u, pack, match) {
   if (weaponId) Object.assign(u, createAmmoState(weaponId));
   ensureUnitMorale(u);
   ensureBlackboardStub(u);
-  u.skillIds = Array.isArray(bal.playerActiveSkills)
-    ? bal.playerActiveSkills.slice()
-    : ['FIST', 'SELF_HEAL'];
   ensureUnitSkills(u);
   ensureMeleeSwing(u);
   u.skillSpeedMult = 1;
@@ -168,7 +244,17 @@ export function resetPlayerStats(u, pack, match) {
       : null;
   if (shieldItem) equipShieldOnUnit(u, shieldItem);
   else u.activeShieldId = null;
-  u.skinGroupId = null; // filled by spawn after match.playerSkinGroupId exists
+  // Skin from Host sheet; menu Default_skin_1 only when body is PLAYER.
+  if (sheet) {
+    const menuSkin =
+      playerBody && match
+        ? match.playerSkinGroupId || 'Default_skin_1'
+        : undefined;
+    u.skinGroupId = skinGroupIdFromSheet(sheet, menuSkin);
+  } else {
+    u.skinGroupId = null;
+  }
+  if (sheet) seedShieldFromArchetype(u, sheet);
   u.visualAction = UNIT_VISUAL_ACTIONS.idle;
   u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
   u.visualActionT = 0;
@@ -194,10 +280,7 @@ export function spawnPlayer(match) {
   }
 
   resetPlayerStats(u, pack, match);
-  u.skinGroupId =
-    match.playerSkinGroupId ||
-    (pack && pack.playerDefaultSkinGroupId) ||
-    'Default_skin_1';
+  fillHostSkinIfMissing(u, match, pack);
   const angle = (match.waveIndex * 1.7 + u.id) % (Math.PI * 2);
   const dist = base.w * 0.55 + L3_SIZE * 0.5;
   u.x = clamp(

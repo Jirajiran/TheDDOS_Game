@@ -3,6 +3,8 @@
  * The page cache is only for this editor tab. Current edits overwrite it.
  */
 
+import { normalizeTeamRows, teamIdsFromDoc } from '../defs/teams.js';
+
 export const PATH_SIZE = 1024;
 export const MAX_SIDE = 8;
 export const CACHE_KEY = 'theddos_editor_page';
@@ -76,40 +78,11 @@ export function armorTypeNames(doc) {
 }
 
 export function normalizeTeams(teams) {
-  if (!Array.isArray(teams)) return [];
-  const out = [];
-  for (let i = 0; i < teams.length && out.length < 6; i++) {
-    const row = teams[i];
-    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-    const next = {};
-    const keys = Object.keys(row);
-    for (let k = 0; k < keys.length; k++) next[keys[k]] = row[keys[k]];
-    next.hostileTo = teamIdList(row.hostileTo);
-    next.allyTo = teamIdList(row.allyTo);
-    if (next.id != null) next.id = next.id | 0;
-    out.push(next);
-  }
-  return out;
-}
-
-function teamIdList(src) {
-  const out = [];
-  const list = Array.isArray(src) ? src : [];
-  for (let i = 0; i < list.length; i++) {
-    const id = list[i] | 0;
-    if (id >= 1 && id <= 6 && out.indexOf(id) < 0) out.push(id);
-  }
-  return out;
+  return normalizeTeamRows(teams);
 }
 
 function mapTeamIds(doc) {
-  const ids = [];
-  const teams = Array.isArray(doc.teams) ? doc.teams : [];
-  for (let i = 0; i < teams.length && ids.length < 6; i++) {
-    const id = teams[i] && (teams[i].id | 0);
-    if (id >= 1 && id <= 6 && ids.indexOf(id) < 0) ids.push(id);
-  }
-  return ids;
+  return teamIdsFromDoc(doc);
 }
 
 function keptAreaId(doc, areaId) {
@@ -139,7 +112,9 @@ export function ensurePlayerSpawns(doc) {
     if (row.role === 'host' && !host) host = row;
     else if (row.role === 'player') players.push(row);
   }
-  if (!host) host = { role: 'host', unitId: '', team: teamIds[0] || 1, areaId: '' };
+  if (!host) {
+    host = { role: 'host', unitId: '', team: teamIds[0] || 0, areaId: '' };
+  }
   host.role = 'host';
   host.unitId = keptUnitId(doc, host.unitId);
   host.areaId = keptAreaId(doc, host.areaId);

@@ -11,6 +11,7 @@ import {
   deriveCollisionLayer,
   getBlockDef,
 } from '../config.js';
+import { enemyTeamId, playerTeamId } from '../defs/teams.js';
 import {
   consumeSlotItem,
   getActiveSlot,
@@ -150,12 +151,13 @@ export function tryPlace(match, unit, gx, gy) {
     return false;
   }
 
+  const packTeams = GAME_PACK && GAME_PACK.teams;
   const placerTeam =
     unit.team != null
       ? unit.team
       : unit.role === 'enemy'
-        ? TEAM.ENEMY
-        : TEAM.PLAYER;
+        ? enemyTeamId(match, packTeams)
+        : playerTeamId(match, packTeams);
   const block = createPlacedBlock(match, slot.itemId, gx, gy, blockDef, {
     team: placerTeam,
   });
@@ -222,7 +224,7 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
       ? opts.team
       : blockDef.team != null
         ? blockDef.team
-        : TEAM.PLAYER;
+        : playerTeamId(match, GAME_PACK && GAME_PACK.teams);
 
   const block = {
     id: blockId,

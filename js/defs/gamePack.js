@@ -7,7 +7,10 @@
 import { getRulesConfig } from './registry.js';
 import { closedModelGroupId } from '../assets/closedCatalog.js';
 
-const MAX_LOCAL_TEAMS = 6;
+import { TEAM_ROW_CAP, normalizeTeamRows } from './teamRows.js';
+
+/** Soft row cap from teamRows — not a hard authoring menu of six. */
+const MAX_LOCAL_TEAMS = TEAM_ROW_CAP;
 
 function cloneFreeze(value) {
   if (Array.isArray(value)) {
@@ -45,10 +48,13 @@ export function installGamePack(doc, rulesDoc, extras) {
   const units = (extra.units && extra.units.units) || {};
   const player = units.PLAYER || {};
   const enemy = units.ENEMY_DEFAULT || {};
-  const teams = Array.isArray(src.teams) ? src.teams : [];
-  if (teams.length < 1 || teams.length > MAX_LOCAL_TEAMS) {
+  const teams = normalizeTeamRows(src.teams);
+  if (teams.length < 1) {
+    throw new Error('pack teams must list at least one team row (data/pack)');
+  }
+  if (teams.length > MAX_LOCAL_TEAMS) {
     throw new Error(
-      `map teams must be 1 to ${MAX_LOCAL_TEAMS} (got ${teams.length})`
+      `pack teams exceed soft cap ${MAX_LOCAL_TEAMS} (got ${teams.length})`
     );
   }
   const skills = Array.isArray(player.skills)
@@ -77,6 +83,7 @@ export function installGamePack(doc, rulesDoc, extras) {
       closedModelGroupId(enemy.model) || 'Default_skin_2',
     playerDefaultSkinGroupId:
       closedModelGroupId(player.model) || 'Default_skin_1',
+    teams,
     seatCap: src.seatCap != null ? src.seatCap : 12,
     startingLoadout: Array.isArray(player.startingLoadout)
       ? player.startingLoadout

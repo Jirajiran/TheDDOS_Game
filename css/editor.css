@@ -519,6 +519,11 @@ select {
   background: #0e1116;
 }
 
+.editor-preview-box.is-weapon-hold,
+.editor-preview-box.is-structure {
+  overflow: visible;
+}
+
 .editor-preview-swatch {
   width: 120px;
   height: 120px;

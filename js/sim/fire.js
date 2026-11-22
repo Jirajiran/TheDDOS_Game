@@ -32,7 +32,14 @@ import {
 } from '../world/occupancy.js';
 import {
   acquireProjectile,
+  deactivateProjectileAt,
 } from '../world/pools.js';
+import {
+  applyPendingBulletHits,
+  ensureBulletHitQueues,
+  queueUnitHit,
+  swapBulletHitBuffers,
+} from './bulletHits.js';
 import { isHostileTeam } from '../ai/senseIndex.js';
 import {
   clearReloadVisual,
@@ -632,12 +639,16 @@ export function canHitBlock(pOrBeam, block) {
 }
 
 export function updateProjectiles(match, dt) {
-  const projs = match.pools.projectiles;
-  const units = match.pools.units;
+  ensureBulletHitQueues(match);
+  // Frame N: resolve hits recorded on frame N-1 (deferred execution).
+  applyPendingBulletHits(match, applyDamageToUnit);
 
-  for (let i = 0; i < projs.length; i++) {
+  const pools = match.pools;
+  const projs = pools.projectiles;
+  const units = pools.units;
+  let i = 0;
+  while (i < (pools.projectileActiveCount | 0)) {
     const p = projs[i];
-    if (!p.active) continue;
 
     p.prevX = p.x;
     p.prevY = p.y;
@@ -659,7 +670,7 @@ export function updateProjectiles(match, dt) {
           applyDamageToBlock,
         });
       }
-      p.active = false;
+      i = deactivateProjectileAt(pools, i);
       continue;
     }
 
@@ -701,7 +712,12 @@ export function updateProjectiles(match, dt) {
             p.damageType,
             unit.armorType || 'DEFAULT'
           );
-          applyDamageToUnit(match, unit, dmg, {
+          // Body damage after shield: queue for next frame.
+          queueUnitHit(match, {
+            targetId: unit.id,
+            generation: unit.generation | 0,
+            damage: dmg,
+            damageType: p.damageType,
             sourceTeam: p.team,
             sourceUnitId: p.ownerId,
             fromTurret: !!p.fromTurret,
@@ -709,9 +725,7 @@ export function updateProjectiles(match, dt) {
             sourceX: p.prevX,
             sourceY: p.prevY,
             skipShield: true,
-            impact: true,
           });
-          if (dmg > 0) match.stats.damageDealt += dmg;
         }
         const cost = abs.pierceCost || (unit.shield && unit.shield.pierceCost) || 1;
         if (cost > pierce || abs.broke || abs.leftover <= 0) {
@@ -730,16 +744,19 @@ export function updateProjectiles(match, dt) {
         p.damageType,
         unit.armorType || 'DEFAULT'
       );
-      applyDamageToUnit(match, unit, dmg, {
+      queueUnitHit(match, {
+        targetId: unit.id,
+        generation: unit.generation | 0,
+        damage: dmg,
+        damageType: p.damageType,
         sourceTeam: p.team,
         sourceUnitId: p.ownerId,
         fromTurret: !!p.fromTurret,
         sourceBlockId: p.sourceBlockId,
         sourceX: p.prevX,
         sourceY: p.prevY,
-        impact: true,
+        skipShield: false,
       });
-      if (dmg > 0) match.stats.damageDealt += dmg;
       if (cost > pierce) {
         stopped = true;
         break;
@@ -755,9 +772,14 @@ export function updateProjectiles(match, dt) {
           applyDamageToBlock,
         });
       }
-      p.active = false;
+      i = deactivateProjectileAt(pools, i);
+      continue;
     }
+    i += 1;
   }
+
+  // Frame N hits become pending for frame N+1.
+  swapBulletHitBuffers(match);
 }
 
 export function collectProjectileSegmentHits(match, p, units) {

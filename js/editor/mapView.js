@@ -8,6 +8,8 @@ import { PATH_SIZE, clampRect, nextAreaId, worldSize } from './mapDoc.js';
 import {
   buildStructureMapIcon,
   buildUnitMapIcon,
+  ensureMapArtDefs,
+  getParsedUnitArt,
   itemFootprint,
 } from './unitArt.js';
 
@@ -448,6 +450,11 @@ export function mountMapView(svg, api) {
       camera.x + ' ' + camera.y + ' ' + camera.w + ' ' + camera.h
     );
     svg.replaceChildren();
+
+    // Shared Unit_Template defs so structure <use> weapon layers resolve (same as inspector).
+    const parsedArt = getParsedUnitArt(pack);
+    const artDefs = ensureMapArtDefs(svg, parsedArt);
+    if (artDefs) svg.appendChild(artDefs);
 
     // 1. Ground background
     svg.appendChild(

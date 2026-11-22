@@ -93,8 +93,15 @@ export const WEAPON_ART_ALIAS = Object.freeze({
 });
 
 export function weaponArtSpec(weaponId) {
-  const id = WEAPON_ART_ALIAS[weaponId] || weaponId;
-  return WEAPON_BTN_ART[id] || null;
+  if (!weaponId) return null;
+  // Accept pack keys (WEAPON_50CAL) and catalog display (Weapon_50Cal).
+  const raw = String(weaponId);
+  const candidates = [raw, raw.toUpperCase()];
+  for (let i = 0; i < candidates.length; i++) {
+    const key = WEAPON_ART_ALIAS[candidates[i]] || candidates[i];
+    if (WEAPON_BTN_ART[key]) return WEAPON_BTN_ART[key];
+  }
+  return null;
 }
 
 /** Action group family for hold / shot / reload playback. */

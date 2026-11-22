@@ -7,6 +7,7 @@ import {
   getArchetypeForWave,
   getUnitArchetype,
 } from '../config.js';
+import { enemyTeamId } from '../defs/teams.js';
 import { pickEdgeSpawnPosition, pointInArea } from '../defs/spawnPolicy.js';
 import { edgeSpawnAnchor } from '../world/world.js';
 import {
@@ -256,7 +257,10 @@ function spawnRows(match, rows) {
       const maxHp = Math.round(hpLo + (hpHi - hpLo) * t);
       const sizeScale =
         archetype && (archetype.sizeScale || (archetype.isBoss ? 1.5 : 1));
-      const team = pos.team != null ? pos.team : TEAM.ENEMY;
+      const team =
+        pos.team != null
+          ? pos.team
+          : enemyTeamId(match, GAME_PACK && GAME_PACK.teams);
       u.active = true;
       u.typeId = 2;
       u.team = team;

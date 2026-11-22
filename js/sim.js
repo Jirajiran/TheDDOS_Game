@@ -27,6 +27,7 @@ import { generateWorldObjects } from './world/mapgen.js';
 import {
   applyEditorPlayerSpawn,
   applyResolvedPlayMap,
+  bindHostSeatFromDoc,
 } from './world/applyEditorMap.js';
 import { consumeEditorTestPlay } from './session/editorTestPlay.js';
 import {
@@ -203,13 +204,18 @@ export function initMatchGameplay(match, options = {}) {
   match.inventory = createEmptyInventory(
     pack.hotbarBaseSlots || pack.hotbarSlots
   );
-  const worn = applyStartingLoadout(match.inventory);
+  // Temporary FlatLand loadout; Host seat sheet replaces after map bind.
+  let worn = applyStartingLoadout(match.inventory);
   match.wornArmorSlot = worn.wornArmorSlot;
   match.wornShieldSlot = worn.wornShieldSlot;
   match.activeHotbar = worn.activeHotbar;
   match.startingWeaponId = worn.activeWeaponId;
   match.hotbar = match.inventory;
   match.playerUnitId = -1;
+  match.playerTeam = null;
+  match.hostUnitId = null;
+  match.hostUnitSheet = null;
+  match.hostSpawnRow = null;
   match.respawnTimer = 0;
   match.playerDead = false;
   match.cameraFreeFly = false;
@@ -262,8 +268,35 @@ export function initMatchGameplay(match, options = {}) {
   // Deploy placed objects / areas from the same resolved map (menu or Test Play).
   if (playMap) applyResolvedPlayMap(match, playMap);
 
+  // Host seat unitId/sheet → inventory (replaces FlatLand PLAYER seed).
+  // role player = control only; body/loadout follow Host unit Settings.
+  const hostDoc =
+    (playMap && playMap.mapDoc) ||
+    (playMap && playMap.roomMap) ||
+    match.editorMapDoc ||
+    null;
+  if (hostDoc) {
+    bindHostSeatFromDoc(match, hostDoc);
+    const sheet = match.hostUnitSheet;
+    if (sheet) {
+      const loadout = Array.isArray(sheet.startingLoadout)
+        ? sheet.startingLoadout
+        : [];
+      worn = applyStartingLoadout(
+        match.inventory,
+        loadout,
+        sheet.currentSlot != null ? sheet.currentSlot : 0
+      );
+      match.wornArmorSlot = worn.wornArmorSlot;
+      match.wornShieldSlot = worn.wornShieldSlot;
+      match.activeHotbar = worn.activeHotbar;
+      match.startingWeaponId = worn.activeWeaponId;
+      match.hotbar = match.inventory;
+    }
+  }
+
   spawnPlayerNearWorldCenter(match);
-  if (playMap && playMap.mapDoc) applyEditorPlayerSpawn(match, playMap.mapDoc);
+  if (hostDoc) applyEditorPlayerSpawn(match, hostDoc);
   rebuildSenseIndexFromMatch(match);
 
   if (
@@ -567,6 +600,11 @@ export function restoreMatchFromSnapshot(match, snap) {
   }
   for (let i = 0; i < match.pools.projectiles.length; i++) {
     match.pools.projectiles[i].active = false;
+  }
+  match.pools.projectileActiveCount = 0;
+  if (match.bulletHits) {
+    match.bulletHits.pending.length = 0;
+    match.bulletHits.current.length = 0;
   }
 
   if (Array.isArray(snap.inventory)) {

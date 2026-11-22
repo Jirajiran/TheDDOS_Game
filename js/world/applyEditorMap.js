@@ -13,6 +13,13 @@ import {
   TEAM,
   deriveCollisionLayer,
 } from '../config.js';
+import { GAME_PACK } from '../defs/gamePack.js';
+import {
+  enemyTeamId,
+  firstTeamId,
+  playerTeamId,
+  teamIdByRole,
+} from '../defs/teams.js';
 import { createAmmoState } from '../combat/weapons.js';
 import { ensureUnitSkills } from '../combat/skills.js';
 import { ensureMeleeSwing } from '../combat/meleeTools.js';
@@ -44,7 +51,9 @@ import {
   installSenseTeams,
   rebuildSenseIndexFromMatch,
   registerSenseUnit,
+  unregisterSenseUnit,
 } from '../ai/senseIndex.js';
+import { resetPlayerStats } from '../sim/unit.js';
 
 function lookupId(raw, getters) {
   if (!raw) return { id: '', def: null };
@@ -109,6 +118,86 @@ function hostSpawnRow(doc) {
     if (seats[i] && seats[i].role === 'host') return seats[i];
   }
   return seats[0] || null;
+}
+
+function findDocUnitRow(doc, unitId) {
+  if (!unitId || !doc || !doc.units) return null;
+  const raw = String(unitId);
+  if (doc.units[raw]) return doc.units[raw];
+  const upper = raw.toUpperCase();
+  if (doc.units[upper]) return doc.units[upper];
+  const snake = raw.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase();
+  if (snake !== upper && doc.units[snake]) return doc.units[snake];
+  const keys = Object.keys(doc.units);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const row = doc.units[key];
+    if (!row) continue;
+    const keyUpper = String(key).toUpperCase();
+    if (keyUpper === upper || keyUpper === snake) return row;
+    const rid = row.id != null ? String(row.id) : '';
+    if (rid === raw || rid.toUpperCase() === upper || rid.toUpperCase() === snake) {
+      return row;
+    }
+  }
+  return null;
+}
+
+/**
+ * Host body sheet = map Settings row over pack archetype (loadout/model/stats).
+ * Role "player" is control only — never invent units.PLAYER here.
+ */
+function resolveHostUnitSheet(doc, unitId) {
+  if (!unitId) return null;
+  const raw = String(unitId);
+  const docRow = findDocUnitRow(doc, raw);
+  const resolved = resolveUnitArchetype(raw);
+  const packDef = resolved
+    ? resolved.def
+    : getUnitArchetype(raw) || null;
+  if (docRow && packDef) {
+    return Object.assign({}, packDef, docRow, {
+      id: docRow.id || (resolved && resolved.id) || packDef.id || raw,
+    });
+  }
+  if (docRow) {
+    if (!docRow.id) {
+      const next = Object.assign({}, docRow);
+      next.id = raw;
+      return next;
+    }
+    return docRow;
+  }
+  return packDef;
+}
+
+/**
+ * Bind Host seat from map doc onto match — unitId/team/sheet drive the controlled unit.
+ * Call before spawnPlayer so resetPlayerStats is data-driven (not hard Player).
+ */
+export function bindHostSeatFromDoc(match, doc) {
+  if (!match) return null;
+  const row = hostSpawnRow(doc);
+  match.hostSpawnRow = row || null;
+  const packTeams = GAME_PACK && GAME_PACK.teams;
+  if (!row) {
+    match.hostUnitId = null;
+    match.hostUnitSheet = null;
+    match.playerTeam = teamIdByRole('player', doc, packTeams);
+    return null;
+  }
+  const unitId = row.unitId ? String(row.unitId) : '';
+  const resolved = unitId ? resolveUnitArchetype(unitId) : null;
+  const sheet = resolveHostUnitSheet(doc, unitId);
+  match.hostUnitSheet = sheet;
+  match.hostUnitId =
+    (resolved && resolved.id) ||
+    (sheet && sheet.id ? String(sheet.id) : null) ||
+    unitId ||
+    null;
+  match.playerTeam =
+    row.team != null ? row.team | 0 : teamIdByRole('player', doc, packTeams);
+  return row;
 }
 
 function clearFlatLandEdge(world) {
@@ -178,12 +267,13 @@ export function materializePlacedObjects(match, doc) {
       console.warn('[map] footprint blocked', itemId, gx, gy);
       continue;
     }
+    const packTeams = GAME_PACK && GAME_PACK.teams;
     const team =
       inst.team != null
         ? inst.team | 0
         : blockDef.team != null
           ? blockDef.team
-          : TEAM.PLAYER;
+          : playerTeamId(match, packTeams) || firstTeamId(doc, packTeams);
     const block = createPlacedBlock(match, itemId, gx, gy, blockDef, { team });
     if (inst.currentHp != null) {
       block.hp = Math.max(1, inst.currentHp | 0);
@@ -237,7 +327,10 @@ export function materializePlacedUnits(match, doc) {
       templateId: inst.templateId,
       x: inst.x || 0,
       y: inst.y || 0,
-      team: inst.team != null ? inst.team | 0 : TEAM.ENEMY,
+      team:
+        inst.team != null
+          ? inst.team | 0
+          : enemyTeamId(match, GAME_PACK && GAME_PACK.teams),
       currentHp: inst.currentHp,
       maxHp: inst.maxHp,
     });
@@ -248,7 +341,11 @@ export function materializePlacedUnits(match, doc) {
     const u = acquireUnit(match.pools);
     if (!u) break;
 
-    const team = inst.team != null ? inst.team | 0 : TEAM.ENEMY;
+    const packTeams = GAME_PACK && GAME_PACK.teams;
+    const team =
+      inst.team != null
+        ? inst.team | 0
+        : enemyTeamId(match, packTeams);
     // Player seat is only the human-controlled unit — map bots stay AI on any team.
     const sheet =
       (doc.units &&
@@ -333,8 +430,9 @@ export function materializePlacedUnits(match, doc) {
     ensureUnitSkills(u);
     ensureMeleeSwing(u);
     registerSenseUnit(match, u);
-    // Wave-clear counter: only non-player-faction bots (team 1 allies do not block win).
-    if (team !== TEAM.PLAYER) {
+    // Wave-clear: bots not on the Host seat team.
+    const playerTeam = playerTeamId(match, GAME_PACK && GAME_PACK.teams);
+    if (team !== playerTeam) {
       match.enemiesAlive = (match.enemiesAlive || 0) + 1;
     }
   }
@@ -356,6 +454,7 @@ export function applyEditorMapDoc(match, doc) {
   }
 
   installSenseTeams(match, doc.teams);
+  bindHostSeatFromDoc(match, doc);
   installEditorAreas(match, doc);
   materializePlacedObjects(match, doc);
   materializePlacedUnits(match, doc);
@@ -365,11 +464,12 @@ export function applyEditorMapDoc(match, doc) {
 }
 
 /**
- * Move the player unit to the editor host spawn if present.
+ * Place / refresh the controlled unit from Host seat (unitId + team + sheet).
+ * Not locked to archetype id "Player" — role player means human seat only.
  */
 export function applyEditorPlayerSpawn(match, doc) {
   if (!match || !doc) return;
-  const row = hostSpawnRow(doc);
+  const row = bindHostSeatFromDoc(match, doc) || hostSpawnRow(doc);
   if (!row) return;
   const point = spawnPointFromDoc(doc, row);
   const u =
@@ -377,6 +477,10 @@ export function applyEditorPlayerSpawn(match, doc) {
       ? match.pools.units[match.playerUnitId]
       : null;
   if (!u || !u.active) return;
+
+  // Re-bind body from Host sheet (stats/skin/loadout already on match).
+  unregisterSenseUnit(match, u);
+  resetPlayerStats(u, getBalancePack(), match);
   u.x = point.x;
   u.y = point.y;
   if (match.world) {
@@ -384,6 +488,7 @@ export function applyEditorPlayerSpawn(match, doc) {
     u.x = Math.max(pad, Math.min(match.world.worldW - pad, u.x));
     u.y = Math.max(pad, Math.min(match.world.worldH - pad, u.y));
   }
+  registerSenseUnit(match, u);
   match.cameraSnapPending = true;
 }
 

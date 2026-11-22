@@ -24,16 +24,25 @@ import {
   itemHeadings,
   renderTyped,
   skillEffectNames,
+  weaponPreviewSpec,
 } from './sheetForm.js';
 import {
-  buildStructureMapIcon,
   ensureUnitPoolEntry,
-  ensureWeaponHeldPoolEntry,
+  getParsedUnitArt,
   heldLoadout,
+  mountModelPreview,
   mountPoolPreview,
+  mountStructurePreviewSvg,
   recordSwatch,
   weaponRecordOf,
 } from './unitArt.js';
+import {
+  TEAM_ROW_CAP,
+  firstTeamId,
+  teamIdsFromDoc,
+  teamSelectOptions,
+} from '../defs/teams.js';
+import { GAME_PACK } from '../defs/gamePack.js';
 
 const TABS = [
   ['area', 'Area'],
@@ -620,15 +629,8 @@ export function renderPlacedTray(trayEl, api) {
   const teamWrap = document.createElement('label');
   teamWrap.textContent = items.length > 1 ? 'Team (all)' : 'Team';
   const teamSelect = document.createElement('select');
-  const teamOpts = [
-    { value: '1', label: '1' },
-    { value: '2', label: '2' },
-    { value: '3', label: '3' },
-    { value: '4', label: '4' },
-    { value: '5', label: '5' },
-    { value: '6', label: '6' },
-    { value: '0', label: '0' },
-  ];
+  const packTeams = GAME_PACK && GAME_PACK.teams;
+  const teamOpts = teamSelectOptions(doc, null, packTeams);
   for (let i = 0; i < teamOpts.length; i++) {
     const opt = document.createElement('option');
     opt.value = teamOpts[i].value;
@@ -636,9 +638,10 @@ export function renderPlacedTray(trayEl, api) {
     teamSelect.appendChild(opt);
   }
   let teamSame = true;
-  const team0 = items[0].team != null ? items[0].team : 1;
+  const defaultTeam = firstTeamId(doc, packTeams);
+  const team0 = items[0].team != null ? items[0].team : defaultTeam;
   for (let i = 1; i < items.length; i++) {
-    const t = items[i].team != null ? items[i].team : 1;
+    const t = items[i].team != null ? items[i].team : defaultTeam;
     if (t !== team0) teamSame = false;
   }
   if (teamSame) teamSelect.value = String(team0);
@@ -691,6 +694,18 @@ function railButton(label, on, onClick, hint) {
   return button;
 }
 
+/** Select a sheet row; returns false when id is already selected (skip remount flash). */
+function selectSheetIfNew(api, key, id) {
+  if (api.getSheetId(key) === id) return false;
+  api.setSheetId(key, id);
+  return true;
+}
+
+function renderPanelIfSheetChanged(api, key, id) {
+  if (!selectSheetIfNew(api, key, id)) return;
+  renderPanel(api.panelRoot(), api);
+}
+
 function renderRail(api, doc, tab) {
   const rail = document.createElement('div');
   rail.className = 'editor-rail';
@@ -699,6 +714,7 @@ function renderRail(api, doc, tab) {
       const id = doc.areas[i].id;
       rail.appendChild(
         railButton(id, api.getSelectedAreaId() === id, () => {
+          if (api.getSelectedAreaId() === id) return;
           clearPlacedSelection(api);
           api.selectArea(id);
           api.paint();
@@ -712,6 +728,7 @@ function renderRail(api, doc, tab) {
     const seats = doc.playerSpawns || [];
     rail.appendChild(
       railButton('Host', api.getSpawnKey() === 'host', () => {
+        if (api.getSpawnKey() === 'host') return;
         api.selectSpawnKey('host');
         api.paint();
         renderPanel(api.panelRoot(), api);
@@ -725,6 +742,7 @@ function renderRail(api, doc, tab) {
       playerCount += 1;
       rail.appendChild(
         railButton('Player ' + team, api.getSpawnKey() === key, () => {
+          if (api.getSpawnKey() === key) return;
           api.selectSpawnKey(key);
           api.paint();
           renderPanel(api.panelRoot(), api);
@@ -743,7 +761,7 @@ function renderRail(api, doc, tab) {
           const teams = doc.teams || [];
           for (let i = 0; i < teams.length; i++) {
             const id = teams[i].id | 0;
-            if (id >= 1 && id <= 6 && !used[id]) {
+            if (id >= 1 && !used[id]) {
               team = id;
               break;
             }
@@ -769,6 +787,7 @@ function renderRail(api, doc, tab) {
       const key = 'wave:' + i;
       rail.appendChild(
         railButton('wave ' + waveNum, api.getSpawnKey() === key, () => {
+          if (api.getSpawnKey() === key) return;
           if (doc.spawns[i]) doc.spawns[i].wave = waveNum;
           api.selectSpawnKey(key);
           api.paint();
@@ -800,18 +819,21 @@ function renderRail(api, doc, tab) {
     const key = api.getRulesKey();
     rail.appendChild(
       railButton('Rule', key === 'rule', () => {
+        if (api.getRulesKey() === 'rule') return;
         api.selectRulesKey('rule');
         renderPanel(api.panelRoot(), api);
       })
     );
     rail.appendChild(
       railButton('Player', key === 'player', () => {
+        if (api.getRulesKey() === 'player') return;
         api.selectRulesKey('player');
         renderPanel(api.panelRoot(), api);
       })
     );
     rail.appendChild(
       railButton('ArmorType', key === 'armorType', () => {
+        if (api.getRulesKey() === 'armorType') return;
         api.selectRulesKey('armorType');
         renderPanel(api.panelRoot(), api);
       })
@@ -840,8 +862,7 @@ function renderRail(api, doc, tab) {
     const id = ids[i];
     rail.appendChild(
       railButton(formatCatalogId(id), selected === id, () => {
-        api.setSheetId(sheet.key, id);
-        renderPanel(api.panelRoot(), api);
+        renderPanelIfSheetChanged(api, sheet.key, id);
       }, formatCatalogId(id))
     );
   }
@@ -924,8 +945,7 @@ function appendBlockRail(rail, api, sheet) {
       const label = formatCatalogId(id);
       rail.appendChild(
         railButton(label, selected === id, () => {
-          api.setSheetId(sheet.key, id);
-          renderPanel(api.panelRoot(), api);
+          renderPanelIfSheetChanged(api, sheet.key, id);
         }, label + ' · ' + typeName)
       );
     }
@@ -991,8 +1011,7 @@ function appendSkillRail(rail, api, doc) {
     const label = formatCatalogId(id);
     rail.appendChild(
       railButton(label, pick === id, () => {
-        api.setSheetId('skillId', id);
-        renderPanel(api.panelRoot(), api);
+        renderPanelIfSheetChanged(api, 'skillId', id);
       }, label)
     );
   }
@@ -1028,8 +1047,7 @@ function appendKindRail(rail, api, sheet, kind) {
     const id = ids[i];
     rail.appendChild(
       railButton(formatCatalogId(id), selected === id, () => {
-        api.setSheetId(sheet.key, id);
-        renderPanel(api.panelRoot(), api);
+        renderPanelIfSheetChanged(api, sheet.key, id);
       }, formatCatalogId(id))
     );
   }
@@ -1109,6 +1127,7 @@ function appendGearRail(rail, api, doc) {
     const id = gear.guns[i];
     rail.appendChild(
       railButton(formatCatalogId(id), gear.pick === 'gun' && gear.id === id, () => {
+        if (gear.pick === 'gun' && gear.id === id) return;
         api.setSheetId('gearPick', 'gun');
         api.setSheetId('weaponId', id);
         renderPanel(api.panelRoot(), api);
@@ -1119,6 +1138,7 @@ function appendGearRail(rail, api, doc) {
     const id = gear.tools[i];
     rail.appendChild(
       railButton(formatCatalogId(id), gear.pick === 'tool' && gear.id === id, () => {
+        if (gear.pick === 'tool' && gear.id === id) return;
         api.setSheetId('gearPick', 'tool');
         api.setSheetId('meleeId', id);
         renderPanel(api.panelRoot(), api);
@@ -1222,26 +1242,37 @@ function renderArea(body, api, doc) {
   body.appendChild(remove);
 }
 
-function ensureAreaTeams(area) {
+function rulesTeamIds(doc) {
+  const ids = teamIdsFromDoc(doc, GAME_PACK && GAME_PACK.teams);
+  return ids.length ? ids : [];
+}
+
+function ensureAreaTeams(area, doc) {
+  const allowed = rulesTeamIds(doc);
+  const allow = Object.create(null);
+  for (let i = 0; i < allowed.length; i++) allow[allowed[i]] = true;
   if (!Array.isArray(area.teams)) {
-    const first = area.team == null || area.team === '' ? 1 : area.team | 0;
-    area.teams = [first >= 1 && first <= 6 ? first : 1];
+    const first = area.team == null || area.team === '' ? allowed[0] : area.team | 0;
+    area.teams = [allow[first] ? first : allowed[0]];
   }
   const next = [];
   for (let i = 0; i < area.teams.length; i++) {
     const id = area.teams[i] | 0;
-    if (id >= 1 && id <= 6) next.push(id);
+    if (allow[id]) next.push(id);
   }
-  area.teams = next;
-  if (next.length) area.team = next[0];
-  else delete area.team;
+  area.teams = next.length ? next : [allowed[0]];
+  area.team = area.teams[0];
   return area.teams;
 }
 
 function renderAreaTeams(column, api, area) {
-  const teams = ensureAreaTeams(area);
+  const doc = api.getDoc ? api.getDoc() : null;
+  const teams = ensureAreaTeams(area, doc);
+  const allowed = rulesTeamIds(doc);
   const options = [];
-  for (let team = 1; team <= 6; team++) options.push({ value: String(team), label: String(team) });
+  for (let i = 0; i < allowed.length; i++) {
+    options.push({ value: String(allowed[i]), label: String(allowed[i]) });
+  }
   for (let i = 0; i < teams.length; i++) {
     const line = document.createElement('div');
     line.className = 'editor-line';
@@ -1275,10 +1306,10 @@ function renderAreaTeams(column, api, area) {
   add.addEventListener('click', () => {
     const used = {};
     for (let i = 0; i < teams.length; i++) used[teams[i] | 0] = true;
-    let next = 1;
-    for (let n = 1; n <= 6; n++) {
-      if (!used[n]) {
-        next = n;
+    let next = allowed[0];
+    for (let n = 0; n < allowed.length; n++) {
+      if (!used[allowed[n]]) {
+        next = allowed[n];
         break;
       }
     }
@@ -1302,7 +1333,7 @@ function seatTeamOptions(doc, row) {
   const teams = doc.teams || [];
   for (let i = 0; i < teams.length; i++) {
     const id = teams[i].id | 0;
-    if (id < 1 || id > 6 || used[id]) continue;
+    if (id < 1 || used[id]) continue;
     options.push({ value: String(id), label: String(id) });
   }
   const current = row.team | 0;
@@ -1438,8 +1469,11 @@ function renderSpawns(body, api, doc) {
       api.touch();
     }), 'is-short')
   );
+  const teamIds = rulesTeamIds(doc);
   const teams = [];
-  for (let team = 1; team <= 6; team++) teams.push({ value: String(team), label: String(team) });
+  for (let i = 0; i < teamIds.length; i++) {
+    teams.push({ value: String(teamIds[i]), label: String(teamIds[i]) });
+  }
   line.appendChild(
     field('Team', selectOf(teams, row.team, (value) => {
       row.team = value | 0;
@@ -2002,14 +2036,14 @@ function previewCaption(text) {
 
 function weaponPreview(api, record) {
   const frame = previewFrame();
+  frame.box.classList.add('is-weapon-hold');
   const pack = api.getPack ? api.getPack() : null;
-  // Unit hold + gun layers (not weapon-only).
-  const pooled = ensureWeaponHeldPoolEntry(pack, record, () => {
-    if (api.refreshPanel) api.refreshPanel();
-  });
-  if (pooled) {
-    const img = mountPoolPreview(pooled);
-    if (img) frame.box.appendChild(img);
+  const parsed = getParsedUnitArt(pack);
+  // Live layers: bottom / arms / gun / body / top — not a merged pixel bake.
+  const svg = mountModelPreview(parsed, 'Default_skin_1', weaponPreviewSpec(record));
+  if (svg) {
+    frame.box.appendChild(svg);
+    requestAnimationFrame(() => fitPreviewArt(frame.wrap));
   }
   return frame.wrap;
 }
@@ -2019,22 +2053,16 @@ function structurePreview(api, record) {
   frame.box.classList.add('is-structure');
   const pack = api.getPack ? api.getPack() : null;
   const doc = api.getDoc ? api.getDoc() : null;
-  const refresh = () => {
-    if (api.refreshPanel) api.refreshPanel();
-  };
-  // Layer Block (footprint color) + Layer Gun on top — same rule as map icon.
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 64 64');
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '100%');
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svg.setAttribute('overflow', 'visible');
-  svg.setAttribute('shape-rendering', 'crispEdges');
-  svg.setAttribute('data-snap', 'kept');
-  svg.classList.add('editor-preview-structure');
-  const icon = buildStructureMapIcon(null, doc, record, 0, 0, 64, 64, pack, refresh);
-  if (icon) svg.appendChild(icon);
-  frame.box.appendChild(svg);
+  // Layer 1 SizeView footprint + Layer 2 gun; overflow expands viewBox (Unit-style).
+  const svg = mountStructurePreviewSvg(pack, doc, record);
+  if (svg) {
+    frame.box.appendChild(svg);
+  } else {
+    const swatch = document.createElement('div');
+    swatch.className = 'editor-preview-swatch';
+    swatch.style.background = cssColor(recordSwatch(record));
+    frame.box.appendChild(swatch);
+  }
   return frame.wrap;
 }
 
@@ -2096,15 +2124,15 @@ function nextTeamId(teams) {
     if (id > max) max = id;
   }
   const next = max + 1;
-  if (next >= 1 && next <= 6 && !used[next]) return next;
-  for (let id = 1; id <= 6; id++) {
+  if (next >= 1 && next <= TEAM_ROW_CAP && !used[next]) return next;
+  for (let id = 1; id <= TEAM_ROW_CAP; id++) {
     if (!used[id]) return id;
   }
   return 0;
 }
 
 function resizeTeams(teams, count) {
-  const n = Math.max(1, Math.min(6, count | 0));
+  const n = Math.max(1, Math.min(TEAM_ROW_CAP, count | 0));
   while (teams.length > n) teams.pop();
   while (teams.length < n) {
     const id = nextTeamId(teams);
@@ -2166,14 +2194,16 @@ function renderRelationGroup(body, teams, api, key, otherKey, activeClass, title
 
 function renderPlayerRules(body, api, doc) {
   if (!Array.isArray(doc.teams)) doc.teams = [];
-  if (doc.teams.length < 1 || doc.teams.length > 6) resizeTeams(doc.teams, doc.teams.length < 1 ? 1 : 6);
+  if (doc.teams.length < 1 || doc.teams.length > TEAM_ROW_CAP) {
+    resizeTeams(doc.teams, doc.teams.length < 1 ? 1 : TEAM_ROW_CAP);
+  }
   const countInput = document.createElement('input');
   countInput.type = 'number';
   countInput.min = '1';
-  countInput.max = '6';
+  countInput.max = String(TEAM_ROW_CAP);
   countInput.value = String(doc.teams.length);
   countInput.addEventListener('change', () => {
-    const next = Math.max(1, Math.min(6, countInput.value | 0));
+    const next = Math.max(1, Math.min(TEAM_ROW_CAP, countInput.value | 0));
     countInput.value = String(next);
     resizeTeams(doc.teams, next);
     api.touch();

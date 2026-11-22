@@ -70,10 +70,14 @@ export function weaponRecordOf(doc, weaponId) {
   if (!weaponId) return null;
   if (doc && doc.weapons && doc.weapons[weaponId]) return doc.weapons[weaponId];
   if (doc && doc.weapons) {
+    const upper = String(weaponId).toUpperCase();
+    if (doc.weapons[upper]) return doc.weapons[upper];
     const ids = Object.keys(doc.weapons);
     for (let i = 0; i < ids.length; i++) {
       const row = doc.weapons[ids[i]];
-      if (row && row.id === weaponId) return row;
+      if (!row) continue;
+      if (row.id === weaponId || String(row.id || '').toUpperCase() === upper) return row;
+      if (String(ids[i]).toUpperCase() === upper) return row;
     }
   }
   return { id: weaponId };
@@ -124,11 +128,17 @@ export function cloneArtGroup(parsed, groupId) {
 }
 
 export function weaponClone(parsed, groupName) {
-  let clone = cloneArtGroup(parsed, groupName);
-  if (!clone && groupName !== 'Weapon_Colt_1911') clone = cloneArtGroup(parsed, 'Weapon_Colt_1911');
+  if (!groupName) return null;
+  const clone = cloneArtGroup(parsed, groupName);
   if (!clone) return null;
   hideMeasures(clone);
   return clone;
+}
+
+/** Clone weapon group but keep SizeView for measurement (caller hides after). */
+export function weaponCloneWithSizeView(parsed, groupName) {
+  if (!groupName) return null;
+  return cloneArtGroup(parsed, groupName);
 }
 
 function hideNode(el) {
@@ -291,8 +301,8 @@ function unionSpace(a, b) {
 }
 
 export function cellSnapSvg(parsed, groupName, fill, drawGun) {
-  let gun = cloneArtGroup(parsed, groupName);
-  if (!gun && groupName !== 'Weapon_Colt_1911') gun = cloneArtGroup(parsed, 'Weapon_Colt_1911');
+  if (!groupName) return null;
+  const gun = cloneArtGroup(parsed, groupName);
   if (!gun) return null;
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('width', '8');
@@ -498,34 +508,184 @@ export function buildUnitMapIcon(parsed, doc, unitRecord, x, y, width, height, p
 }
 
 /**
- * Structure footprint + optional weapon from pixel pool only (no live SVG gun).
+ * One compose for Map / Trail / Settings: Layer1 SizeView footprint + Layer2 gun.
+ * Measures sync (offscreen). Gun keeps authored scale; overflow expands the frame.
+ * @returns {{ host: SVGGElement, cell: {x:number,y:number,w:number,h:number}, content: {x:number,y:number,w:number,h:number}|null, defs: Element|null } | null}
  */
-export function buildStructureMapIcon(parsed, doc, itemRecord, x, y, width, height, pack, onPoolReady) {
-  const g = document.createElementNS(SVG_NS, 'g');
+export function composeStructureLayers(parsed, doc, itemRecord) {
+  const artDoc = parsed || null;
   const swatch = cssColor(recordSwatch(itemRecord));
+  const weapon =
+    itemRecord && itemRecord.weaponId ? weaponRecordOf(doc, itemRecord.weaponId) : null;
+  const spec = weapon ? weaponPreviewSpec(weapon) : null;
+  const groupName = spec && spec.group ? spec.group : null;
 
-  const pad = 2;
+  const host = document.createElementNS(SVG_NS, 'g');
+  host.setAttribute('class', 'structure-layers');
+
   const bg = document.createElementNS(SVG_NS, 'rect');
-  bg.setAttribute('x', String(x + pad));
-  bg.setAttribute('y', String(y + pad));
-  bg.setAttribute('width', String(Math.max(8, width - pad * 2)));
-  bg.setAttribute('height', String(Math.max(8, height - pad * 2)));
+  bg.setAttribute('class', 'structure-foot');
+  bg.setAttribute('x', '0');
+  bg.setAttribute('y', '0');
+  bg.setAttribute('width', '64');
+  bg.setAttribute('height', '64');
   bg.setAttribute('rx', '3');
   bg.setAttribute('fill', swatch);
   bg.setAttribute('stroke', '#2a2010');
   bg.setAttribute('stroke-width', '2');
-  g.appendChild(bg);
+  host.appendChild(bg);
 
-  const weapon = itemRecord && itemRecord.weaponId ? weaponRecordOf(doc, itemRecord.weaponId) : null;
-  if (weapon) {
-    const entry = ensureWeaponPoolEntry(pack, weapon, onPoolReady);
-    if (entry) {
-      const gun = poolSpriteImage(entry, x, y, width, height);
-      if (gun) g.appendChild(gun);
+  let gun = null;
+  let defs = null;
+  if (artDoc && groupName) {
+    const srcDefs = artDoc.querySelector('defs');
+    if (srcDefs) defs = srcDefs.cloneNode(true);
+    gun = weaponCloneWithSizeView(artDoc, groupName);
+    if (gun) {
+      gun.setAttribute('class', 'structure-gun');
+      host.appendChild(gun);
     }
   }
 
-  return g;
+  // Sync measure SizeView + content (same path for map and inspector).
+  const metrics = measureStructureHost(artDoc, host, defs);
+  const cell = metrics.cell || { x: 0, y: 0, w: 64, h: 64 };
+  bg.setAttribute('x', String(cell.x));
+  bg.setAttribute('y', String(cell.y));
+  bg.setAttribute('width', String(cell.w));
+  bg.setAttribute('height', String(cell.h));
+  hideMeasures(host);
+
+  const content = metrics.content || cell;
+  return { host, cell, content, defs };
+}
+
+function measureStructureHost(artDoc, host, defsClone) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('width', '256');
+  svg.setAttribute('height', '256');
+  svg.style.position = 'fixed';
+  svg.style.left = '-10000px';
+  svg.style.top = '-10000px';
+  svg.style.pointerEvents = 'none';
+  if (defsClone) svg.appendChild(defsClone.cloneNode(true));
+  else if (artDoc) {
+    const defs = artDoc.querySelector('defs');
+    if (defs) svg.appendChild(defs.cloneNode(true));
+  }
+  svg.appendChild(host);
+  document.body.appendChild(svg);
+
+  let cell = null;
+  const nodes = host.querySelectorAll('[id]');
+  for (let i = 0; i < nodes.length; i++) {
+    const id = nodes[i].getAttribute('id') || '';
+    if (id.indexOf('SizeView') !== 0) continue;
+    cell = unionSpace(cell, boxInSpace(nodes[i], host, svg));
+  }
+  // Probe content while SizeView still visible so bbox is stable; caller hides after.
+  let content = null;
+  try {
+    content = boxInSpace(host, host, svg);
+  } catch (_) {
+    content = null;
+  }
+  svg.remove();
+  // host was moved into temp svg — re-attach responsibility is caller's (still referenced).
+  return { cell, content };
+}
+
+/**
+ * Inspector structure preview — same compose as map icons.
+ */
+export function mountStructurePreviewSvg(pack, doc, itemRecord) {
+  const artDoc = pack ? getParsedUnitArt(pack) : null;
+  const composed = composeStructureLayers(artDoc, doc, itemRecord);
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.setAttribute('overflow', 'visible');
+  svg.setAttribute('shape-rendering', 'crispEdges');
+  svg.classList.add('editor-preview-structure');
+
+  if (!composed) {
+    svg.setAttribute('viewBox', '0 0 64 64');
+    return svg;
+  }
+  if (composed.defs) svg.appendChild(composed.defs);
+  svg.appendChild(composed.host);
+
+  // Frame = union of SizeView foot + gun overflow (Unit-style expand, no gun rescale).
+  const cell = composed.cell;
+  const content = composed.content;
+  let frame = cell;
+  if (content && content.w > 0 && content.h > 0) {
+    frame = unionSpace(cell, content) || cell;
+  }
+  // After hideMeasures, re-measure content once attached for accurate gun overflow.
+  const pad = 4;
+  svg.setAttribute(
+    'viewBox',
+    frame.x - pad + ' ' + (frame.y - pad) + ' ' + (frame.w + pad * 2) + ' ' + (frame.h + pad * 2)
+  );
+  requestAnimationFrame(() => {
+    if (!svg.isConnected) return;
+    let box = null;
+    try {
+      box = composed.host.getBBox();
+    } catch (_) {
+      box = null;
+    }
+    if (box && box.width > 0 && box.height > 0) {
+      svg.setAttribute(
+        'viewBox',
+        box.x - pad + ' ' + (box.y - pad) + ' ' + (box.width + pad * 2) + ' ' + (box.height + pad * 2)
+      );
+    }
+  });
+  return svg;
+}
+
+/**
+ * Map / tool structure icon — same compose as inspector; SizeView maps to world footprint.
+ * Gun may extend past the footprint (overflow). onPoolReady kept for call-site compat.
+ */
+export function buildStructureMapIcon(parsed, doc, itemRecord, x, y, width, height, pack, onPoolReady) {
+  const artDoc = parsed || getParsedUnitArt(pack);
+  const composed = composeStructureLayers(artDoc, doc, itemRecord);
+  const wrap = document.createElementNS(SVG_NS, 'g');
+  wrap.setAttribute('class', 'map-structure-icon');
+
+  if (!composed) {
+    const swatch = cssColor(recordSwatch(itemRecord));
+    const pad = 2;
+    const bg = document.createElementNS(SVG_NS, 'rect');
+    bg.setAttribute('x', String(x + pad));
+    bg.setAttribute('y', String(y + pad));
+    bg.setAttribute('width', String(Math.max(8, width - pad * 2)));
+    bg.setAttribute('height', String(Math.max(8, height - pad * 2)));
+    bg.setAttribute('rx', '3');
+    bg.setAttribute('fill', swatch);
+    bg.setAttribute('stroke', '#2a2010');
+    bg.setAttribute('stroke-width', '2');
+    wrap.appendChild(bg);
+    return wrap;
+  }
+
+  const cell = composed.cell;
+  const sx = cell.w > 0 ? width / cell.w : 1;
+  const sy = cell.h > 0 ? height / cell.h : 1;
+  // Uniform scale from SizeView → world footprint; gun sticks out with same scale.
+  const scale = Math.min(sx, sy);
+  const ox = x + (width - cell.w * scale) / 2;
+  const oy = y + (height - cell.h * scale) / 2;
+  composed.host.setAttribute(
+    'transform',
+    'translate(' + ox + ',' + oy + ') scale(' + scale + ') translate(' + -cell.x + ',' + -cell.y + ')'
+  );
+  wrap.appendChild(composed.host);
+  return wrap;
 }
 
 /**
@@ -542,6 +702,9 @@ export function renderTemplateThumb(container, doc, pack, kind, templateId, onPo
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.setAttribute('overflow', 'visible');
   svg.setAttribute('shape-rendering', 'crispEdges');
+  const parsed = getParsedUnitArt(pack);
+  const artDefs = ensureMapArtDefs(svg, parsed);
+  if (artDefs) svg.appendChild(artDefs);
   const refresh = () => {
     if (onPoolReady) onPoolReady();
     else renderTemplateThumb(container, doc, pack, kind, templateId);
@@ -559,7 +722,7 @@ export function renderTemplateThumb(container, doc, pack, kind, templateId, onPo
     const h = (fp.h / maxDim) * box;
     const ox = (64 - w) / 2;
     const oy = (64 - h) / 2;
-    svg.appendChild(buildStructureMapIcon(null, doc, itemDef, ox, oy, w, h, pack, refresh));
+    svg.appendChild(buildStructureMapIcon(parsed, doc, itemDef, ox, oy, w, h, pack, refresh));
   }
   container.appendChild(svg);
 }

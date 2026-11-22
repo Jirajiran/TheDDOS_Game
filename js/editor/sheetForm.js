@@ -45,7 +45,8 @@ export function shownWeaponModel(record) {
   if (record && typeof record.model === 'string' && record.model) return record.model;
   const spec = weaponArtSpec(record && record.id);
   if (spec && spec.group) return spec.group;
-  return DEFAULT_WEAPON_GROUP;
+  // No silent Colt default — missing art stays empty (not M1911).
+  return null;
 }
 
 export function shownWeaponHold(record) {
@@ -495,8 +496,9 @@ export function renderTyped(body, key, record, ctx) {
     appendDivider(body);
     appendSectionTitle(body, 'Appearance & ID');
     const groups = weaponArtGroups();
-    const artValue = shownWeaponModel(record);
-    if (groups.indexOf(artValue) < 0) groups.push(artValue);
+    const resolvedArt = shownWeaponModel(record);
+    const artValue = resolvedArt || DEFAULT_WEAPON_GROUP;
+    if (artValue && groups.indexOf(artValue) < 0) groups.push(artValue);
     body.appendChild(categorySelect('Art', groups, artValue, (next) => {
       record.model = next;
       ctx.touch(true);

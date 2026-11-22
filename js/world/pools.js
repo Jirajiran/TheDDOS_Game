@@ -21,6 +21,8 @@ export function clearMuzzleQueue(u) {
 function makeInactiveUnit(i) {
   return {
     id: i,
+    /** Bumps on deactivate so deferred hits cannot ABA onto a recycled slot. */
+    generation: 0,
     active: false,
     typeId: 0,
     team: 0,
@@ -180,6 +182,8 @@ export function allocatePools() {
   return {
     units,
     projectiles,
+    /** Dense active slice: indices [0, projectileActiveCount) are live (swap-and-pop). */
+    projectileActiveCount: 0,
     drops,
     capacity: {
       units: POOL_UNITS,
@@ -255,6 +259,7 @@ export function resetPools(pools) {
   for (let i = 0; i < pools.projectiles.length; i++) {
     pools.projectiles[i].active = false;
   }
+  pools.projectileActiveCount = 0;
   for (let i = 0; i < pools.drops.length; i++) {
     pools.drops[i].active = false;
   }
@@ -268,10 +273,30 @@ export function acquireUnit(pools) {
 }
 
 export function acquireProjectile(pools) {
-  for (let i = 0; i < pools.projectiles.length; i++) {
-    if (!pools.projectiles[i].active) return pools.projectiles[i];
+  const n = pools.projectileActiveCount | 0;
+  if (n >= pools.projectiles.length) return null;
+  const p = pools.projectiles[n];
+  p.active = true;
+  pools.projectileActiveCount = n + 1;
+  return p;
+}
+
+/**
+ * Swap-and-pop deactivate. Returns the next index to process in a forward while-loop
+ * (same index again — the swapped-in bullet has not been stepped yet).
+ */
+export function deactivateProjectileAt(pools, index) {
+  const projs = pools.projectiles;
+  let last = (pools.projectileActiveCount | 0) - 1;
+  if (index < 0 || index > last) return index + 1;
+  projs[index].active = false;
+  if (index !== last) {
+    const moved = projs[last];
+    projs[last] = projs[index];
+    projs[index] = moved;
   }
-  return null;
+  pools.projectileActiveCount = last;
+  return index;
 }
 
 export function acquireDrop(pools) {
@@ -284,6 +309,7 @@ export function acquireDrop(pools) {
 export function deactivateUnit(u) {
   if (!u) return;
   u.active = false;
+  u.generation = (u.generation | 0) + 1;
   u.hp = 0;
   u.vx = 0;
   u.vy = 0;

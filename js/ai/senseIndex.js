@@ -5,6 +5,8 @@
  */
 
 import { TEAM } from '../config.js';
+import { GAME_PACK } from '../defs/gamePack.js';
+import { normalizeTeamRows, teamIdList } from '../defs/teams.js';
 import { TargetKind } from './blackboard.js';
 
 function emptyHostileCache() {
@@ -16,54 +18,18 @@ export function createSenseIndex() {
     byTeam: Object.create(null),
     unitAt: Object.create(null),
     blockAt: Object.create(null),
-    teams: defaultTeamRows(),
+    teams: normalizeTeamRows((GAME_PACK && GAME_PACK.teams) || []),
     hostileOf: emptyHostileCache(),
     dirtyTeams: Object.create(null),
   };
 }
 
-function defaultTeamRows() {
-  return [
-    { id: TEAM.PLAYER, name: 'Team 1', hostileTo: [TEAM.ENEMY], allyTo: [TEAM.ALLY] },
-    { id: TEAM.ENEMY, name: 'Team 2', hostileTo: [TEAM.PLAYER, TEAM.ALLY], allyTo: [] },
-    { id: TEAM.ALLY, name: 'Team 3', hostileTo: [TEAM.ENEMY], allyTo: [TEAM.PLAYER] },
-  ];
-}
-
-function teamIdList(raw) {
-  if (!Array.isArray(raw)) return [];
-  const out = [];
-  const seen = Object.create(null);
-  for (let i = 0; i < raw.length; i++) {
-    const id = raw[i] | 0;
-    if (!id || seen[id]) continue;
-    seen[id] = true;
-    out.push(id);
-  }
-  return out;
-}
-
-/** Install map/doc team relations (hostileTo / allyTo). */
+/** Install map/doc team relations from Rules/pack data only — no hard Team 1/2/3 rows. */
 export function installSenseTeams(match, teams) {
   const idx = ensureSenseIndex(match);
-  if (Array.isArray(teams) && teams.length) {
-    const rows = [];
-    for (let i = 0; i < teams.length && rows.length < 6; i++) {
-      const row = teams[i];
-      if (!row) continue;
-      const id = row.id | 0;
-      if (!id) continue;
-      rows.push({
-        id,
-        name: row.name || 'Team ' + id,
-        hostileTo: teamIdList(row.hostileTo),
-        allyTo: teamIdList(row.allyTo),
-      });
-    }
-    if (rows.length) idx.teams = rows;
-  } else {
-    idx.teams = defaultTeamRows();
-  }
+  const fromMap = normalizeTeamRows(teams);
+  const fromPack = normalizeTeamRows((GAME_PACK && GAME_PACK.teams) || []);
+  idx.teams = fromMap.length ? fromMap : fromPack;
   rebuildHostileCache(idx);
   match.mapTeams = idx.teams;
   return idx;
@@ -74,17 +40,8 @@ function rebuildHostileCache(idx) {
   const rows = idx.teams || [];
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    // Only authored hostileTo — no invented PLAYER/ENEMY/ALLY pairs.
     idx.hostileOf[row.id] = teamIdList(row.hostileTo).slice();
-  }
-  // Fallback pairs if a team id has no row.
-  if (!idx.hostileOf[TEAM.ENEMY]) {
-    idx.hostileOf[TEAM.ENEMY] = [TEAM.PLAYER, TEAM.ALLY];
-  }
-  if (!idx.hostileOf[TEAM.PLAYER]) {
-    idx.hostileOf[TEAM.PLAYER] = [TEAM.ENEMY];
-  }
-  if (!idx.hostileOf[TEAM.ALLY]) {
-    idx.hostileOf[TEAM.ALLY] = [TEAM.ENEMY];
   }
 }
 
@@ -102,8 +59,7 @@ export function hostileTeamIds(match, selfTeam) {
   const team = selfTeam | 0;
   const list = idx.hostileOf[team];
   if (list && list.length) return list;
-  if (team === TEAM.ENEMY) return [TEAM.PLAYER, TEAM.ALLY];
-  if (team === TEAM.PLAYER || team === TEAM.ALLY) return [TEAM.ENEMY];
+  // Unknown / empty hostileTo → not hostile to anyone (data-driven; no hard TEAM pairs).
   return [];
 }
 
@@ -240,9 +196,8 @@ export function unregisterSenseBlock(match, blockOrId) {
 }
 
 export function classifyUnitTargetKind(team, unit) {
+  // Seat role is control flag; combat hostility uses hostileTo data, not hard team ids.
   if (unit && unit.role === 'player') return TargetKind.PLAYER;
-  if (team === TEAM.PLAYER) return TargetKind.PLAYER;
-  if (team === TEAM.ALLY) return TargetKind.ALLY_UNIT;
   return TargetKind.ENEMY_UNIT;
 }
 
