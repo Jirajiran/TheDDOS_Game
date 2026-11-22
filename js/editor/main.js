@@ -11,7 +11,9 @@ import {
   ensureMixSkills,
   ensurePlayerSpawns,
   exportMapText,
+  hasPageCache,
   parseMapFile,
+  peekPageCacheMeta,
   readPageCache,
   sheetsFromPack,
   spawnPoint,
@@ -894,6 +896,47 @@ function setCreateError(message) {
   if (error) error.textContent = message || '';
 }
 
+function syncResumeDraftUi() {
+  const btn = document.getElementById('editor-resume-draft');
+  const hint = document.getElementById('editor-resume-hint');
+  if (!btn) return;
+  const meta = peekPageCacheMeta();
+  if (!meta || !hasPageCache()) {
+    btn.hidden = true;
+    if (hint) {
+      hint.hidden = true;
+      hint.textContent = '';
+    }
+    return;
+  }
+  btn.hidden = false;
+  const size =
+    meta.pathCols && meta.pathRows
+      ? ' · ' + meta.pathCols + '×' + meta.pathRows
+      : '';
+  btn.textContent = 'Resume · ' + (meta.name || 'draft') + size;
+  if (hint) {
+    hint.hidden = false;
+    hint.textContent =
+      'A cached draft is on this browser. Resume opens it, or Create / Import starts fresh (New map clears the draft).';
+  }
+}
+
+function tryOpenCachedDraft() {
+  const cached = readPageCache();
+  if (!cached) return false;
+  state.doc = fillSheets(cached);
+  state.areaId = '';
+  state.selectedPlacedIds = [];
+  state.spawnKey = '';
+  state.rulesKey = 'rule';
+  writePageCache(state.doc);
+  openWork();
+  const copy = document.getElementById('editor-copy');
+  if (copy) copy.textContent = 'Restored from browser cache';
+  return true;
+}
+
 function resetCreateFormDefaults() {
   const name = document.getElementById('editor-name');
   const cols = document.getElementById('editor-cols');
@@ -902,6 +945,7 @@ function resetCreateFormDefaults() {
   if (cols) cols.value = '3';
   if (rows) rows.value = '3';
   setCreateError('');
+  syncResumeDraftUi();
 }
 
 /**
@@ -975,6 +1019,18 @@ function bindCreate() {
   const rows = document.getElementById('editor-rows');
   cols.max = String(MAX_SIDE);
   rows.max = String(MAX_SIDE);
+
+  const resumeBtn = document.getElementById('editor-resume-draft');
+  if (resumeBtn) {
+    resumeBtn.addEventListener('click', () => {
+      setCreateError('');
+      if (!tryOpenCachedDraft()) {
+        setCreateError('No cached draft found');
+        syncResumeDraftUi();
+      }
+    });
+  }
+
   document.getElementById('editor-create-form').addEventListener('submit', (event) => {
     event.preventDefault();
     setCreateError('');
@@ -1018,7 +1074,8 @@ function bindCreate() {
 function enterEditor() {
   return runLoading()
     .then(() => {
-      // Always land on New map so author can Create or Import every session.
+      // Resume cached draft after refresh / return from Test Play.
+      if (tryOpenCachedDraft()) return;
       state.doc = null;
       state.areaId = '';
       state.selectedPlacedIds = [];
@@ -1044,6 +1101,27 @@ function boot() {
   view = mountMapView(document.getElementById('editor-svg'), api());
   bindCreate();
   bindWork();
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!state.doc) return;
+    try {
+      writePageCache(state.doc);
+    } catch (_) {
+      /* ignore */
+    }
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  window.addEventListener('pagehide', () => {
+    if (state.doc) {
+      try {
+        writePageCache(state.doc);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  });
+
   enterEditor();
 }
 

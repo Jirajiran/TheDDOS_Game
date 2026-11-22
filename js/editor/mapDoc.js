@@ -1,6 +1,7 @@
 /**
  * One editor map file. The path grid is chosen once at creation and then locked.
- * The page cache is only for this editor tab. Current edits overwrite it.
+ * Draft cache: sessionStorage (fast, same tab) + localStorage (survives refresh / tab close).
+ * Current edits overwrite it; New map clears it.
  */
 
 import { normalizeTeamRows, teamIdsFromDoc } from '../defs/teams.js';
@@ -8,6 +9,7 @@ import { normalizeTeamRows, teamIdsFromDoc } from '../defs/teams.js';
 export const PATH_SIZE = 1024;
 export const MAX_SIDE = 8;
 export const CACHE_KEY = 'theddos_editor_page';
+export const CACHE_META_KEY = 'theddos_editor_page_meta';
 
 export function sanitizeMapName(raw) {
   const text = String(raw || '')
@@ -434,22 +436,99 @@ export function parseMapFile(text) {
   return ensureMixSkills(ensurePlayerSpawns(doc));
 }
 
-export function readPageCache() {
+function readStorageRaw(storage, key) {
+  if (!storage) return null;
   try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
+    return storage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeStorageRaw(storage, key, value) {
+  if (!storage) return;
+  try {
+    storage.setItem(key, value);
+  } catch (_) {
+    /* quota / private mode */
+  }
+}
+
+function removeStorageRaw(storage, key) {
+  if (!storage) return;
+  try {
+    storage.removeItem(key);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function parseCachedDoc(raw) {
+  if (!raw) return null;
+  try {
     return parseMapFile(raw);
   } catch (_) {
     return null;
   }
 }
 
+/** Prefer session draft, then durable local draft. */
+export function readPageCache() {
+  const fromSession = parseCachedDoc(readStorageRaw(sessionStorage, CACHE_KEY));
+  if (fromSession) return fromSession;
+  return parseCachedDoc(readStorageRaw(localStorage, CACHE_KEY));
+}
+
+/** Lightweight label for Resume UI — no full parse required. */
+export function peekPageCacheMeta() {
+  try {
+    const raw =
+      readStorageRaw(sessionStorage, CACHE_META_KEY) ||
+      readStorageRaw(localStorage, CACHE_META_KEY);
+    if (raw) {
+      const meta = JSON.parse(raw);
+      if (meta && typeof meta === 'object') return meta;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  const doc = readPageCache();
+  if (!doc) return null;
+  return {
+    name: doc.name || 'untitled_map',
+    pathCols: doc.pathCols | 0,
+    pathRows: doc.pathRows | 0,
+    savedAt: null,
+  };
+}
+
+export function hasPageCache() {
+  return !!(
+    readStorageRaw(sessionStorage, CACHE_KEY) ||
+    readStorageRaw(localStorage, CACHE_KEY)
+  );
+}
+
 export function writePageCache(doc) {
-  sessionStorage.setItem(CACHE_KEY, JSON.stringify(doc));
+  if (!doc) return;
+  const raw = JSON.stringify(doc);
+  writeStorageRaw(sessionStorage, CACHE_KEY, raw);
+  writeStorageRaw(localStorage, CACHE_KEY, raw);
+  const meta = JSON.stringify({
+    name: doc.name || 'untitled_map',
+    pathCols: doc.pathCols | 0,
+    pathRows: doc.pathRows | 0,
+    savedAt: Date.now(),
+  });
+  writeStorageRaw(sessionStorage, CACHE_META_KEY, meta);
+  writeStorageRaw(localStorage, CACHE_META_KEY, meta);
 }
 
 export function clearPageCache() {
-  sessionStorage.removeItem(CACHE_KEY);
+  removeStorageRaw(sessionStorage, CACHE_KEY);
+  removeStorageRaw(localStorage, CACHE_KEY);
+  removeStorageRaw(sessionStorage, CACHE_META_KEY);
+  removeStorageRaw(localStorage, CACHE_META_KEY);
 }
 
 export function nextAreaId(areas) {

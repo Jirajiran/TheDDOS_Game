@@ -48,6 +48,24 @@ select {
   text-align: center;
 }
 
+#editor-resume-draft {
+  width: 100%;
+  margin-top: 4px;
+  background: #243044;
+  border: 1px solid #3d5a80;
+  color: #d8e6ff;
+}
+
+#editor-resume-draft:hover:not(:disabled) {
+  background: #2f4060;
+  color: #ffffff;
+}
+
+#editor-resume-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
 .editor-drop-hint {
   margin: 0;
   opacity: 0.85;
