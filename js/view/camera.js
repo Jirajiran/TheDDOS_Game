@@ -1,12 +1,29 @@
 /**
- * Simple camera: follow a point or show whole world; clamp to world bounds.
+ * Simple camera: follow a point or show whole world; clamp with edge margin
+ * so map content does not stick to the screen edge.
  * Visible world width ≈ viewW / zoom — raise zoom (GAME_PACK.cameraFollowZoom) to tighten.
  */
+
+/** World units of empty pad past the map edge (≈ one L3 cell). */
+export const CAMERA_EDGE_MARGIN = 64;
+
 export function createCamera() {
   return {
     x: 0,
     y: 0,
     zoom: 1,
+  };
+}
+
+function camClampRange(worldW, worldH, viewW, viewH, zoom, margin) {
+  const m = margin != null ? margin : CAMERA_EDGE_MARGIN;
+  const maxX = Math.max(0, worldW - viewW / zoom);
+  const maxY = Math.max(0, worldH - viewH / zoom);
+  return {
+    minX: -m,
+    minY: -m,
+    maxX: maxX + m,
+    maxY: maxY + m,
   };
 }
 
@@ -21,20 +38,17 @@ export function fitWorldInView(camera, worldW, worldH, viewW, viewH) {
 
   const drawnW = worldW * zoom;
   const drawnH = worldH * zoom;
-  // Center world in view, then clamp so we never scroll past edges.
+  // Center world in view, then clamp with edge margin.
   let camX = (drawnW - viewW) / 2 / zoom;
   let camY = (drawnH - viewH) / 2 / zoom;
 
-  // When zoomed to fit, drawn size ≤ view → cam should be 0 (letterbox ok).
-  // When zoomed larger (follow mode later), clamp.
-  const maxX = Math.max(0, worldW - viewW / zoom);
-  const maxY = Math.max(0, worldH - viewH / zoom);
-  camera.x = clamp(camX, 0, maxX);
-  camera.y = clamp(camY, 0, maxY);
+  const r = camClampRange(worldW, worldH, viewW, viewH, zoom, CAMERA_EDGE_MARGIN);
+  camera.x = clamp(camX, r.minX, r.maxX);
+  camera.y = clamp(camY, r.minY, r.maxY);
 }
 
 /**
- * Follow world-space point; keep view inside world.
+ * Follow world-space point; keep view near world with edge margin.
  */
 export function followPoint(camera, targetX, targetY, worldW, worldH, viewW, viewH) {
   const zoom = camera.zoom > 0 ? camera.zoom : 1;
@@ -44,21 +58,19 @@ export function followPoint(camera, targetX, targetY, worldW, worldH, viewW, vie
   let x = targetX - halfW;
   let y = targetY - halfH;
 
-  const maxX = Math.max(0, worldW - viewW / zoom);
-  const maxY = Math.max(0, worldH - viewH / zoom);
-  camera.x = clamp(x, 0, maxX);
-  camera.y = clamp(y, 0, maxY);
+  const r = camClampRange(worldW, worldH, viewW, viewH, zoom, CAMERA_EDGE_MARGIN);
+  camera.x = clamp(x, r.minX, r.maxX);
+  camera.y = clamp(y, r.minY, r.maxY);
 }
 
 /**
- * Pan camera by world delta (free-fly); clamp to world bounds.
+ * Pan camera by world delta (free-fly); clamp with edge margin.
  */
 export function panCamera(camera, dx, dy, worldW, worldH, viewW, viewH) {
   const zoom = camera.zoom > 0 ? camera.zoom : 1;
-  const maxX = Math.max(0, worldW - viewW / zoom);
-  const maxY = Math.max(0, worldH - viewH / zoom);
-  camera.x = clamp(camera.x + dx, 0, maxX);
-  camera.y = clamp(camera.y + dy, 0, maxY);
+  const r = camClampRange(worldW, worldH, viewW, viewH, zoom, CAMERA_EDGE_MARGIN);
+  camera.x = clamp(camera.x + dx, r.minX, r.maxX);
+  camera.y = clamp(camera.y + dy, r.minY, r.maxY);
 }
 
 /**

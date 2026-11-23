@@ -14,7 +14,6 @@ import {
   ART_W,
   EFFECT_IDS,
   EMPTY_SLOT_PAD,
-  FIST_ICON_COLOR,
   HOTBAR_MAIN,
   PLAYER_UI_SVG_URL,
   SKILL_IDS,
@@ -106,7 +105,7 @@ api.mountSvg = async function mountSvg() {
     api.setVisible(api.$(earlyHide[i]), false);
   }
   for (let i = 0; i < EFFECT_IDS.length; i++) api.setVisible(api.$(EFFECT_IDS[i]), false);
-  for (let i = 1; i < SKILL_IDS.length; i++) api.setVisible(api.$(SKILL_IDS[i]), false);
+  for (let i = 0; i < SKILL_IDS.length; i++) api.setVisible(api.$(SKILL_IDS[i]), false);
 
   const hitRoots = [
     'Anchor_Right_Top',
@@ -156,9 +155,11 @@ api.mountSvg = async function mountSvg() {
   api.setBackpackTier(0);
   api.setInteractiveVisible(false);
   for (let i = 0; i < EFFECT_IDS.length; i++) api.setVisible(api.$(EFFECT_IDS[i]), false);
-  for (let i = 1; i < SKILL_IDS.length; i++) api.setVisible(api.$(SKILL_IDS[i]), false);
-  api.setVisible(api.$('Skill_Show_1'), true);
-  api.ensureIconOverlay(api.$('Skill_Show_1'), FIST_ICON_COLOR, true);
+  // Skills HUD: hidden until Host sheet lists skills (syncSkills).
+  for (let i = 0; i < SKILL_IDS.length; i++) {
+    api.setVisible(api.$(SKILL_IDS[i]), false);
+    api.ensureIconOverlay(api.$(SKILL_IDS[i]), null, false);
+  }
   api.setVisible(api.$('Icon_Current_slot'), false);
   api.syncRequestItems(null);
   api.syncIconCurrentSlot();

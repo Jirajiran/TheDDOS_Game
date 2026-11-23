@@ -409,9 +409,17 @@ export function createApp(dom) {
         else if ((slotIndex | 0) === 1) dispatchUi('castHeal');
       },
       onCastSkill: (skillId) => {
-        // Legacy: map named skills to Host skill slots 0/1
-        if (skillId === 'FIST') dispatchUi('castFist');
-        else if (skillId === 'SELF_HEAL') dispatchUi('castHeal');
+        // Map sheet skill id → Host skill slot 0/1 (Q / C), not hard FIST/SELF_HEAL names.
+        const match = state.match;
+        const player =
+          match && match.units
+            ? match.units.find((u) => u && u.active && u.role === 'player')
+            : null;
+        const ids =
+          player && Array.isArray(player.skillIds) ? player.skillIds : [];
+        const idx = ids.indexOf(skillId);
+        if (idx === 0) dispatchUi('castFist');
+        else if (idx === 1) dispatchUi('castHeal');
       },
       onChatOpen: (open) => {
         if (state.input && state.input.setChatMode) {

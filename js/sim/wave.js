@@ -59,6 +59,11 @@ function balanceForMatch(match) {
   return Object.assign({}, pack, {
     targetWaveToWin:
       rules.targetWaveToWin != null ? rules.targetWaveToWin : pack.targetWaveToWin,
+    winByWaves:
+      rules.winByWaves != null ? rules.winByWaves === true : pack.winByWaves,
+    waveAdvanceMode:
+      rules.waveAdvanceMode || pack.waveAdvanceMode || 'CONTINUOUS',
+    waveWinMode: rules.waveWinMode || pack.waveWinMode || 'CLEAR',
     setupPhaseDurationSec:
       rules.setupPhaseDurationSec != null
         ? rules.setupPhaseDurationSec
@@ -70,7 +75,33 @@ function balanceForMatch(match) {
     waveGroupCount:
       rules.waveGroupCount != null ? rules.waveGroupCount : pack.waveGroupCount,
     lastStand: rules.lastStand != null ? rules.lastStand : pack.lastStand,
+    botInfiniteAmmo:
+      rules.botInfiniteAmmo != null
+        ? rules.botInfiniteAmmo === true
+        : pack.botInfiniteAmmo === true,
   });
+}
+
+/** Win-by-waves is an optional Rule condition (checkbox in Editor). */
+function wavesWinEnabled(pack) {
+  if (!pack) return false;
+  if (pack.winByWaves === false) return false;
+  if (pack.winByWaves === true) return (pack.targetWaveToWin | 0) > 0;
+  return (pack.targetWaveToWin | 0) > 0;
+}
+
+function maxAuthoredWave(match) {
+  const custom =
+    match && Array.isArray(match.editorSpawns) && match.editorSpawns.length
+      ? match.editorSpawns
+      : null;
+  const rows = custom || GAME_PACK.spawns || [];
+  let max = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const w = rows[i] && rows[i].wave != null ? rows[i].wave | 0 : 0;
+    if (w > max) max = w;
+  }
+  return max;
 }
 
 export function updateWaves(match, dt) {
@@ -81,24 +112,34 @@ export function updateWaves(match, dt) {
 
   tickPendingSpawns(match);
 
-  // Win: cleared target wave (all enemies dead after wave N spawned).
-  if (
-    match.waveIndex >= pack.targetWaveToWin &&
-    match.enemiesAlive <= 0 &&
-    match.waveIndex > 0
-  ) {
-    match.waveActive = false;
-    match.outcome = 'win';
-    return;
+  const winWaves = wavesWinEnabled(pack);
+  const target = Math.max(1, pack.targetWaveToWin | 0);
+  const scheduleCap = winWaves ? target : Math.max(1, maxAuthoredWave(match));
+
+  // Win-by-waves: mode CLEAR = need wipe; REACH = hit wave index alone.
+  const winMode = String(pack.waveWinMode || 'CLEAR').toUpperCase();
+  if (winWaves && match.waveIndex >= target && match.waveIndex > 0) {
+    const cleared = match.enemiesAlive <= 0;
+    if (winMode === 'REACH' || cleared) {
+      match.waveActive = false;
+      match.outcome = 'win';
+      return;
+    }
   }
 
-  // Final wave spawned — wait for clear only (no more schedule spawns).
-  if (match.waveIndex >= pack.targetWaveToWin) {
+  // No more scheduled waves — wait for clear (win only if winWaves).
+  if (match.waveIndex >= scheduleCap) {
     match.waveActive = match.enemiesAlive > 0;
     return;
   }
 
-  // Countdown always ticks (setup + between). Does NOT wait for full wipe.
+  // Advance: CONTINUOUS = countdown always; WAIT_CLEAR = wait wipe between waves.
+  const advance = String(pack.waveAdvanceMode || 'CONTINUOUS').toUpperCase();
+  if (advance === 'WAIT_CLEAR' && match.waveIndex > 0 && match.enemiesAlive > 0) {
+    match.waveActive = true;
+    return;
+  }
+
   match.waveCountdown -= dt;
   if (match.waveCountdown > 0) return;
 
@@ -106,7 +147,7 @@ export function updateWaves(match, dt) {
   spawnWave(match, match.waveIndex);
   match.waveActive = true;
   match.phase = 'wave';
-  if (match.waveIndex < pack.targetWaveToWin) {
+  if (match.waveIndex < scheduleCap) {
     match.waveCountdown = pack.waveCountdownSec;
   } else {
     match.waveCountdown = 0;
@@ -180,32 +221,50 @@ export function tickPendingSpawns(match) {
   if (due.length) spawnRows(match, due);
 }
 
+/** Wave points: each { areaId, units } owns its list. Legacy: areaId/areaIds + row.units. */
+function pointsOfRow(row) {
+  if (!row) return [];
+  if (Array.isArray(row.points) && row.points.length) return row.points;
+  const units = Array.isArray(row.units) ? row.units : [];
+  if (Array.isArray(row.areaIds) && row.areaIds.length) {
+    return row.areaIds.map((areaId, i) => ({
+      areaId,
+      units: i === 0 ? units : [],
+    }));
+  }
+  return [{ areaId: row.areaId || '', units }];
+}
+
 function expandSpawnSlots(match, rows) {
   const slots = [];
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
-    const specs = Array.isArray(row.units) ? row.units : [];
-    const flat = [];
-    for (let s = 0; s < specs.length; s++) {
-      const spec = parseUnitSpec(specs[s]);
-      // Editor may store Title_Case ids — upper for pack lookup.
-      const archId = String(spec.id || '').toUpperCase();
-      for (let n = 0; n < spec.count; n++) flat.push(archId || spec.id);
-    }
-    const area = areaById(match, row.areaId);
-    for (let i = 0; i < flat.length; i++) {
-      let point;
-      if (area) {
-        point = pointInArea(area, i, flat.length);
-      } else {
-        point = pickSpawnOutsideBaseChunk(match, i, flat.length);
+    const points = pointsOfRow(row);
+    for (let p = 0; p < points.length; p++) {
+      const point = points[p] || {};
+      const specs = Array.isArray(point.units) ? point.units : [];
+      const flat = [];
+      for (let s = 0; s < specs.length; s++) {
+        const spec = parseUnitSpec(specs[s]);
+        const archId = String(spec.id || '').toUpperCase();
+        for (let n = 0; n < spec.count; n++) flat.push(archId || spec.id);
       }
-      slots.push({
-        archId: flat[i],
-        team: row.team,
-        x: point.x,
-        y: point.y,
-      });
+      if (!flat.length) continue;
+      const area = point.areaId ? areaById(match, point.areaId) : null;
+      for (let i = 0; i < flat.length; i++) {
+        let pos;
+        if (area) {
+          pos = pointInArea(area, i, flat.length);
+        } else {
+          pos = pickSpawnOutsideBaseChunk(match, i + p * flat.length, flat.length);
+        }
+        slots.push({
+          archId: flat[i],
+          team: row.team,
+          x: pos.x,
+          y: pos.y,
+        });
+      }
     }
   }
   return slots;
@@ -278,7 +337,19 @@ function spawnRows(match, rows) {
       u.sizeScale = sizeScale || 1;
       u.maxHp = maxHp;
       u.hp = u.maxHp;
-      u.speed = pack.enemySpeed * (u.isBoss ? 0.85 : 1);
+      if (archetype && archetype.speed != null && Number(archetype.speed) > 0) {
+        u.speed = Number(archetype.speed);
+      } else {
+        u.speed = pack.enemySpeed * (u.isBoss ? 0.85 : 1);
+      }
+      {
+        let pri =
+          archetype && archetype.priorityScore != null
+            ? Number(archetype.priorityScore)
+            : 5;
+        if (!isFinite(pri)) pri = 5;
+        u.priorityScore = Math.max(1, Math.min(10, Math.round(pri)));
+      }
       u.radius = Math.round(pack.enemyRadius * (u.sizeScale || 1));
       u.armorType =
         (archetype && archetype.armorType) || pack.enemyArmorType;

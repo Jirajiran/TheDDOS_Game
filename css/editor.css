@@ -499,6 +499,25 @@ select {
   font-size: 12px;
 }
 
+.editor-spawn-point {
+  margin: 8px 0 12px;
+  padding: 10px;
+  border: 1px solid #3a414c;
+  border-radius: 4px;
+  background: #161b22;
+}
+
+.editor-ai-matrix-wrap {
+  display: grid;
+  gap: 12px;
+  overflow-x: auto;
+}
+
+.editor-ai-matrix-wrap .editor-ai-matrix {
+  width: 100%;
+  font-size: 12px;
+}
+
 .editor-matrix {
   border-collapse: collapse;
   width: max-content;
@@ -1373,11 +1392,13 @@ button.tool-picker-item.is-selected {
 
 .editor-matrix-modal-body {
   padding: 16px 20px;
-  overflow: hidden;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  flex: 1 1 auto;
+  max-height: calc(85vh - 120px);
 }
 
 .editor-matrix-scroll {
@@ -1579,6 +1600,12 @@ button.tool-picker-item.is-selected {
   font-size: 13px;
   line-height: 1.4;
   min-height: 2.8em;
+}
+
+.editor-placed-tray .editor-field-help.is-warn {
+  border-color: #a33a3a;
+  background: #2a1818;
+  color: #f0b0b0;
 }
 
 .editor-placed-tray .editor-field-help[hidden] {

@@ -460,11 +460,8 @@ export function createInput(canvas, hooks = {}) {
       if (firePressed) {
         actions.push(makeEquipWornAction(playerUnitId));
       }
-    } else if (!slot || !slot.itemId) {
-      if (firePressed) {
-        actions.push(makeCastSkillAction(playerUnitId, 'FIST'));
-      }
     }
+    // Empty hands: no invented FIST cast — skills only via Q/C / Skill_Show from sheet.
   }
   firePressed = false;
   if (stick && stick.placeRelease) stick.placeRelease = false;

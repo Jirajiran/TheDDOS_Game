@@ -267,9 +267,21 @@ export function tickHotbarSwitches(match, dt) {
   }
 }
 
+function fireAmmoOpts(match, unit) {
+  return {
+    role: unit && unit.role,
+    botInfiniteAmmo: !!(
+      match &&
+      match.mapRules &&
+      match.mapRules.botInfiniteAmmo
+    ),
+  };
+}
+
 export function fireProjectileShot(match, unit, weapon, ammo, playSound) {
-  const consumed = consumeAmmoForShot(ammo, weapon);
-  if (!consumed && !weapon.infiniteAmmo) return false;
+  const opts = fireAmmoOpts(match, unit);
+  const consumed = consumeAmmoForShot(ammo, weapon, opts);
+  if (!consumed && !ignoresMag(weapon, opts)) return false;
   scheduleUnitVolley(match, unit, weapon, unit.aimRad);
   match.stats.shotsFired += 1;
   playShotingVisual(unit, match);
@@ -277,22 +289,37 @@ export function fireProjectileShot(match, unit, weapon, ammo, playSound) {
   return true;
 }
 
+function ignoresMag(weapon, opts) {
+  if (weapon && weapon.infiniteAmmo) return true;
+  if (opts && opts.botInfiniteAmmo && opts.role && opts.role !== 'player') {
+    return true;
+  }
+  return false;
+}
+
 export function tryFire(match, unit) {
   const { weapon, ammo } = getUnitWeaponAmmo(match, unit);
   if (!weapon) return;
   if ((unit.burstRemaining | 0) > 0) return;
   if (unit.fireCooldown > 0) return;
-  if (!canFireAmmo(ammo, weapon)) {
-    if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) {
-      const opts = unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
-      beginReload(ammo, weapon, opts);
+  const opts = fireAmmoOpts(match, unit);
+  if (!canFireAmmo(ammo, weapon, opts)) {
+    if (
+      !ignoresMag(weapon, opts) &&
+      ammo &&
+      ammo.ammoInMag <= 0 &&
+      ammo.mags > 0
+    ) {
+      const reloadOpts =
+        unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
+      beginReload(ammo, weapon, reloadOpts);
     }
     return;
   }
 
   if (weapon.projectileMode === 'CONTINUOUS_BEAM') {
-    if (!weapon.infiniteAmmo) {
-      const consumed = consumeAmmoForShot(ammo, weapon);
+    if (!ignoresMag(weapon, opts)) {
+      const consumed = consumeAmmoForShot(ammo, weapon, opts);
       if (!consumed) return;
     }
     // No stacking: fireCooldown covers beamDuration then cooldownSec.
@@ -339,13 +366,19 @@ export function tickWeaponBursts(match, dt) {
     unit.burstIntervalT = Math.max(0, (unit.burstIntervalT || 0) - dt);
     if (unit.burstIntervalT > 0) continue;
 
-    if (!canFireAmmo(ammo, weapon)) {
+    const burstOpts = fireAmmoOpts(match, unit);
+    if (!canFireAmmo(ammo, weapon, burstOpts)) {
       clearUnitBurst(unit);
       unit.fireCooldown = weapon.cooldownSec || 0;
-      if (ammo && ammo.ammoInMag <= 0 && ammo.mags > 0) {
-        const opts =
+      if (
+        !ignoresMag(weapon, burstOpts) &&
+        ammo &&
+        ammo.ammoInMag <= 0 &&
+        ammo.mags > 0
+      ) {
+        const reloadOpts =
           unit.role === 'player' ? playerReloadOpts(match, weapon) : null;
-        beginReload(ammo, weapon, opts);
+        beginReload(ammo, weapon, reloadOpts);
       }
       continue;
     }

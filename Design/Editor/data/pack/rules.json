@@ -1,6 +1,9 @@
 {
   "version": "1",
   "targetWaveToWin": 10,
+  "winByWaves": true,
+  "waveWinMode": "CLEAR",
+  "waveAdvanceMode": "CONTINUOUS",
   "setupPhaseDurationSec": 144,
   "waveCountdownSec": 144,
   "enemiesPerWaveBase": 3,

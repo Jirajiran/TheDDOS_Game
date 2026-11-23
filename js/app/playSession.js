@@ -6,7 +6,7 @@ import {
   makeTakeFactoryAction,
   makeTakeGenAction,
 } from '../player/actions.js';
-import { GAME_PACK, getBalancePack, getWeaponDef } from '../config.js';
+import { GAME_PACK, getWeaponDef } from '../config.js';
 import { panCamera } from '../view/camera.js';
 import { tickNightBlend } from '../view/dayCycle.js';
 import { tickAmbience } from '../audio/sfx.js';
@@ -44,6 +44,17 @@ export function createPlaySession(hub) {
     return s;
   }
 
+  function blockHasConfiguredOutputs(block) {
+    if (!block) return false;
+    if (block.generatorList && block.generatorList.length) {
+      for (let i = 0; i < block.generatorList.length; i++) {
+        if (block.generatorList[i] && block.generatorList[i].itemId) return true;
+      }
+    }
+    if (block.genRate && block.genRate.itemId) return true;
+    return false;
+  }
+
   function syncInteractiveUi(match) {
     const { state, playerUi } = hub;
     if (!playerUi || !playerUi.isReady()) return;
@@ -53,10 +64,8 @@ export function createPlaySession(hub) {
       return;
     }
     const best = findInteractTarget(match, player);
-    const nearGenOrBase = !!(
-      best &&
-      ((best.isGen && best.genRate) || best.isDefeatCondition)
-    );
+    // Gen / Base: only when outputs are configured — not merely because it is a Base.
+    const nearGenOrBase = !!(best && blockHasConfiguredOutputs(best));
     const nearFactory = !!(best && best.isFactory);
     playerUi.setInteractiveVisible(nearGenOrBase || nearFactory);
 
@@ -117,12 +126,9 @@ export function createPlaySession(hub) {
 
     if (playerUi && playerUi.isReady()) {
       const skills = [];
+      // Sheet only — empty list hides Skill_Show (no pack invent).
       const skillIds =
-        player && Array.isArray(player.skillIds) && player.skillIds.length
-          ? player.skillIds
-          : Array.isArray(getBalancePack().playerActiveSkills)
-            ? getBalancePack().playerActiveSkills
-            : [];
+        player && Array.isArray(player.skillIds) ? player.skillIds : [];
       for (let si = 0; si < skillIds.length; si++) {
         const sid = skillIds[si];
         const rt = player && player.skills ? player.skills[sid] : null;

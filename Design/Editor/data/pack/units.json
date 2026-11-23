@@ -513,10 +513,7 @@
       "radius": 28,
       "armorType": "DEFAULT",
       "senseRadiusPath": 1,
-      "skills": [
-        "FIST",
-        "SELF_HEAL"
-      ],
+      "skills": [],
       "model": "model.unit.default_1",
       "currentSlot": 1,
       "startingLoadout": [

@@ -181,6 +181,12 @@ export function resetPlayerStats(u, pack, match) {
     u.armorType =
       sheet.armorType ||
       (playerBody ? bal.playerArmorType : bal.enemyArmorType);
+    {
+      let pri =
+        sheet.priorityScore != null ? Number(sheet.priorityScore) : 5;
+      if (!isFinite(pri)) pri = 5;
+      u.priorityScore = Math.max(1, Math.min(10, Math.round(pri)));
+    }
     u.archetypeId =
       hostId || (sheet.id ? String(sheet.id) : null) || u.archetypeId;
     // Skills from Host/unit sheet only — no hard FIST/SELF_HEAL invent.
@@ -200,10 +206,9 @@ export function resetPlayerStats(u, pack, match) {
     u.speed = bal.playerSpeed;
     u.radius = bal.playerRadius;
     u.armorType = bal.playerArmorType;
-    // FlatLand / no Host sheet: pack rules list if present, else none.
-    u.skillIds = Array.isArray(bal.playerActiveSkills)
-      ? bal.playerActiveSkills.slice()
-      : [];
+    // No Host sheet: no invented skills (HUD stays empty until sheet lists them).
+    u.skillIds = [];
+    u.priorityScore = 5;
   }
 
   const weaponId = match && match.startingWeaponId;
@@ -681,7 +686,14 @@ export function decideEnemyActions(match, dt) {
       allyY,
       allyN,
       leftSector: !!leftSector,
-      canFireAmmo,
+      canFireAmmo: (u, w) =>
+        canFireAmmo(u, w, {
+          role: u && u.role,
+          botInfiniteAmmo: !!(
+            (match.mapRules && match.mapRules.botInfiniteAmmo) ||
+            (pack && pack.botInfiniteAmmo)
+          ),
+        }),
       getWeaponDef,
       goalBaseWeights: AI_GOAL_BASE_WEIGHTS,
       goalToStage: AI_GOAL_TO_STAGE,
@@ -746,15 +758,13 @@ export function scoreCombatCandidate(kind, dist, sensePx, isPathBlocker, aggroCh
       : GAME_PACK.enemyEngageRadius;
   // Aggro chase ignores normal engage radius (sticky pursuit).
   if (!aggroChase && dist > engage * 1.25) return -1;
-  let bias = 0;
-  if (kind === 'block' && isPathBlocker) bias = 110;
-  else if (kind === 'unit') bias = aggroChase ? 200 : 90;
-  else if (kind === 'block') bias = 45;
-  else if (kind === 'base') {
-    // Base value from data (priorityScore), not a hard gate for AI thinking.
-    const pri = typeof priorityScore === 'number' ? priorityScore : 120;
-    bias = 40 + Math.min(160, pri);
-  }
+  // priorityScore 1–10 from data (Program Function input) — not hardcoded Base specials.
+  let pri = typeof priorityScore === 'number' ? priorityScore : 5;
+  if (!isFinite(pri)) pri = 5;
+  pri = Math.max(1, Math.min(10, pri));
+  let bias = pri * 12;
+  if (kind === 'block' && isPathBlocker) bias += 40;
+  else if (kind === 'unit' && aggroChase) bias += 50;
   return bias + (engage - Math.min(dist, engage));
 }
 
@@ -803,7 +813,10 @@ export function targetPriorityBias(unit, candidate) {
 /** Dogpile: Score = priorityScore / (distance + currentAttackers * K). */
 
 export function scoreTurretPriority(block, dist, attackers) {
-  const pri = block.priorityScore || 10;
+  const pri =
+    typeof block.priorityScore === 'number' && isFinite(block.priorityScore)
+      ? Math.max(1, Math.min(10, block.priorityScore))
+      : 5;
   return pri / (dist + attackers * TURRET_DOGPILE_K + 1);
 }
 
@@ -852,7 +865,14 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         dist,
         block: blk,
         targetKind: TargetKind.BLOCK_OTHER,
-        score: scoreCombatCandidate('block', dist, sense, true, false),
+        score: scoreCombatCandidate(
+          'block',
+          dist,
+          sense,
+          true,
+          false,
+          blk.priorityScore
+        ),
       });
     } else {
       e.attackBlockId = -1;
@@ -874,7 +894,16 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         dist,
         block: ab,
         targetKind: TargetKind.BLOCK_TURRET,
-        score: 250 + dog * 100,
+        score:
+          scoreCombatCandidate(
+            'block',
+            dist,
+            sense,
+            false,
+            true,
+            ab.priorityScore
+          ) +
+          dog * 100,
       });
     } else {
       e.aggroBlockId = -1;
@@ -906,7 +935,8 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
           hit.dist,
           sense,
           false,
-          aggro && hit.unit && player && hit.unit.id === player.id
+          aggro && hit.unit && player && hit.unit.id === player.id,
+          hit.unit && hit.unit.priorityScore
         ),
       });
     } else if (hit.kind === 'base') {
@@ -930,6 +960,7 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
       const dog = hit.block
         ? scoreTurretPriority(hit.block, hit.dist, hit.block.currentAttackers || 0)
         : 0;
+      const pri = hit.block && hit.block.priorityScore;
       candidates.push({
         kind: 'block',
         id: hit.id,
@@ -939,9 +970,8 @@ export function pickStickyCombatTarget(match, e, player, bx, by, pack, dt) {
         block: hit.block,
         targetKind: hit.targetKind || TargetKind.BLOCK_OTHER,
         score:
-          40 +
           dog * 80 +
-          scoreCombatCandidate('block', hit.dist, sense, false, false) * 0.25,
+          scoreCombatCandidate('block', hit.dist, sense, false, false, pri),
       });
     }
   }

@@ -3,7 +3,15 @@
  * Numbers and switches stay numbers and switches.
  */
 
+import { L3_SIZE } from '../config.js';
+
 const TEXT_KEYS = { id: true, label: true, description: true };
+const SPEED_BLOCKS_MIN = 0.01;
+const SPEED_BLOCKS_MAX = 64;
+/** Keep in sync with sheetForm.GENERATOR_OUTPUT_CAP (avoid circular import). */
+const GEN_OUTPUT_CAP = 3;
+const PRIORITY_MIN = 1;
+const PRIORITY_MAX = 10;
 
 /** Gun / model tokens kept as proper nouns (not Title_Case). */
 const CATALOG_ACRONYMS = {
@@ -126,13 +134,18 @@ const FIELD_HELP = {
   color: 'Swatch used in list thumbs and simple block previews on the map.',
   model: 'Unit body SVG group from the pack art template (SizeView).',
   hpRange: 'Min/max HP roll for this unit template when it spawns or is placed.',
-  speed: 'Base move speed in world units per second for this unit.',
+  speed: 'Walk speed in blocks per second (1 block = 64px). Min 0.01, max 64. Stored as world units internally.',
+  bulletSpeedPxSec: 'Bullet speed in blocks per second (same scale as walk Speed). Stored as world px/s.',
+  'Bullet Spd (blocks/s)': 'Bullet speed in blocks per second (1 block = 64px).',
+  'Speed (blocks/s)': 'Walk speed in blocks per second (1 block = 64px).',
+  priorityScore: 'Target importance 1–10 for AI scoring (higher = more attractive). Shared by units and placeables.',
+  'Bot inf ammo': 'Non-player units skip mag consume while firing (not 999 ammo). Player still uses normal mags.',
   armorType: 'Armor column in the damage matrix. Multipliers below show damage×armor for this type.',
   preferredRange: 'AI preferred fight distance band (closer / mid / far) for this unit.',
   skills: 'Skill ids granted to this unit (passive or activatable).',
   startingLoadout: 'Starting inventory rows (items/weapons) this unit holds when it spawns. Hover a row to preview it in Trail.',
   currentSlot: 'Which loadout slot index is held/active first when the unit appears.',
-  weaponId: 'Weapon template this turret fires. Most gun stats (mag, reload, damage type) are authored on the Weapons sheet; unit loadout picks which weapon id a unit holds under the Units tab.',
+  weaponId: 'Pick a weapon id from the Weapons tab. This placeable/turret fires that template — gun stats stay on the Weapons sheet.',
   defaultWeapon: 'Fallback gun id if loadout has no weapon. Set on the Units tab loadout when possible.',
   footprint: 'Occupied size in L3 cells (64×64). Minimum 1×1. Used for place overlap.',
   maxHp: 'Maximum hit points for this placeable template. Placed instances copy this as Max HP.',
@@ -151,11 +164,18 @@ const FIELD_HELP = {
   allowProjectilePass: 'Lets projectiles pass even if solid flags are set.',
   canToggle: 'Door can open/close in play.',
   Wave: 'Wave index locked to the side rail tab (wave N always equals N). Not editable here.',
-  Time: 'Seconds from match start before this wave’s units begin spawning.',
+  Time: 'Delay (seconds) after the wave starts before units at these spawn points appear. Advance policy (wait clear vs continuous) is under Rules → Wave advance.',
   Team: 'Team id for seats, waves, or placed instances (0 = neutral).',
+  Area: 'One spawn point (map area). Add multiple points per wave — each gets the unit list.',
+  'Win by waves': 'Optional win condition. When on, reaching Waves to win can end the match (see Win when).',
+  'Waves to win': 'Target wave index for win-by-waves.',
+  'Win when': 'CLEAR = need enemies wiped after reaching the wave. REACH = win as soon as that wave index is reached.',
+  'Wave advance': 'CONTINUOUS = between-wave countdown always ticks. WAIT_CLEAR = next wave waits until current enemies are gone.',
+  'Last stand': 'Secondary rule: keep playing after the defeat-condition base is destroyed.',
+  'Base destroyed': 'Primary lose rule when the defeat-condition base dies.',
+  Craft: 'When checked, this template can be crafted and ingredient rows are shown. Unchecked hides craft data UI.',
   Unit: 'Unit template used for this seat or wave row. Hover to preview in Trail.',
   Count: 'How many copies of that unit spawn in this wave row.',
-  Area: 'Map area this spawn is tied to (or free point if unset).',
   Art: 'Weapon SVG art group for preview and in-world draw (Weapons sheet).',
   Hold: 'Hold pose when a unit aims this weapon (Weapons sheet).',
   typeId: 'Internal placeable type tag. Not shown for Turrets in this editor.',
@@ -313,12 +333,23 @@ export function toReadableLabel(str) {
     .trim();
 }
 
-function helpCtxOf(ctx, getValue) {
+function helpCtxOf(ctx, getValue, warn) {
   return {
     doc: ctx && ctx.getDoc ? ctx.getDoc() : null,
     getValue: typeof getValue === 'function' ? getValue : () => '',
+    warn: !!warn,
   };
 }
+
+/** Cross-sheet pointers — Trail help uses warn (red) so authors know stats live elsewhere. */
+const CROSS_SHEET_HELP = {
+  weaponId: true,
+  defaultWeapon: true,
+  ammoTypeId: true,
+  skillId: true,
+  skills: true,
+  activeSkills: true,
+};
 
 function field(label, control, kind, helpCtx) {
   const wrap = document.createElement('label');
@@ -336,8 +367,12 @@ function field(label, control, kind, helpCtx) {
     wrap.addEventListener('pointerenter', () => {
       const next = resolveHelp();
       wrap.title = next;
+      const warn =
+        (helpCtx && helpCtx.warn) ||
+        CROSS_SHEET_HELP[label] ||
+        CROSS_SHEET_HELP[String(label || '')];
       if (typeof window.__editorSetFieldHelp === 'function') {
-        window.__editorSetFieldHelp(next);
+        window.__editorSetFieldHelp(next, { warn: !!warn });
       }
     });
     wrap.addEventListener('pointerleave', () => {
@@ -389,6 +424,7 @@ function unitFieldKeys(record, shape) {
     'currentSlot',
     'armorType',
     'speed',
+    'priorityScore',
     'behaviorFlags',
     'allowedGoals',
     'targetPriorityList',
@@ -764,13 +800,120 @@ function renderUnitField(parent, record, shape, ctx, key, opts) {
   );
 }
 
+function worldSpeedToBlocks(speed) {
+  const cell = L3_SIZE > 0 ? L3_SIZE : 64;
+  const n = Number(speed);
+  if (!isFinite(n) || n <= 0) return SPEED_BLOCKS_MIN;
+  return Math.max(SPEED_BLOCKS_MIN, Math.min(SPEED_BLOCKS_MAX, n / cell));
+}
+
+function blocksToWorldSpeed(blocks) {
+  const cell = L3_SIZE > 0 ? L3_SIZE : 64;
+  let b = Number(blocks);
+  if (!isFinite(b)) b = SPEED_BLOCKS_MIN;
+  b = Math.max(SPEED_BLOCKS_MIN, Math.min(SPEED_BLOCKS_MAX, b));
+  return b * cell;
+}
+
+function clampPriority(raw) {
+  const n = Number(raw);
+  if (!isFinite(n)) return 5;
+  return Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, Math.round(n)));
+}
+
+/** Seed empty behaviorFlags so AI panel has editable controls (pack may omit keys). */
+const DEFAULT_BEHAVIOR_FLAGS = {
+  retreatHpRatio: 0.25,
+  canRegroup: true,
+  preferredRange: 'MEDIUM',
+};
+
+function ownKey(record, key) {
+  return !!(record && Object.prototype.hasOwnProperty.call(record, key));
+}
+
+function ensureAiBehaviorData(record) {
+  if (!Array.isArray(record.allowedGoals)) record.allowedGoals = [];
+  if (!record.behaviorFlags || typeof record.behaviorFlags !== 'object') {
+    record.behaviorFlags = Object.assign({}, DEFAULT_BEHAVIOR_FLAGS);
+  } else if (!Object.keys(record.behaviorFlags).length) {
+    Object.assign(record.behaviorFlags, DEFAULT_BEHAVIOR_FLAGS);
+  }
+  if (!Array.isArray(record.targetPriorityList)) record.targetPriorityList = [];
+}
+
+/** Open AI & Behavior in the shared editor modal (same pattern as Damage Matrix). */
+function openAiBehaviorModal(record, shape, ctx) {
+  const modal = document.getElementById('editor-matrix-modal');
+  const body = document.getElementById('editor-matrix-body');
+  const title = modal && modal.querySelector('h2');
+  if (!modal || !body) return;
+  ensureAiBehaviorData(record);
+  if (title) {
+    title.dataset.prevTitle = title.textContent || '';
+    title.textContent = 'AI & Behavior';
+  }
+  body.replaceChildren();
+  const scroll = document.createElement('div');
+  scroll.className = 'editor-matrix-scroll';
+  const wrap = document.createElement('div');
+  wrap.className = 'editor-fields';
+  renderUnitField(wrap, record, shape, ctx, 'allowedGoals');
+  renderUnitField(wrap, record, shape, ctx, 'behaviorFlags');
+  renderUnitField(wrap, record, shape, ctx, 'targetPriorityList');
+  scroll.appendChild(wrap);
+  body.appendChild(scroll);
+  modal.hidden = false;
+  const restore = () => {
+    if (title && title.dataset.prevTitle != null) {
+      title.textContent = title.dataset.prevTitle;
+      delete title.dataset.prevTitle;
+    }
+    modal.hidden = true;
+  };
+  const done = document.getElementById('editor-matrix-done');
+  const close = document.getElementById('editor-matrix-close');
+  if (done) done.onclick = () => {
+    restore();
+    if (ctx && ctx.touch) ctx.touch();
+  };
+  if (close) close.onclick = restore;
+}
+
+function renderAiBehaviorPanel(parent, record, shape, ctx) {
+  appendSectionTitle(parent, 'AI & Behavior');
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.textContent = 'Open AI & Behavior';
+  openBtn.addEventListener('click', () => openAiBehaviorModal(record, shape, ctx));
+  parent.appendChild(openBtn);
+}
+
 function renderUnitSections(parent, record, shape, ctx) {
   appendSectionTitle(parent, 'Identity & Stats');
-  if (hasRecordKey(record, shape, 'id')) renderUnitField(parent, record, shape, ctx, 'id');
-  if (hasRecordKey(record, shape, 'model')) renderUnitField(parent, record, shape, ctx, 'model');
-  if (hasRecordKey(record, shape, 'hpRange')) renderUnitField(parent, record, shape, ctx, 'hpRange');
-  const hasSpeed = hasRecordKey(record, shape, 'speed');
-  const hasArmor = hasRecordKey(record, shape, 'armorType');
+  if (ownKey(record, 'id') || hasRecordKey(record, shape, 'id')) {
+    renderUnitField(parent, record, shape, ctx, 'id');
+  }
+  if (ownKey(record, 'model')) {
+    renderUnitField(parent, record, shape, ctx, 'model');
+  }
+  // Only show HP/speed from this record — never invent 0 from union shape.
+  if (ownKey(record, 'hpRange') && Array.isArray(record.hpRange)) {
+    const lo = Number(record.hpRange[0]);
+    const hi = Number(record.hpRange[1]);
+    if (!(lo > 0) && !(hi > 0)) {
+      record.hpRange = [100, 100];
+    }
+    renderUnitField(parent, record, shape, ctx, 'hpRange');
+  } else if (ownKey(record, 'maxHp')) {
+    if (!(Number(record.maxHp) > 0)) record.maxHp = 100;
+    renderUnitField(parent, record, shape, ctx, 'maxHp', { fullWidth: true, minVal: 1 });
+  }
+  const hasSpeed = ownKey(record, 'speed');
+  if (hasSpeed && !(Number(record.speed) > 0)) {
+    record.speed = blocksToWorldSpeed(3.125);
+  }
+  const hasArmor = ownKey(record, 'armorType');
   if (hasSpeed || hasArmor) {
     const pair = document.createElement('div');
     pair.className = 'editor-pair';
@@ -778,31 +921,34 @@ function renderUnitSections(parent, record, shape, ctx) {
     if (hasArmor) renderUnitField(pair, record, shape, ctx, 'armorType', { fullWidth: true });
     parent.appendChild(pair);
   }
+  if (!ownKey(record, 'priorityScore')) {
+    record.priorityScore = 5;
+  }
+  renderUnitField(parent, record, shape, ctx, 'priorityScore', { fullWidth: true });
 
-  const hasLoadout = hasRecordKey(record, shape, 'startingLoadout');
-  const hasSlot = hasRecordKey(record, shape, 'currentSlot');
-  if (hasLoadout || hasSlot) {
+  if (ownKey(record, 'startingLoadout') || ownKey(record, 'currentSlot')) {
     appendDivider(parent);
     appendSectionTitle(parent, 'Loadout');
-    if (hasLoadout) renderUnitField(parent, record, shape, ctx, 'startingLoadout', { hideTitle: true });
-    if (hasSlot) renderUnitField(parent, record, shape, ctx, 'currentSlot', { fullWidth: true });
+    if (ownKey(record, 'startingLoadout')) {
+      renderUnitField(parent, record, shape, ctx, 'startingLoadout', { hideTitle: true });
+    }
+    if (ownKey(record, 'currentSlot')) {
+      renderUnitField(parent, record, shape, ctx, 'currentSlot', { fullWidth: true });
+    }
   }
 
-  if (hasRecordKey(record, shape, 'skills')) {
-    appendDivider(parent);
+  // Skills slot for units — empty list OK (no HUD invent).
+  appendDivider(parent);
+  appendSectionTitle(parent, 'Skills');
+  if (ownKey(record, 'activeSkills') && !ownKey(record, 'skills')) {
+    renderUnitField(parent, record, shape, ctx, 'activeSkills');
+  } else {
+    if (!ownKey(record, 'skills')) record.skills = [];
     renderUnitField(parent, record, shape, ctx, 'skills');
   }
 
-  const hasBehavior = hasRecordKey(record, shape, 'behaviorFlags');
-  const hasGoals = hasRecordKey(record, shape, 'allowedGoals');
-  const hasTargets = hasRecordKey(record, shape, 'targetPriorityList');
-  if (hasBehavior || hasGoals || hasTargets) {
-    appendDivider(parent);
-    appendSectionTitle(parent, 'AI & Behavior');
-    if (hasBehavior) renderUnitField(parent, record, shape, ctx, 'behaviorFlags');
-    if (hasGoals) renderUnitField(parent, record, shape, ctx, 'allowedGoals');
-    if (hasTargets) renderUnitField(parent, record, shape, ctx, 'targetPriorityList');
-  }
+  appendDivider(parent);
+  renderAiBehaviorPanel(parent, record, shape, ctx);
 }
 
 function renderObject(parent, record, shape, ctx, isRoot, objOpts) {
@@ -902,6 +1048,43 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       select.value = String(shown);
       select.addEventListener('change', () => setValue((select.value | 0) - 1));
       parent.appendChild(field(key, select, numberClass, helpCtxOf(ctx, () => select.value)));
+      return;
+    }
+    if (key === 'speed' || key === 'bulletSpeedPxSec') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = String(SPEED_BLOCKS_MIN);
+      input.max = String(SPEED_BLOCKS_MAX);
+      input.step = '0.01';
+      const blocks = worldSpeedToBlocks(value);
+      input.value = String(Number(blocks.toFixed(4)));
+      input.title = 'Blocks per second (1 block = ' + (L3_SIZE || 64) + 'px)';
+      input.addEventListener('change', () => {
+        let b = Number(input.value);
+        if (!isFinite(b) || b <= 0) b = SPEED_BLOCKS_MIN;
+        b = Math.max(SPEED_BLOCKS_MIN, Math.min(SPEED_BLOCKS_MAX, b));
+        input.value = String(b);
+        setValue(blocksToWorldSpeed(b));
+      });
+      const label =
+        key === 'bulletSpeedPxSec' ? 'Bullet Spd (blocks/s)' : 'Speed (blocks/s)';
+      const lab = field(label, input, numberClass, helpCtxOf(ctx, () => input.value));
+      parent.appendChild(lab);
+      return;
+    }
+    if (key === 'priorityScore') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = String(PRIORITY_MIN);
+      input.max = String(PRIORITY_MAX);
+      input.step = '1';
+      input.value = String(clampPriority(value));
+      input.addEventListener('change', () => {
+        const next = clampPriority(input.value);
+        input.value = String(next);
+        setValue(next);
+      });
+      parent.appendChild(field(key, input, numberClass, helpCtxOf(ctx, () => input.value)));
       return;
     }
     if (key === 'maxStack' && ctx.lockMaxStack) {
@@ -1105,6 +1288,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     add.textContent = addMap[key] || ('Add ' + toReadableLabel(key));
     add.addEventListener('click', () => {
       if (skillList && list.length >= 3) return;
+      if (key === 'generatorList' && list.length >= GEN_OUTPUT_CAP) return;
       if (kind === 'string') {
         const options = childCtx.choices(key, '');
         list.push(options[0] || '');
@@ -1117,6 +1301,10 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       else return;
       childCtx.touch(true);
     });
+    if (key === 'generatorList') {
+      add.disabled = list.length >= GEN_OUTPUT_CAP;
+      add.title = 'Max ' + GEN_OUTPUT_CAP + ' generator outputs';
+    }
     block.appendChild(add);
     parent.appendChild(block);
     return;

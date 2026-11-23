@@ -54,8 +54,10 @@ export function registerBlock(match, block) {
 export function initGeneratorList(list) {
   if (!list || !list.length) return null;
   const out = [];
-  for (let i = 0; i < list.length; i++) {
+  const cap = 3;
+  for (let i = 0; i < list.length && out.length < cap; i++) {
     const g = list[i];
+    if (!g || !g.itemId) continue;
     out.push({
       itemId: g.itemId,
       amount: g.amount,
@@ -64,7 +66,7 @@ export function initGeneratorList(list) {
       stock: 0,
     });
   }
-  return out;
+  return out.length ? out : null;
 }
 
 /** Ensure defeat-condition block has storage bags for receive UI. */

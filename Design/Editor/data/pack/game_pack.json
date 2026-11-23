@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "description": "One map. Local teams (max 6). seatCap 12 is the player-vs-player seat ceiling. Areas live in areas.json. The spawn schedule lives in spawns.json.",
+  "description": "One map. Teams are data rows (id/role/hostileTo) — not a hard 1..6 menu. seatCap 12 is the player-vs-player seat ceiling. Areas live in areas.json. The spawn schedule lives in spawns.json.",
   "pack": {
     "baseFootprintL3": 3,
     "baseMaxHp": 1000,

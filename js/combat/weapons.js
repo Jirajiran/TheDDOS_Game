@@ -83,19 +83,32 @@ export function finishReload(ammo, weaponDef, opts = null) {
   return true;
 }
 
+/**
+ * Mag bypass: weapon.infiniteAmmo OR match Rule botInfiniteAmmo for non-player.
+ * Not "999 rounds" — fire path simply does not decrement mag.
+ */
+export function ignoresMagConsume(weaponDef, opts = {}) {
+  if (weaponDef && weaponDef.infiniteAmmo) return true;
+  if (opts && opts.botInfiniteAmmo && opts.role && opts.role !== 'player') {
+    return true;
+  }
+  return false;
+}
+
 /** Returns rounds consumed (0 if cannot fire). One shot action = 1 round (burst is sequential). */
-export function consumeAmmoForShot(ammo, weaponDef) {
-  if (!ammo || !weaponDef) return 0;
-  if (weaponDef.infiniteAmmo) return 1;
+export function consumeAmmoForShot(ammo, weaponDef, opts = {}) {
+  if (!weaponDef) return 0;
+  if (ignoresMagConsume(weaponDef, opts)) return 1;
+  if (!ammo) return 0;
   if (ammo.reloadTimer > 0) return 0;
   if (ammo.ammoInMag < 1) return 0;
   ammo.ammoInMag -= 1;
   return 1;
 }
 
-export function canFireAmmo(ammo, weaponDef) {
+export function canFireAmmo(ammo, weaponDef, opts = {}) {
   if (!weaponDef) return false;
-  if (weaponDef.infiniteAmmo) return true;
+  if (ignoresMagConsume(weaponDef, opts)) return true;
   if (!ammo) return false;
   if (ammo.reloadTimer > 0) return false;
   return ammo.ammoInMag >= 1;

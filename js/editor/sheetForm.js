@@ -70,8 +70,9 @@ const WEAPON_BALLISTICS = [
 ];
 const WEAPON_AMMO = [
   'magCapacity', 'maxMags', 'reloadSec', 'infiniteAmmo', 'ammoTypeId',
-  'reloadType', 'damageType', 'targetFaction',
+  'damageType', 'targetFaction',
 ];
+/** reloadType is derived from weapon category — not shown in Editor. */
 const WEAPON_COMMON = WEAPON_IDENTITY.concat(WEAPON_BALLISTICS, WEAPON_AMMO);
 
 const WEAPON_EXTRA = {
@@ -85,18 +86,25 @@ const PLACE_FLAGS = [
   'isDefeatCondition', 'isTurret', 'isHeal', 'isGen', 'isFactory', 'isDoor', 'isWire', 'isHarvest',
 ];
 
-const TURRET_RECORD = [
-  'id', 'label', 'color', 'typeId', 'maxStack', 'maxHp', 'armorType', 'weaponId', 'detectRadius',
-  'infiniteAmmo', 'priorityScore', 'footprint',
+/** Shared placeable fields (collider bodies): armor, skill slot, size, priority, … */
+const PLACEABLE_CORE = [
+  'id', 'label', 'color', 'typeId', 'maxStack', 'maxHp', 'armorType', 'priorityScore',
+  'skillId', 'pierceCost', 'footprint',
 ];
 
+const TURRET_RECORD = PLACEABLE_CORE.concat([
+  'weaponId', 'detectRadius', 'infiniteAmmo',
+]);
+
 const ITEM_FIELDS = {
-  Block: ['id', 'label', 'color', 'typeId', 'maxStack', 'maxHp', 'armorType', 'skillId', 'pierceCost', 'walkSolid', 'projectileSolid', 'allowProjectilePass', 'footprint'],
-  Door: ['id', 'label', 'color', 'typeId', 'maxStack', 'maxHp', 'armorType', 'pierceCost', 'canToggle', 'footprint'],
-  Turret: ['id', 'weaponId'],
-  Generator: ['id', 'label', 'color', 'maxHp', 'genRate', 'footprint'],
-  Factory: ['id', 'label', 'color', 'maxHp', 'armorType', 'footprint'],
-  Base: ['id', 'label', 'color', 'maxHp', 'armorType', 'weaponId', 'detectRadius', 'generatorList', 'footprint'],
+  Block: PLACEABLE_CORE.concat([
+    'walkSolid', 'projectileSolid', 'allowProjectilePass',
+  ]),
+  Door: PLACEABLE_CORE.concat(['canToggle']),
+  Turret: TURRET_RECORD.slice(),
+  Generator: PLACEABLE_CORE.concat(['generatorList']),
+  Factory: PLACEABLE_CORE.slice(),
+  Base: PLACEABLE_CORE.concat(['weaponId', 'detectRadius', 'generatorList']),
   Weapon: ['id', 'label', 'color', 'weaponId', 'maxStack'],
   Resource: ['id', 'label', 'color', 'maxStack'],
   Tool: ['id', 'label', 'color', 'toolTier', 'maxStack', 'harvestDamage', 'structureDamage', 'repairAmount', 'meleeRole', 'activeDurationSec', 'cooldownSec'],
@@ -104,6 +112,9 @@ const ITEM_FIELDS = {
   Shield: ['id', 'label', 'color', 'maxStack', 'shieldMaxHp', 'shieldRadius', 'shieldOffset', 'shieldPierceCost', 'shieldAbsorbRatio', 'shieldRegenPerSec', 'markerColor'],
   Backpack: ['id', 'label', 'color', 'maxStack', 'backpackTier', 'backpackBonusSlots'],
 };
+
+/** Max inherent generator outputs (Base / Generator). */
+export const GENERATOR_OUTPUT_CAP = 3;
 
 const EFFECT = {
   MELEE_SWING: { damage: 18, hitUnits: true, hitBlocks: true, vfxSize: 54, color: '#e8dcc0' },
@@ -151,6 +162,11 @@ export function weaponCategory(record) {
   return 'Normal';
 }
 
+function reloadTypeForCategory(category) {
+  // Shotgun shells reload one-by-one; others use full magazine.
+  return category === 'Shotgun' ? 'INDIVIDUAL_SHELL' : 'MAGAZINE';
+}
+
 function applyWeapon(record, category) {
   record.projectileMode = category === 'Lazer' ? 'CONTINUOUS_BEAM' : 'PROJECTILE_RAYCAST';
   if (category === 'Shotgun') record.pelletCount = Math.max(2, record.pelletCount || 2);
@@ -159,6 +175,7 @@ function applyWeapon(record, category) {
   else record.burstCount = 1;
   if (category === 'Lazer') record.beamDurationSec = record.beamDurationSec > 0 ? record.beamDurationSec : 1;
   else record.beamDurationSec = 0;
+  record.reloadType = reloadTypeForCategory(category);
   ensure(record, WEAPON_COMMON.concat(WEAPON_EXTRA[category] || WEAPON_EXTRA.Normal), {
     label: record.id || '',
     color: '#6b9fbf',
@@ -173,7 +190,7 @@ function applyWeapon(record, category) {
     ammoTypeId: category === 'Lazer' ? null : 'Ammo_5_56',
     targetFaction: 'ENEMY',
     damageType: category === 'Lazer' ? 'Lazer' : 'Bullet',
-    reloadType: 'MAGAZINE',
+    reloadType: reloadTypeForCategory(category),
     muzzleLeadSec: 0.02,
     projectileRadius: 9,
     aiFireRangePath: 0.75,
@@ -235,8 +252,13 @@ export function isLockedBackpack(record) {
 
 export function itemCategory(record) {
   if (record.kind === 'WEAPON') return 'Weapon';
-  if (record.kind === 'RESOURCE') {
-    if (typeof record.id === 'string' && /^Ammo_/i.test(record.id)) return 'Ammo';
+  if (
+    record.kind === 'RESOURCE' ||
+    record.kind === 'AMMO' ||
+    record.typeId === 'AMMO' ||
+    record.typeId === 'RESOURCE'
+  ) {
+    // Wood / Ammo / other stocks share one Resource pipe; Craft checkbox gates recipes.
     return 'Resource';
   }
   if (record.kind === 'TOOL') return 'Tool';
@@ -290,7 +312,7 @@ function applyItem(record, category) {
     weaponId: '',
     detectRadius: 256,
     infiniteAmmo: false,
-    priorityScore: 0,
+    priorityScore: 5,
     healFriendly: true,
     healRadius: 160,
     healPerSec: 8,
@@ -492,6 +514,7 @@ export function renderTyped(body, key, record, ctx) {
   }
   if (key === 'weaponId') {
     const category = weaponCategory(record);
+    record.reloadType = reloadTypeForCategory(category);
     kindNote(body, category);
     appendDivider(body);
     appendSectionTitle(body, 'Appearance & ID');
@@ -527,8 +550,8 @@ export function renderTyped(body, key, record, ctx) {
   if (key === 'itemId') {
     const category = itemCategory(record);
     let fields = storedItemKeys(category) || ITEM_FIELDS.Block;
-    // Turret: keep typeId in data, but do not show it in the form.
-    if (category === 'Turret') {
+    // typeId is Apply-time only — hide after the record is committed.
+    if (!record.pending) {
       fields = fields.filter((name) => name !== 'typeId');
     }
     kindNote(body, isLockedBackpack(record) ? 'Backpack' : category === 'Tool' ? 'Melee (Tool)' : category);
@@ -547,7 +570,14 @@ export function renderTyped(body, key, record, ctx) {
       body.appendChild(box);
       return;
     }
-    renderRecord(body, record, record, formCtx);
+    // skillId uses Skills-tab picker (not a free text field).
+    const fieldsNoSkill = fields.filter((name) => name !== 'skillId');
+    renderRecord(
+      body,
+      record,
+      record,
+      Object.assign({}, formCtx, { only: fieldsNoSkill })
+    );
     if (category === 'Armor') renderArmorExtra(body, record, ctx);
     if (category === 'Shield') {
       const pierce = document.createElement('p');
@@ -555,7 +585,10 @@ export function renderTyped(body, key, record, ctx) {
       pierce.textContent = 'The projectile requests the pierce. The shield charges shieldPierceCost.';
       body.appendChild(pierce);
     }
-    if (category === 'Block') renderBlockSkill(body, record, ctx);
+    if (fields.indexOf('skillId') >= 0) {
+      appendDivider(body);
+      renderBlockSkill(body, record, ctx);
+    }
     appendDivider(body);
     body.appendChild(deleteButton(ctx, record.id));
     return;

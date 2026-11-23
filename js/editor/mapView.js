@@ -55,72 +55,25 @@ export function clientToWorld(svg, clientX, clientY) {
 }
 
 /**
- * Shrink the map SVG content box so overlays (Trail / Panel / Tools) do not
- * steal world space — fixes click/ghost offset when preview trays open.
+ * Map viewport stays full-bleed and centered — Trail / Panel / Tools are
+ * overlays only. Never pad the map when help/preview opens (that shifted PlaceHold).
  */
 export function syncMapVisibleInsets() {
   const wrap = document.querySelector('.editor-map-wrap');
   const map = wrap && wrap.querySelector('.editor-map');
-  if (!wrap || !map) return;
-  const wrapRect = wrap.getBoundingClientRect();
-  if (!(wrapRect.width > 0) || !(wrapRect.height > 0)) return;
-
-  let padL = 0;
-  let padR = 0;
-  let padB = 0;
-
-  const tray = document.getElementById('editor-placed-tray');
-  if (tray && !tray.hidden) {
-    const r = tray.getBoundingClientRect();
-    if (r.width > 0 && r.right > wrapRect.left && r.left < wrapRect.right) {
-      padL = Math.max(0, Math.min(r.right, wrapRect.right) - wrapRect.left + 8);
-    }
-  }
-
-  const panel = document.getElementById('editor-panel-tray');
-  if (panel && !panel.classList.contains('is-collapsed')) {
-    const r = panel.getBoundingClientRect();
-    if (r.width > 0) {
-      padR = Math.max(0, wrapRect.right - Math.max(r.left, wrapRect.left));
-    }
-  }
-
-  const tools = document.getElementById('editor-tools-tray');
-  const toolsInner = document.getElementById('editor-map-tools');
-  if (
-    tools &&
-    !tools.classList.contains('is-collapsed') &&
-    toolsInner
-  ) {
-    const r = toolsInner.getBoundingClientRect();
-    if (r.height > 0 && r.top < wrapRect.bottom) {
-      padB = Math.max(0, wrapRect.bottom - r.top);
-    }
-  }
-
-  // Leave a usable strip if overlays are huge.
-  const maxL = Math.floor(wrapRect.width * 0.42);
-  const maxR = Math.floor(wrapRect.width * 0.48);
-  const maxB = Math.floor(wrapRect.height * 0.35);
-  if (padL > maxL) padL = maxL;
-  if (padR > maxR) padR = maxR;
-  if (padB > maxB) padB = maxB;
-
+  if (!map) return;
   map.style.boxSizing = 'border-box';
-  map.style.paddingLeft = padL + 'px';
-  map.style.paddingRight = padR + 'px';
-  map.style.paddingBottom = padB + 'px';
+  map.style.paddingLeft = '0px';
+  map.style.paddingRight = '0px';
+  map.style.paddingBottom = '0px';
   map.style.paddingTop = '0px';
 }
 
-/** After DOM/tray layout settles (Trail open/close). */
+/** Clear any leftover inset after tray/layout changes. */
 export function scheduleMapVisibleInsets() {
   syncMapVisibleInsets();
   if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(() => {
-      syncMapVisibleInsets();
-      requestAnimationFrame(syncMapVisibleInsets);
-    });
+    requestAnimationFrame(syncMapVisibleInsets);
   }
 }
 
@@ -253,6 +206,9 @@ function edgeAt(area, x, y, tol) {
   return name;
 }
 
+/** Match gameplay: allow a bit of void past the map so content is not edge-stuck. */
+const EDITOR_EDGE_MARGIN = 64;
+
 function clampCamera(camera, world) {
   const minW = Math.min(world.w, 256);
   camera.w = Math.max(minW, Math.min(world.w, camera.w));
@@ -261,10 +217,11 @@ function clampCamera(camera, world) {
     camera.h = world.h;
     camera.w = world.w;
   }
-  if (camera.x < 0) camera.x = 0;
-  if (camera.y < 0) camera.y = 0;
-  if (camera.x + camera.w > world.w) camera.x = world.w - camera.w;
-  if (camera.y + camera.h > world.h) camera.y = world.h - camera.h;
+  const m = EDITOR_EDGE_MARGIN;
+  if (camera.x < -m) camera.x = -m;
+  if (camera.y < -m) camera.y = -m;
+  if (camera.x + camera.w > world.w + m) camera.x = world.w + m - camera.w;
+  if (camera.y + camera.h > world.h + m) camera.y = world.h + m - camera.h;
 }
 
 function snapCoord(val, span, maxSpan) {

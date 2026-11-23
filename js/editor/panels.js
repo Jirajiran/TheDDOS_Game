@@ -92,14 +92,17 @@ function syncTrailVisibility(trayEl) {
 }
 
 /** Field help lives on the left tray (near placed-panel), not inside settings. */
-export function setFieldHelp(text) {
+export function setFieldHelp(text, opts) {
   const tray = document.getElementById('editor-placed-tray');
   const bar = document.getElementById('editor-field-help');
   if (!bar) return;
   const msg = text && String(text).trim() ? String(text).trim() : '';
+  const warn = !!(opts && opts.warn);
+  bar.classList.toggle('is-warn', warn && !!msg);
   if (!msg) {
     bar.textContent = '';
     bar.hidden = true;
+    bar.classList.remove('is-warn');
   } else {
     bar.textContent = msg;
     bar.hidden = false;
@@ -862,6 +865,12 @@ function renderRail(api, doc, tab) {
           timeStart: 0,
           team: 2,
           areaId: area ? area.id : doc.areas[0] ? doc.areas[0].id : '',
+          points: [
+            {
+              areaId: area ? area.id : doc.areas[0] ? doc.areas[0].id : '',
+              units: unitIds[0] ? [unitIds[0] + ':1'] : [],
+            },
+          ],
           units: unitIds[0] ? [unitIds[0] + ':1'] : [],
         });
         api.selectSpawnKey('wave:' + (doc.spawns.length - 1));
@@ -1401,12 +1410,20 @@ function seatTeamOptions(doc, row) {
   return options;
 }
 
-function appendAreaField(line, api, doc, row) {
-  if (doc.areas && doc.areas.length) {
+/** Seat / host: single area only. */
+function appendSeatAreaRow(body, api, doc, row) {
+  const line = document.createElement('div');
+  line.className = 'editor-line';
+  const allAreas = (doc.areas || []).map((area) => area.id).filter(Boolean);
+  if (!allAreas.length) {
+    const center = document.createElement('span');
+    center.textContent = 'Path center';
+    line.appendChild(field('Area', center));
+  } else {
     line.appendChild(
       field(
         'Area',
-        selectOf(idList(doc.areas.map((area) => area.id), row.areaId || ''), row.areaId || '', (value) => {
+        selectOf(idList(allAreas, row.areaId || ''), row.areaId || '', (value) => {
           row.areaId = value;
           api.touch();
           api.paint();
@@ -1414,19 +1431,175 @@ function appendAreaField(line, api, doc, row) {
         'is-grow'
       )
     );
-    return;
   }
-  const center = document.createElement('span');
-  center.textContent = 'Path center';
-  line.appendChild(field('Area', center));
+  body.appendChild(line);
 }
 
-/** Area always on its own settings row (not packed with Unit/Team). */
-function appendAreaRow(body, api, doc, row) {
-  const line = document.createElement('div');
-  line.className = 'editor-line';
-  appendAreaField(line, api, doc, row);
-  body.appendChild(line);
+/**
+ * Migrate legacy wave row → points[{ areaId, units }].
+ * Each Area box owns its own unit list (not shared across the wave).
+ */
+function normalizeWavePoints(row) {
+  if (!row) return [];
+  if (Array.isArray(row.points) && row.points.length) {
+    for (let i = 0; i < row.points.length; i++) {
+      const p = row.points[i] || {};
+      if (!Array.isArray(p.units)) p.units = [];
+      row.points[i] = p;
+    }
+    row.areaId = row.points[0].areaId || '';
+    return row.points;
+  }
+  const units = Array.isArray(row.units) ? row.units.slice() : [];
+  const ids = Array.isArray(row.areaIds) && row.areaIds.length
+    ? row.areaIds.slice()
+    : row.areaId
+      ? [row.areaId]
+      : [''];
+  row.points = ids.map((areaId, i) => ({
+    areaId: areaId || '',
+    units: i === 0 ? units : [],
+  }));
+  if (!row.points.length) row.points = [{ areaId: '', units: [] }];
+  row.areaId = row.points[0].areaId || '';
+  delete row.areaIds;
+  // Keep row.units as mirror of first point for older readers.
+  row.units = row.points[0].units;
+  return row.points;
+}
+
+function appendWaveUnitRows(body, api, doc, point, refresh) {
+  const unitIds = Object.keys(doc.units || {});
+  const specs = Array.isArray(point.units) ? point.units : [];
+  if (specs.length) {
+    const head = document.createElement('div');
+    head.className = 'editor-line is-head is-compact-head';
+    head.appendChild(columnMark('Unit', 'is-grow'));
+    head.appendChild(columnMark('Count', 'is-short'));
+    head.appendChild(columnMark('', 'is-remove'));
+    body.appendChild(head);
+  }
+  for (let i = 0; i < specs.length; i++) {
+    const spec = parseUnitSpec(specs[i]);
+    const unitLine = document.createElement('div');
+    unitLine.className = 'editor-line is-compact-row';
+    const unitPicker = settingsUnitPicker(api, unitIds, spec.id, (value) => {
+      point.units[i] = value + ':' + spec.count;
+      api.touch();
+      refresh();
+    });
+    const unitField = field('', unitPicker, 'is-grow');
+    bindFieldHelpHover(unitField, () => getFieldHelp('Unit'));
+    unitLine.appendChild(unitField);
+    const countField = field(
+      '',
+      numberOf(spec.count, 1, (value) => {
+        point.units[i] = spec.id + ':' + Math.max(1, value | 0);
+        api.touch();
+        refresh();
+      }),
+      'is-short'
+    );
+    bindFieldHelpHover(countField, () => getFieldHelp('Count'));
+    unitLine.appendChild(countField);
+    const dropUnit = document.createElement('button');
+    dropUnit.type = 'button';
+    dropUnit.className = 'is-remove';
+    dropUnit.textContent = 'Remove';
+    dropUnit.addEventListener('click', () => {
+      point.units.splice(i, 1);
+      api.touch();
+      refresh();
+    });
+    unitLine.appendChild(dropUnit);
+    body.appendChild(unitLine);
+  }
+  const addUnit = document.createElement('button');
+  addUnit.type = 'button';
+  addUnit.textContent = 'Add unit';
+  addUnit.addEventListener('click', () => {
+    if (!unitIds[0]) return;
+    if (!Array.isArray(point.units)) point.units = [];
+    point.units.push(unitIds[0] + ':1');
+    api.touch();
+    refresh();
+  });
+  body.appendChild(addUnit);
+}
+
+/** Wave: each Area is its own box with its own units. */
+function appendWaveSpawnPoints(body, api, doc, row) {
+  appendSectionTitle(body, 'Spawn points');
+  const points = normalizeWavePoints(row);
+  const allAreas = (doc.areas || []).map((area) => area.id).filter(Boolean);
+  const refresh = () => {
+    row.areaId = (row.points && row.points[0] && row.points[0].areaId) || '';
+    row.units = (row.points && row.points[0] && row.points[0].units) || [];
+    renderPanel(api.panelRoot(), api);
+  };
+  if (!allAreas.length) {
+    const note = document.createElement('p');
+    note.className = 'editor-note';
+    note.textContent = 'No areas on map — add an Area first, or points spawn at path center.';
+    body.appendChild(note);
+  }
+  for (let i = 0; i < points.length; i++) {
+    const idx = i;
+    const point = points[idx];
+    const box = document.createElement('div');
+    box.className = 'editor-fields editor-spawn-point';
+    const areaLine = document.createElement('div');
+    areaLine.className = 'editor-line is-compact-row';
+    if (allAreas.length) {
+      areaLine.appendChild(
+        field(
+          'Area',
+          selectOf(idList(allAreas, point.areaId || ''), point.areaId || '', (value) => {
+            point.areaId = value;
+            api.touch();
+            api.paint();
+            refresh();
+          }),
+          'is-grow'
+        )
+      );
+    } else {
+      const center = document.createElement('span');
+      center.textContent = 'Path center';
+      areaLine.appendChild(field('Area', center, 'is-grow'));
+    }
+    const dropPoint = document.createElement('button');
+    dropPoint.type = 'button';
+    dropPoint.className = 'is-remove';
+    dropPoint.textContent = 'Remove';
+    dropPoint.title = 'Remove this Area group';
+    dropPoint.addEventListener('click', () => {
+      row.points.splice(idx, 1);
+      if (!row.points.length) row.points = [{ areaId: '', units: [] }];
+      api.touch();
+      api.paint();
+      refresh();
+    });
+    areaLine.appendChild(dropPoint);
+    box.appendChild(areaLine);
+    appendWaveUnitRows(box, api, doc, point, refresh);
+    body.appendChild(box);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.textContent = 'Add Area group';
+  add.addEventListener('click', () => {
+    const used = {};
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].areaId) used[points[i].areaId] = true;
+    }
+    const pick = allAreas.find((id) => !used[id]) || allAreas[0] || '';
+    row.points.push({ areaId: pick, units: [] });
+    api.touch();
+    api.paint();
+    refresh();
+  });
+  body.appendChild(add);
 }
 
 function settingsUnitPicker(api, unitIds, currentId, onPick) {
@@ -1480,7 +1653,7 @@ function renderSeat(body, api, doc, row, canDelete) {
     }), 'is-short')
   );
   body.appendChild(line);
-  appendAreaRow(body, api, doc, row);
+  appendSeatAreaRow(body, api, doc, row);
   if (!canDelete) return;
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -1538,64 +1711,8 @@ function renderSpawns(body, api, doc) {
     }), 'is-short')
   );
   body.appendChild(line);
-  appendAreaRow(body, api, doc, row);
+  appendWaveSpawnPoints(body, api, doc, row);
 
-  const unitIds = Object.keys(doc.units || {});
-  const specs = Array.isArray(row.units) ? row.units : [];
-  if (specs.length) {
-    const head = document.createElement('div');
-    head.className = 'editor-line is-head is-compact-head';
-    head.appendChild(columnMark('Unit', 'is-grow'));
-    head.appendChild(columnMark('Count', 'is-short'));
-    head.appendChild(columnMark('', 'is-remove'));
-    body.appendChild(head);
-  }
-  for (let i = 0; i < specs.length; i++) {
-    const spec = parseUnitSpec(specs[i]);
-    const unitLine = document.createElement('div');
-    unitLine.className = 'editor-line is-compact-row';
-    const unitPicker = settingsUnitPicker(api, unitIds, spec.id, (value) => {
-      row.units[i] = value + ':' + spec.count;
-      api.touch();
-      renderPanel(api.panelRoot(), api);
-    });
-    // Empty visible label — head row already names columns; help still uses Unit/Count.
-    const unitField = field('', unitPicker, 'is-grow');
-    unitField.title = getFieldHelp('Unit');
-    bindFieldHelpHover(unitField, () => getFieldHelp('Unit'));
-    unitLine.appendChild(unitField);
-    const countField = field('', numberOf(spec.count, 1, (value) => {
-      row.units[i] = spec.id + ':' + Math.max(1, value | 0);
-      api.touch();
-      renderPanel(api.panelRoot(), api);
-    }), 'is-short');
-    countField.title = getFieldHelp('Count');
-    bindFieldHelpHover(countField, () => getFieldHelp('Count'));
-    unitLine.appendChild(countField);
-    const dropUnit = document.createElement('button');
-    dropUnit.type = 'button';
-    dropUnit.className = 'is-remove';
-    dropUnit.textContent = 'Remove';
-    dropUnit.title = 'Remove this unit row';
-    dropUnit.addEventListener('click', () => {
-      row.units.splice(i, 1);
-      api.touch();
-      renderPanel(api.panelRoot(), api);
-    });
-    unitLine.appendChild(dropUnit);
-    body.appendChild(unitLine);
-  }
-  const addUnit = document.createElement('button');
-  addUnit.type = 'button';
-  addUnit.textContent = 'Add unit';
-  addUnit.addEventListener('click', () => {
-    if (!unitIds[0]) return;
-    if (!Array.isArray(row.units)) row.units = [];
-    row.units.push(unitIds[0] + ':1');
-    api.touch();
-    renderPanel(api.panelRoot(), api);
-  });
-  body.appendChild(addUnit);
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.textContent = 'Delete row';
@@ -1717,7 +1834,12 @@ function showsCraft(selectedKey, record) {
   if (selectedKey !== 'itemId') return false;
   const category = record.pending ? record.pendingCategory || 'Block' : itemCategory(record);
   if (isBlockTabKind(category) || isArmorTabKind(category)) return true;
-  return category === 'Turret' || category === 'Ammo' || category === 'Tool';
+  return (
+    category === 'Turret' ||
+    category === 'Ammo' ||
+    category === 'Tool' ||
+    category === 'Resource'
+  );
 }
 
 function readEditorCraft(record) {
@@ -1881,8 +2003,11 @@ function renderCraft(body, api, doc, record) {
     renderPanel(api.panelRoot(), api);
   });
   body.appendChild(field('Craft', toggle));
+  // Unchecked = hide craft rows entirely (data stays on record.editorCraft).
+  if (!craft.on) return;
+
   const box = document.createElement('div');
-  box.className = craft.on ? 'editor-craft' : 'editor-craft is-off';
+  box.className = 'editor-craft';
   const ids = resourceItemIds(doc.items);
   const rows = craft.rows;
   for (let i = 0; i < rows.length; i++) {
@@ -1924,7 +2049,7 @@ function renderCraft(body, api, doc, record) {
   add.type = 'button';
   add.textContent = 'Add';
   add.addEventListener('click', () => {
-    if (!craft.on || !ids.length) return;
+    if (!ids.length) return;
     const state = editorCraftOf(record);
     state.on = true;
     state.rows.push({ id: ids[0], count: 1 });
@@ -1932,10 +2057,6 @@ function renderCraft(body, api, doc, record) {
     renderPanel(api.panelRoot(), api);
   });
   box.appendChild(add);
-  if (!craft.on) {
-    const locked = box.querySelectorAll('select, input, button');
-    for (let i = 0; i < locked.length; i++) locked[i].disabled = true;
-  }
   body.appendChild(box);
 }
 
@@ -1944,16 +2065,8 @@ function nonPendingIds(map) {
 }
 
 function ammoItemIds(items) {
-  const ids = [];
-  const keys = Object.keys(items || {});
-  for (let i = 0; i < keys.length; i++) {
-    const row = items[keys[i]];
-    if (!row || row.pending) continue;
-    if (itemCategory(row) !== 'Ammo') continue;
-    const id = typeof row.id === 'string' && row.id ? row.id : keys[i];
-    if (id && ids.indexOf(id) < 0) ids.push(id);
-  }
-  return ids;
+  // Ammo shares the Resource pipe — weapon ammoTypeId picks any Resource stock.
+  return resourceItemIds(items);
 }
 
 function choiceIds(doc, key, current) {
@@ -1970,7 +2083,9 @@ function choiceIds(doc, key, current) {
   else if (key === 'armorType') ids = armorTypeNames(doc);
   else if (key === 'itemId') ids = nonPendingIds(doc.items);
   else if (key === 'defaultWeapon' || key === 'weaponId') ids = nonPendingIds(doc.weapons);
-  else if (key === 'skills' || key === 'activeSkills') ids = nonPendingIds(doc.skills);
+  else if (key === 'skills' || key === 'activeSkills' || key === 'skillId') {
+    ids = nonPendingIds(doc.skills);
+  }
   else if (key === 'allowedGoals') ids = collectStrings(units, 'allowedGoals');
   else if (key === 'targetPriorityList') ids = collectStrings(units, 'targetPriorityList');
   else if (key === 'preferredRange') ids = collectStrings(units, 'preferredRange');
@@ -1979,13 +2094,22 @@ function choiceIds(doc, key, current) {
   return ids;
 }
 
+function rewriteUnitSpecList(list, prev, next) {
+  if (!Array.isArray(list)) return;
+  for (let n = 0; n < list.length; n++) {
+    const spec = parseUnitSpec(list[n]);
+    if (spec.id === prev) list[n] = next + ':' + spec.count;
+  }
+}
+
 function retarget(doc, kind, prev, next) {
   if (kind === 'unitId') {
     for (let i = 0; i < doc.spawns.length; i++) {
-      const units = doc.spawns[i].units || [];
-      for (let n = 0; n < units.length; n++) {
-        const spec = parseUnitSpec(units[n]);
-        if (spec.id === prev) units[n] = next + ':' + spec.count;
+      const row = doc.spawns[i];
+      rewriteUnitSpecList(row.units, prev, next);
+      const points = Array.isArray(row.points) ? row.points : [];
+      for (let p = 0; p < points.length; p++) {
+        rewriteUnitSpecList(points[p] && points[p].units, prev, next);
       }
     }
     const seats = doc.playerSpawns || [];
@@ -2356,10 +2480,20 @@ function renderRelationGroup(body, teams, api, key, otherKey, activeClass, title
         const idx = team[key].indexOf(other.id);
         if (idx >= 0) {
           team[key].splice(idx, 1);
+          // Mirror off on the other team (two-way relation).
+          if (!Array.isArray(other[key])) other[key] = [];
+          const back = other[key].indexOf(team.id);
+          if (back >= 0) other[key].splice(back, 1);
         } else {
           team[key].push(other.id);
           const opp = team[otherKey].indexOf(other.id);
           if (opp >= 0) team[otherKey].splice(opp, 1);
+          // Mirror on — relation is symmetric.
+          if (!Array.isArray(other[key])) other[key] = [];
+          if (other[key].indexOf(team.id) < 0) other[key].push(team.id);
+          if (!Array.isArray(other[otherKey])) other[otherKey] = [];
+          const otherOpp = other[otherKey].indexOf(team.id);
+          if (otherOpp >= 0) other[otherKey].splice(otherOpp, 1);
         }
         api.touch();
         renderPanel(api.panelRoot(), api);
@@ -2396,9 +2530,20 @@ function renderPlayerRules(body, api, doc) {
   for (let i = 0; i < teams.length; i++) {
     const team = teams[i];
     if (!team.name) team.name = 'Team ' + team.id;
-    const tag = document.createElement('span');
+    const tag = document.createElement('label');
     tag.className = 'editor-team-tag';
-    tag.textContent = 'Team ' + team.id;
+    const cap = document.createElement('span');
+    cap.textContent = 'Team ' + team.id + ' · ';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = team.name;
+    nameInput.title = 'Display name only — logic uses team index/id';
+    nameInput.addEventListener('change', () => {
+      team.name = nameInput.value.trim() || 'Team ' + team.id;
+      api.touch();
+    });
+    tag.appendChild(cap);
+    tag.appendChild(nameInput);
     tags.appendChild(tag);
   }
   body.appendChild(tags);
@@ -2666,6 +2811,7 @@ function renderArmorTypeTable(body, api, doc) {
 function openDamageMatrixModal(api, doc) {
   const modal = document.getElementById('editor-matrix-modal');
   const body = document.getElementById('editor-matrix-body');
+  const title = modal && modal.querySelector('h2');
   if (!modal || !body) return;
 
   const stored = doc.damageMatrix && doc.damageMatrix.matrix;
@@ -2673,6 +2819,7 @@ function openDamageMatrixModal(api, doc) {
   const rows = damageTypeNames(doc);
   const cols = armorTypeNames(doc);
 
+  if (title) title.textContent = 'Damage & Armor Multiplier Matrix';
   body.replaceChildren();
 
   const note = document.createElement('p');
@@ -2760,6 +2907,8 @@ function openDamageMatrixModal(api, doc) {
 }
 
 function matchNumbers(body, api, rules) {
+  // Rule = win/lose + optional secondary toggles. Spawn owns wave timing/units.
+  // Architecture (groups, dodge) and FlatLand spawn formula stay in pack — not here.
   body.appendChild(
     field(
       'Base destroyed',
@@ -2776,6 +2925,7 @@ function matchNumbers(body, api, rules) {
       )
     )
   );
+
   const last = document.createElement('input');
   last.type = 'checkbox';
   last.checked = rules.lastStand === true;
@@ -2784,24 +2934,80 @@ function matchNumbers(body, api, rules) {
     api.touch();
   });
   body.appendChild(field('Last stand', last));
-  const numbers = [
-    ['targetWaveToWin', 'Waves to win', 1],
-    ['setupPhaseDurationSec', 'Setup seconds', 0],
-    ['waveCountdownSec', 'Wave countdown', 0],
-    ['respawnBaseSec', 'Respawn seconds', 0],
-    ['respawnExtraPerWave', 'Extra respawn per wave', 0],
-    ['enemiesPerWaveBase', 'Enemies per wave base', 0],
-    ['enemiesPerWaveScale', 'Enemies per wave scale', 0],
-    ['waveGroupCount', 'Wave groups', 0],
-    ['dodgeQuota', 'Dodge quota', 0],
-  ];
-  for (let i = 0; i < numbers.length; i++) {
-    const key = numbers[i][0];
+
+  const winByWaves =
+    rules.winByWaves === true ||
+    (rules.winByWaves == null && (rules.targetWaveToWin | 0) > 0);
+  const winToggle = document.createElement('input');
+  winToggle.type = 'checkbox';
+  winToggle.checked = winByWaves;
+  winToggle.addEventListener('change', () => {
+    rules.winByWaves = winToggle.checked;
+    if (winToggle.checked && !(rules.targetWaveToWin > 0)) {
+      rules.targetWaveToWin = 5;
+    }
+    api.touch();
+    renderPanel(api.panelRoot(), api);
+  });
+  body.appendChild(field('Win by waves', winToggle));
+
+  if (winToggle.checked) {
     body.appendChild(
-      field(numbers[i][1], numberOf(rules[key] || 0, numbers[i][2], (value) => {
-        rules[key] = Math.max(numbers[i][2], Number(value) || 0);
-        api.touch();
-      }))
+      field(
+        'Waves to win',
+        numberOf(rules.targetWaveToWin > 0 ? rules.targetWaveToWin : 5, 1, (value) => {
+          rules.targetWaveToWin = Math.max(1, Number(value) || 1);
+          rules.winByWaves = true;
+          api.touch();
+        })
+      )
+    );
+    body.appendChild(
+      field(
+        'Win when',
+        selectOf(
+          [
+            { value: 'CLEAR', label: 'Reach wave + clear enemies' },
+            { value: 'REACH', label: 'Reach wave (enemies may remain)' },
+          ],
+          String(rules.waveWinMode || 'CLEAR').toUpperCase() === 'REACH'
+            ? 'REACH'
+            : 'CLEAR',
+          (value) => {
+            rules.waveWinMode = value;
+            api.touch();
+          }
+        )
+      )
     );
   }
+
+  body.appendChild(
+    field(
+      'Wave advance',
+      selectOf(
+        [
+          { value: 'CONTINUOUS', label: 'Countdown always (parallel)' },
+          { value: 'WAIT_CLEAR', label: 'Wait until wave cleared' },
+        ],
+        String(rules.waveAdvanceMode || 'CONTINUOUS').toUpperCase() ===
+          'WAIT_CLEAR'
+          ? 'WAIT_CLEAR'
+          : 'CONTINUOUS',
+        (value) => {
+          rules.waveAdvanceMode = value;
+          api.touch();
+        }
+      )
+    )
+  );
+
+  const botInf = document.createElement('input');
+  botInf.type = 'checkbox';
+  botInf.checked = rules.botInfiniteAmmo === true;
+  botInf.addEventListener('change', () => {
+    rules.botInfiniteAmmo = botInf.checked;
+    api.touch();
+  });
+  body.appendChild(field('Bot inf ammo', botInf));
 }

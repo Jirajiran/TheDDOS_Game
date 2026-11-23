@@ -2,8 +2,6 @@ import {
   BTN_SVG_URL,
   SVG_NS,
   RESOURCE_COLORS,
-  FIST_ICON_COLOR,
-  HEAL_ICON_COLOR,
   SLOT_BODY,
   SLOT_ICON,
   EMPTY_SLOT_PAD,
@@ -1273,10 +1271,8 @@ export function installPlayPanels(api) {
       const num = api.findNumberHost(el);
       const cd = sk.cooldownSec || 0;
       api.setCountOnHost(num, Math.ceil(cd), cd > 0.05);
-      let color = '#7a8a9a';
-      if (sk.id === 'FIST') color = FIST_ICON_COLOR;
-      else if (sk.id === 'SELF_HEAL') color = HEAL_ICON_COLOR;
-      api.ensureIconOverlay(el, color, true);
+      // Neutral tint — no FIST/SELF_HEAL color lock by slot index.
+      api.ensureIconOverlay(el, '#7a8a9a', true);
     }
   }
   

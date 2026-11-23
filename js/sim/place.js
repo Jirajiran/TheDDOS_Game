@@ -48,6 +48,13 @@ import {
   getPlayerUnit,
   resolveUnitInventory,
 } from './unit.js';
+
+function clampPriorityScore(raw) {
+  const n = Number(raw);
+  if (!isFinite(n)) return 5;
+  return Math.max(1, Math.min(10, Math.round(n)));
+}
+
 export function updatePlaceGhost(match, mouseWorld) {
   match.placeGhost = null;
   if (!mouseWorld) return null;
@@ -286,6 +293,7 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
     factoryBusy: false,
     factorySourceId: null,
     color: blockDef.color,
+    priorityScore: clampPriorityScore(blockDef.priorityScore),
     team,
     pierceCost: typeof blockDef.pierceCost === 'number' ? blockDef.pierceCost : 1,
     collisionLayer: deriveCollisionLayer({
@@ -296,8 +304,6 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
     tauntTimer: 0,
     tauntedById: -1,
     blackboard: null,
-    priorityScore:
-      typeof blockDef.priorityScore === 'number' ? blockDef.priorityScore : 0,
   };
   attachAreaTriggerFromDef(block, blockDef);
   ensureBlackboardStub(block);
