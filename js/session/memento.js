@@ -140,7 +140,9 @@ export function serializeMatchSnapshot(match) {
       combatTargetId: u.combatTargetId,
       aggroBlockId: u.aggroBlockId != null ? u.aggroBlockId : -1,
       localGeneral: !!u.localGeneral,
-      activeArmorId: u.activeArmorId || null,
+      activeArmorId: u.activeArmorVestId || u.activeArmorId || null,
+      activeArmorTopId: u.activeArmorTopId || null,
+      activeArmorVestId: u.activeArmorVestId || u.activeArmorId || null,
       activeShieldId: u.activeShieldId || null,
     });
   }
@@ -223,7 +225,17 @@ export function serializeMatchSnapshot(match) {
     basePlaced: match.basePlaced,
     outcome: match.outcome,
     activeHotbar: match.activeHotbar,
-    wornArmorSlot: match.wornArmorSlot != null ? match.wornArmorSlot : -1,
+    wornArmorSlot: match.wornArmorVestSlot != null
+      ? match.wornArmorVestSlot
+      : match.wornArmorSlot != null
+        ? match.wornArmorSlot
+        : -1,
+    wornArmorTopSlot: match.wornArmorTopSlot != null ? match.wornArmorTopSlot : -1,
+    wornArmorVestSlot: match.wornArmorVestSlot != null
+      ? match.wornArmorVestSlot
+      : match.wornArmorSlot != null
+        ? match.wornArmorSlot
+        : -1,
     wornShieldSlot: match.wornShieldSlot != null ? match.wornShieldSlot : -1,
     playerUnitId: match.playerUnitId,
     playerDead: match.playerDead,

@@ -14,6 +14,7 @@ import {
 } from '../config.js';
 import { getAiFireDecisionRangePx } from '../view/dayCycle.js';
 import {
+  DRIVE_STAGE_LEGACY,
   Goal,
   STAGE_TO_LEGACY,
   StageId,
@@ -29,11 +30,14 @@ import {
 } from './archetypes.js';
 import { SkillPhase } from '../combat/skills.js';
 import { runApproach } from './stages/approach.js';
+import { runDrive } from './stages/drive.js';
 import { runEngage } from './stages/engage.js';
 import { runPlace } from './stages/place.js';
 import { runRegroup } from './stages/regroup.js';
 import { runRetreat } from './stages/retreat.js';
 import { runSeekPoint } from './stages/seek_point.js';
+import { onDriveGoalChanged } from '../sim/vehicleDrive.js';
+import { findVehicleById } from '../sim/vehicle.js';
 
 /** Goal baseWeight (data-driven; mirrored in config AI_GOAL_BASE_WEIGHTS). */
 export const DEFAULT_GOAL_BASE_WEIGHTS = Object.freeze({
@@ -452,6 +456,7 @@ export function decideUnitViaMediator(match, unit, ctx) {
     // Burst accum uses previous stage; flag arms FLANK_POSITION this frame.
     tickBurstRelocate(unit, bb, combatTarget, ctx.dt || 0, bb.activeStage);
 
+    const prevGoal = bb.activeGoal;
     activeGoal = selectGoal(
       unit,
       bb,
@@ -467,11 +472,19 @@ export function decideUnitViaMediator(match, unit, ctx) {
 
     bb.activeGoal = activeGoal;
     bb.activeStage = activeStage;
+    // Goal switch → invalidate hull spline (U-turn from current v0).
+    if (
+      prevGoal &&
+      activeGoal &&
+      prevGoal !== activeGoal &&
+      unit.vehicleId != null &&
+      unit.hiddenInVehicle
+    ) {
+      const veh = findVehicleById(match, unit.vehicleId);
+      onDriveGoalChanged(unit, veh);
+    }
   }
 
-  unit.aiStage = STAGE_TO_LEGACY[activeStage] || 'approach';
-
-  const runner = STAGE_RUNNERS[activeStage] || runApproach;
   const stageCtx = {
     match,
     unit,
@@ -487,18 +500,34 @@ export function decideUnitViaMediator(match, unit, ctx) {
     getWeaponDef: ctx.getWeaponDef,
   };
 
-  const actions = runner(stageCtx) || [];
+  // Driving: collider hull stages — no foot strafe / approach runners.
+  const driving =
+    unit.vehicleId != null &&
+    unit.hiddenInVehicle &&
+    !unit.vehicleTween;
+  unit.aiStage = driving
+    ? DRIVE_STAGE_LEGACY
+    : STAGE_TO_LEGACY[activeStage] || 'approach';
+  const actions = driving
+    ? runDrive(stageCtx, activeStage) || []
+    : (STAGE_RUNNERS[activeStage] || runApproach)(stageCtx) || [];
 
   // RELOAD stays Unified Input — emit before stage movement if mag empty.
-  const weapon = unit.weaponId ? ctx.getWeaponDef(unit.weaponId) : null;
-  const needsReload =
-    !!weapon && !weapon.infiniteAmmo && unit.ammoInMag <= 0 && unit.mags > 0;
-  if (needsReload && !(unit.reloadTimer > 0)) {
-    actions.unshift({ type: ActionType.RELOAD, unitId: unit.id });
+  // Driving uses vehicle turret ammo path — skip foot RELOAD.
+  if (!driving) {
+    const weapon = unit.weaponId ? ctx.getWeaponDef(unit.weaponId) : null;
+    const needsReload =
+      !!weapon && !weapon.infiniteAmmo && unit.ammoInMag <= 0 && unit.mags > 0;
+    if (needsReload && !(unit.reloadTimer > 0)) {
+      actions.unshift({ type: ActionType.RELOAD, unitId: unit.id });
+    }
   }
 
   // Shield / boss skills via Unified CAST_SKILL (no skill names in stages).
-  if (activeStage === StageId.ENGAGE || activeStage === StageId.REGROUP) {
+  if (
+    !driving &&
+    (activeStage === StageId.ENGAGE || activeStage === StageId.REGROUP)
+  ) {
     maybeEmitReadySkill(unit, combatTarget, actions, ctx);
   }
 

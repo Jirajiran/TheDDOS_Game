@@ -74,6 +74,8 @@ function makeInactiveUnit(i) {
     skillSpeedMult: 1,
     meleeSwing: null,
     activeArmorId: null,
+    activeArmorTopId: null,
+    activeArmorVestId: null,
     activeShieldId: null,
     moraleState: null,
     shield: null,
@@ -141,6 +143,8 @@ function makeInactiveProjectile(i) {
     blockPierceLeft: 0,
     pierceConfig: null,
     weaponId: null,
+    /** From WeaponDef.bulletArtId — drawn via getProjectileArt. */
+    bulletArtId: null,
     targetFaction: 'ENEMY',
     hitMask: 0,
     sourceBlockId: -1,
@@ -246,6 +250,8 @@ export function resetPools(pools) {
     u._flankTimer = 0;
     u.meleeSwing = null;
     u.activeArmorId = null;
+    u.activeArmorTopId = null;
+    u.activeArmorVestId = null;
     u.activeShieldId = null;
     u.skillIds = null;
     u.skills = null;

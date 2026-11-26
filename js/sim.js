@@ -29,6 +29,7 @@ import {
   applyResolvedPlayMap,
   bindHostSeatFromDoc,
 } from './world/applyEditorMap.js';
+import { clearPlayItemOverlay } from './defs/registry.js';
 import { consumeEditorTestPlay } from './session/editorTestPlay.js';
 import {
   installSenseTeams,
@@ -81,6 +82,19 @@ import {
   updateInteractPrompt,
 } from './sim/block.js';
 import {
+  applyDamageToVehicle,
+  applyVehicleMove,
+  applyVehicleTankControl,
+  findVehicleById,
+  flushVehicleDriverDamage,
+  integrateVehicles,
+  resolveVehicleRams,
+  tickVehicleOccupants,
+  toggleVehicleTurretMode,
+  unitIsDriving,
+  unitVehicleHandsLocked,
+} from './sim/vehicle.js';
+import {
   pickupDrops,
   spawnDrop,
   updateDrops,
@@ -93,6 +107,7 @@ import {
   tickWeaponBursts,
   tryFire,
   tryTurretFire,
+  tryVehicleTurretFire,
   updateBeams,
   updateCooldowns,
   updateProjectiles,
@@ -185,6 +200,7 @@ export function initMatchGameplay(match, options = {}) {
   match.territories = [];
   match.huntArea = null;
   match.blocks = [];
+  match.vehicles = [];
   match.worldObjects = [];
   match.blockById = Object.create(null);
   match.basePlaced = false;
@@ -196,17 +212,23 @@ export function initMatchGameplay(match, options = {}) {
   match.outcome = null;
   match.activeHotbar = 0;
   match.wornArmorSlot = -1;
+  match.wornArmorTopSlot = -1;
+  match.wornArmorVestSlot = -1;
   match.wornShieldSlot = -1;
   match.pendingHotbar = -1;
   match.hotbarSwitchT = 0;
   match.hotbarFireLockT = 0;
   match.equippedBackpackId = null;
+  // Drop previous match's map items before FlatLand seed; map apply reinstalls.
+  clearPlayItemOverlay();
   match.inventory = createEmptyInventory(
     pack.hotbarBaseSlots || pack.hotbarSlots
   );
   // Temporary FlatLand loadout; Host seat sheet replaces after map bind.
   let worn = applyStartingLoadout(match.inventory);
-  match.wornArmorSlot = worn.wornArmorSlot;
+  match.wornArmorTopSlot = worn.wornArmorTopSlot != null ? worn.wornArmorTopSlot : -1;
+  match.wornArmorVestSlot = worn.wornArmorVestSlot != null ? worn.wornArmorVestSlot : -1;
+  match.wornArmorSlot = match.wornArmorVestSlot;
   match.wornShieldSlot = worn.wornShieldSlot;
   match.activeHotbar = worn.activeHotbar;
   match.startingWeaponId = worn.activeWeaponId;
@@ -288,7 +310,11 @@ export function initMatchGameplay(match, options = {}) {
         loadout,
         sheet.currentSlot != null ? sheet.currentSlot : 0
       );
-      match.wornArmorSlot = worn.wornArmorSlot;
+      match.wornArmorTopSlot =
+        worn.wornArmorTopSlot != null ? worn.wornArmorTopSlot : -1;
+      match.wornArmorVestSlot =
+        worn.wornArmorVestSlot != null ? worn.wornArmorVestSlot : -1;
+      match.wornArmorSlot = match.wornArmorVestSlot;
       match.wornShieldSlot = worn.wornShieldSlot;
       match.activeHotbar = worn.activeHotbar;
       match.startingWeaponId = worn.activeWeaponId;
@@ -342,7 +368,9 @@ export function tickMatch(match, actions, mouseWorld, dt) {
   tickAreaTriggers(match, dt, {
     applyDamageToUnit,
     applyDamageToBlock,
+    applyDamageToVehicle,
   });
+  flushVehicleDriverDamage(match, applyDamageToUnit);
   updateFactory(match, dt);
   applyEnemyContactDamage(match, dt);
   updateDrops(match, dt);
@@ -423,6 +451,7 @@ function applyFactoryTake(match, blockId, slotIndex, role) {
 function applyActions(match, actions, mouseWorld, dt) {
   const player = getPlayerUnit(match);
   const moveIntent = Object.create(null);
+  const vehicleMove = Object.create(null);
 
   // Pass 1: queue SELECT (delay + lock while burst/beam). Commit in tickHotbarSwitches.
   for (let i = 0; i < actions.length; i++) {
@@ -450,17 +479,65 @@ function applyActions(match, actions, mouseWorld, dt) {
       tryTurretFire(match, a.turretBlockId, a.aimRad);
       continue;
     }
+    if (a.type === ActionType.FIRE && a.vehicleId != null) {
+      tryVehicleTurretFire(match, a.vehicleId, a.aimRad);
+      continue;
+    }
 
     const unit = match.pools.units[a.unitId];
     if (!unit || !unit.active) continue;
 
     if (a.type === ActionType.MOVE) {
-      moveIntent[unit.id] = { dx: a.dx, dy: a.dy };
-      if (a.dx !== 0 || a.dy !== 0) {
-        unit.targetFacingRad = Math.atan2(a.dy, a.dx);
+      if (unitIsDriving(unit) && !unit.vehicleTween) {
+        const veh = findVehicleById(match, unit.vehicleId);
+        if (veh) {
+          if (a.throttle != null || a.steer != null) {
+            vehicleMove[veh.id] = {
+              throttle: a.throttle || 0,
+              steer: a.steer || 0,
+            };
+            applyVehicleTankControl(veh, a.throttle || 0, a.steer || 0, dt);
+          } else {
+            vehicleMove[veh.id] = {
+              dx: a.dx,
+              dy: a.dy,
+              curvature: a.curvature || 0,
+            };
+            applyVehicleMove(veh, a.dx, a.dy, dt, a.curvature || 0, {
+              reverse: !!a.reverse,
+              pivot: !!a.pivot,
+              desireDist: a.desireDist,
+              speedCap: a.speedCap,
+            });
+          }
+        }
+      } else if (!unitIsDriving(unit) && !unit.vehicleTween) {
+        moveIntent[unit.id] = { dx: a.dx, dy: a.dy };
+        if (a.dx !== 0 || a.dy !== 0) {
+          unit.targetFacingRad = Math.atan2(a.dy, a.dx);
+        }
       }
     } else if (a.type === ActionType.AIM) {
-      if (a.stickAim && typeof a.aimRad === 'number') {
+      if (unitVehicleHandsLocked(unit)) {
+        // Driving: hull faces move; MANUAL aim steers turret.
+        let aim = typeof a.aimRad === 'number' ? a.aimRad : null;
+        if (unit.role === 'player' && mouseWorld && !a.stickAim) {
+          aim = Math.atan2(mouseWorld.y - unit.y, mouseWorld.x - unit.x);
+        }
+        if (aim != null) {
+          unit.targetAimRad = aim;
+          const veh = findVehicleById(match, unit.vehicleId);
+          if (veh) {
+            // Player ASSIST: leave target to decideVehicleTurretActions.
+            // MANUAL player + any AI driver: AIM feeds turretTargetAimRad (slew later).
+            const playerAssist =
+              unit.role === 'player' && veh.turretMode !== 'MANUAL';
+            if (!playerAssist) {
+              veh.turretTargetAimRad = aim;
+            }
+          }
+        }
+      } else if (a.stickAim && typeof a.aimRad === 'number') {
         unit.targetAimRad = a.aimRad;
         unit.targetFacingRad = a.aimRad;
       } else if (unit.role === 'player' && mouseWorld) {
@@ -470,18 +547,43 @@ function applyActions(match, actions, mouseWorld, dt) {
         unit.targetAimRad = a.aimRad;
       }
     } else if (a.type === ActionType.FIRE) {
-      tryFire(match, unit);
+      if (unitIsDriving(unit)) {
+        const veh = findVehicleById(match, unit.vehicleId);
+        if (veh) {
+          tryVehicleTurretFire(
+            match,
+            veh.id,
+            typeof unit.targetAimRad === 'number'
+              ? unit.targetAimRad
+              : veh.turretAimRad
+          );
+        }
+      } else {
+        tryFire(match, unit);
+      }
+    } else if (a.type === ActionType.TOGGLE_VEHICLE_TURRET) {
+      if (unitIsDriving(unit)) {
+        const veh = findVehicleById(match, unit.vehicleId);
+        if (veh) {
+          const mode = toggleVehicleTurretMode(veh);
+          if (unit.role === 'player') {
+            match.interactPrompt =
+              mode === 'MANUAL' ? 'Turret: Manual' : 'Turret: Assist';
+          }
+        }
+      }
     } else if (a.type === ActionType.RELOAD) {
-      tryReload(match, unit);
+      if (!unitVehicleHandsLocked(unit)) tryReload(match, unit);
     } else if (a.type === ActionType.CANCEL_RELOAD) {
-      tryCancelReload(match, unit);
+      if (!unitVehicleHandsLocked(unit)) tryCancelReload(match, unit);
     } else if (a.type === ActionType.INTERACT) {
-      if (unit.role === 'player') tryInteract(match, unit);
+      tryInteract(match, unit);
     } else if (a.type === ActionType.HARVEST) {
-      // Player + AI units with inventory share tool/wrench path (no cheat).
-      tryHarvest(match, unit, a.worldX, a.worldY);
+      if (!unitVehicleHandsLocked(unit)) {
+        tryHarvest(match, unit, a.worldX, a.worldY);
+      }
     } else if (a.type === ActionType.TAKE_GEN) {
-      if (unit.role === 'player') {
+      if (unit.role === 'player' && !unitVehicleHandsLocked(unit)) {
         match.lastTakeResult = {
           kind: 'gen',
           blockId: a.blockId,
@@ -489,7 +591,7 @@ function applyActions(match, actions, mouseWorld, dt) {
         };
       }
     } else if (a.type === ActionType.TAKE_BASE) {
-      if (unit.role === 'player') {
+      if (unit.role === 'player' && !unitVehicleHandsLocked(unit)) {
         match.lastTakeResult = {
           kind: 'base',
           itemId: a.itemId,
@@ -497,27 +599,50 @@ function applyActions(match, actions, mouseWorld, dt) {
         };
       }
     } else if (a.type === ActionType.TAKE_FACTORY) {
-      if (unit.role === 'player') {
+      if (unit.role === 'player' && !unitVehicleHandsLocked(unit)) {
         applyFactoryTake(match, a.blockId, a.slotIndex, a.role);
       }
     } else if (a.type === ActionType.PLACE) {
-      tryPlaceFromAction(match, unit, a);
+      if (!unitVehicleHandsLocked(unit)) tryPlaceFromAction(match, unit, a);
     } else if (a.type === ActionType.EQUIP_WORN) {
-      if (unit.role === 'player') tryEquipWornFromActive(match, unit);
+      if (unit.role === 'player' && !unitVehicleHandsLocked(unit)) {
+        tryEquipWornFromActive(match, unit);
+      }
     } else if (a.type === ActionType.CAST_SKILL) {
-      tryBeginCastSkill(unit, {
-        skillId: a.skillId,
-        targetPosVec2: a.targetPosVec2,
-        targetEntityId: a.targetEntityId,
-      });
+      if (!unitVehicleHandsLocked(unit)) {
+        tryBeginCastSkill(unit, {
+          skillId: a.skillId,
+          targetPosVec2: a.targetPosVec2,
+          targetEntityId: a.targetEntityId,
+        });
+      }
     }
   }
+
+  // No MOVE this tick → brake/coast (accel path), not instant stop.
+  const vlist = match.vehicles || [];
+  for (let vi = 0; vi < vlist.length; vi++) {
+    const veh = vlist[vi];
+    if (!veh || !veh.active) continue;
+    if (!vehicleMove[veh.id]) {
+      applyVehicleTankControl(veh, 0, 0, dt);
+    }
+  }
+  integrateVehicles(match, dt);
+  resolveVehicleRams(match, applyDamageToUnit, applyDamageToBlock);
+  tickVehicleOccupants(match, dt);
 
   const units = match.pools.units;
   const pack = GAME_PACK;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (!u.active) continue;
+    if (unitIsDriving(u) || u.vehicleTween) {
+      // Motion owned by vehicle / tween — do not walk.
+      u.vx = 0;
+      u.vy = 0;
+      continue;
+    }
     const intent = moveIntent[u.id];
     const speedMult = getEffectiveSpeedMult(u);
     if (u.role !== 'player') claimAreaOrder(u);
@@ -569,7 +694,15 @@ export function restoreMatchFromSnapshot(match, snap) {
   match.enemiesAlive = 0;
   match.outcome = snap.outcome || null;
   match.activeHotbar = snap.activeHotbar || 0;
-  match.wornArmorSlot = snap.wornArmorSlot != null ? snap.wornArmorSlot : -1;
+  match.wornArmorTopSlot =
+    snap.wornArmorTopSlot != null ? snap.wornArmorTopSlot : -1;
+  match.wornArmorVestSlot =
+    snap.wornArmorVestSlot != null
+      ? snap.wornArmorVestSlot
+      : snap.wornArmorSlot != null
+        ? snap.wornArmorSlot
+        : -1;
+  match.wornArmorSlot = match.wornArmorVestSlot;
   match.wornShieldSlot = snap.wornShieldSlot != null ? snap.wornShieldSlot : -1;
   match.playerDead = !!snap.playerDead;
   match.respawnTimer = snap.respawnTimer || 0;
@@ -581,6 +714,7 @@ export function restoreMatchFromSnapshot(match, snap) {
 
   // Clear world harvest then rebuild from snap blocks only (snapshot owns world objects).
   match.blocks = [];
+  match.vehicles = [];
   match.blockById = Object.create(null);
   match.base = null;
   match.basePlaced = false;
@@ -739,11 +873,12 @@ export function restoreMatchFromSnapshot(match, snap) {
       u.combatTargetId = su.combatTargetId != null ? su.combatTargetId : -1;
       u.aggroBlockId = su.aggroBlockId != null ? su.aggroBlockId : -1;
       u.localGeneral = !!su.localGeneral;
-      u.activeArmorId = su.activeArmorId || null;
+      u.activeArmorTopId = su.activeArmorTopId || null;
+      u.activeArmorVestId = su.activeArmorVestId || su.activeArmorId || null;
+      u.activeArmorId = u.activeArmorVestId;
       u.activeShieldId = su.activeShieldId || null;
-      if (u.activeArmorId) {
-        equipArmorOnUnit(u, u.activeArmorId);
-      }
+      if (u.activeArmorTopId) equipArmorOnUnit(u, u.activeArmorTopId);
+      if (u.activeArmorVestId) equipArmorOnUnit(u, u.activeArmorVestId);
       if (u.activeShieldId) {
         equipShieldOnUnit(u, u.activeShieldId);
       } else if (u.archetypeId) {

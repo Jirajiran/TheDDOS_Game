@@ -48,7 +48,8 @@
           "amount": 1,
           "intervalSec": 90
         }
-      ]
+      ],
+      "artId": "Block_Base"
     },
     "WALL_WOOD": {
       "kind": "PLACEABLE",
@@ -78,7 +79,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 250
+      "maxHp": 250,
+      "artId": "Block_Wood"
     },
     "WALL_STONE": {
       "kind": "PLACEABLE",
@@ -108,7 +110,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 550
+      "maxHp": 550,
+      "artId": "Block_Stone"
     },
     "WALL_IRON": {
       "kind": "PLACEABLE",
@@ -138,7 +141,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 800
+      "maxHp": 800,
+      "artId": "Block_Iron"
     },
     "DOOR_WOOD": {
       "kind": "PLACEABLE",
@@ -291,7 +295,8 @@
       },
       "maxHp": 350,
       "weaponId": "M1991",
-      "detectRadius": 819
+      "detectRadius": 819,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_50CAL": {
       "kind": "PLACEABLE",
@@ -323,7 +328,8 @@
       },
       "maxHp": 450,
       "weaponId": "WEAPON_50CAL",
-      "detectRadius": 1024
+      "detectRadius": 1024,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_SMG": {
       "kind": "PLACEABLE",
@@ -355,7 +361,8 @@
       },
       "maxHp": 380,
       "weaponId": "SMG",
-      "detectRadius": 870
+      "detectRadius": 870,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_AK47": {
       "kind": "PLACEABLE",
@@ -387,7 +394,8 @@
       },
       "maxHp": 420,
       "weaponId": "AK47",
-      "detectRadius": 973
+      "detectRadius": 973,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_LAZER": {
       "kind": "PLACEABLE",
@@ -419,7 +427,8 @@
       },
       "maxHp": 500,
       "weaponId": "LAZER",
-      "detectRadius": 1126
+      "detectRadius": 1126,
+      "artId": "Block_Turrent_1"
     },
     "HEAL_BLOCK": {
       "kind": "PLACEABLE",
@@ -883,13 +892,144 @@
       "kind": "ARMOR",
       "maxStack": 1,
       "damageReduction": 0.2,
-      "markerColor": "#7a9ab0"
+      "markerColor": "#7a9ab0",
+      "armorSlot": "VEST",
+      "artId": "Asset_Arm_Vest_1",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "ARMOR_VEST_2": {
+      "id": "ARMOR_VEST_2",
+      "label": "Armor Vest 2",
+      "color": "#6a5a4a",
+      "kind": "ARMOR",
+      "maxStack": 1,
+      "damageReduction": 0.22,
+      "markerColor": "#8a7a60",
+      "armorSlot": "VEST",
+      "artId": "Asset_Arm_Vest_2",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "ARMOR_VEST_3": {
+      "id": "ARMOR_VEST_3",
+      "label": "Armor Vest 3",
+      "color": "#4a5a6a",
+      "kind": "ARMOR",
+      "maxStack": 1,
+      "damageReduction": 0.25,
+      "markerColor": "#6a8a9a",
+      "armorSlot": "VEST",
+      "artId": "Asset_Arm_Vest_3",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "ARMOR_TOP_COMMAND_CAP": {
+      "id": "ARMOR_TOP_COMMAND_CAP",
+      "label": "Command Cap",
+      "color": "#3a4a3a",
+      "kind": "ARMOR",
+      "maxStack": 1,
+      "damageReduction": 0.05,
+      "markerColor": "#5a7a5a",
+      "armorSlot": "TOP",
+      "artId": "Asset_Top_CommandCap",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "ARMOR_TOP_HELMET_1": {
+      "id": "ARMOR_TOP_HELMET_1",
+      "label": "Helmet 1",
+      "color": "#4a4a4a",
+      "kind": "ARMOR",
+      "maxStack": 1,
+      "damageReduction": 0.1,
+      "markerColor": "#6a6a6a",
+      "armorSlot": "TOP",
+      "artId": "Asset_Top_Helmet_1",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "ARMOR_TOP_HELMET_3": {
+      "id": "ARMOR_TOP_HELMET_3",
+      "label": "Helmet 3",
+      "color": "#3a3a4a",
+      "kind": "ARMOR",
+      "maxStack": 1,
+      "damageReduction": 0.12,
+      "markerColor": "#5a5a6a",
+      "armorSlot": "TOP",
+      "artId": "Asset_Top_Helmet_3",
+      "armorType": "DEFAULT",
+      "resistPercent": {
+        "DEFAULT": 0,
+        "BULLET": 0,
+        "EXPLOSION": 0,
+        "LAZER": 0
+      }
+    },
+    "Vehicle_ArmorCar_1": {
+      "id": "Vehicle_ArmorCar_1",
+      "label": "Armor Car 1",
+      "color": "#5a6058",
+      "kind": "VEHICLE",
+      "isVehicle": true,
+      "maxStack": 1,
+      "maxHp": 400,
+      "artId": "Vehicle_ArmorCar_1",
+      "modelId": "model.vehicle.armor_car_1",
+      "speed": 220,
+      "speedMax": 220,
+      "speedBase": 40,
+      "accel": 160,
+      "brake": 280,
+      "ramSpeedMin": 90,
+      "ramDamage": 35,
+      "ramCooldownSec": 0.45,
+      "weaponId": "AK47",
+      "detectRadius": 420,
+      "mobilityHpRatio": 0.45,
+      "mobilityRepairChance": 0.55,
+      "brokenClearSec": 60,
+      "driverProtection": {
+        "allowPierce": true,
+        "absorbRatio": 0,
+        "explosionFactor": 1
+      },
+      "startUnitDriven": ""
     },
     "SHIELD_BASIC": {
       "id": "SHIELD_BASIC",
       "label": "Basic Shield",
       "color": "#4a7a9a",
       "kind": "SHIELD",
+      "itemKind": "Shield",
+      "shieldVariant": "BASIC",
       "maxStack": 1,
       "shieldMaxHp": 200,
       "shieldRadius": 35,
@@ -897,13 +1037,16 @@
       "shieldPierceCost": 2,
       "shieldAbsorbRatio": 1,
       "shieldRegenPerSec": 0,
-      "markerColor": "#6a9ccc"
+      "markerColor": "#6a9ccc",
+      "artId": "Item_shiled_Basic_1"
     },
     "ENERGY_SHIELD": {
       "id": "ENERGY_SHIELD",
       "label": "Energy Shield",
       "color": "#1a6a62",
       "kind": "SHIELD",
+      "itemKind": "Shield Energy",
+      "shieldVariant": "ENERGY",
       "maxStack": 1,
       "shieldMaxHp": 120,
       "shieldRadius": 35,
@@ -911,7 +1054,8 @@
       "shieldPierceCost": 2,
       "shieldAbsorbRatio": 1,
       "shieldRegenPerSec": 4,
-      "markerColor": "#3dffe0"
+      "markerColor": "#3dffe0",
+      "artId": "Item_shiled_Enegy_on"
     },
     "GRENADE_LAUNCHER": {
       "id": "GRENADE_LAUNCHER",

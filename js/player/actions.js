@@ -23,10 +23,24 @@ export const ActionType = Object.freeze({
   CAST_SKILL: 'CAST_SKILL',
   /** Wear the armor or shield in the active slot. Same kind replaces the worn piece. */
   EQUIP_WORN: 'EQUIP_WORN',
+  /** Player driving: toggle MANUAL ↔ ASSIST_BOT turret. */
+  TOGGLE_VEHICLE_TURRET: 'TOGGLE_VEHICLE_TURRET',
 });
 
 export function makeMoveAction(unitId, dx, dy) {
   return { type: ActionType.MOVE, unitId, dx, dy };
+}
+
+/** Driving: W/S throttle (−1..1), A/D steer (−1..1). Same MOVE type, tank payload. */
+export function makeDriveAction(unitId, throttle, steer) {
+  return {
+    type: ActionType.MOVE,
+    unitId,
+    throttle: throttle || 0,
+    steer: steer || 0,
+    dx: 0,
+    dy: 0,
+  };
 }
 
 export function makeAimAction(unitId, aimRad) {
@@ -85,6 +99,10 @@ export function makeTakeFactoryAction(unitId, blockId, slotIndex, role) {
  */
 export function makeEquipWornAction(unitId) {
   return { type: ActionType.EQUIP_WORN, unitId };
+}
+
+export function makeToggleVehicleTurretAction(unitId) {
+  return { type: ActionType.TOGGLE_VEHICLE_TURRET, unitId };
 }
 
 export function makeCastSkillAction(unitId, skillId, opts = {}) {

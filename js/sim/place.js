@@ -10,6 +10,7 @@ import {
   TEAM,
   deriveCollisionLayer,
   getBlockDef,
+  getItemDef,
 } from '../config.js';
 import { enemyTeamId, playerTeamId } from '../defs/teams.js';
 import {
@@ -53,6 +54,24 @@ function clampPriorityScore(raw) {
   const n = Number(raw);
   if (!isFinite(n)) return 5;
   return Math.max(1, Math.min(10, Math.round(n)));
+}
+
+/** Prefer def.artId; fall back to item sheet / known BlockArt groups. */
+export function resolvePlaceableArtId(blockDef, itemId) {
+  if (blockDef && typeof blockDef.artId === 'string' && blockDef.artId.trim()) {
+    return blockDef.artId.trim();
+  }
+  const item = getItemDef(itemId || (blockDef && blockDef.id));
+  if (item && typeof item.artId === 'string' && item.artId.trim()) {
+    return item.artId.trim();
+  }
+  if (blockDef && blockDef.isDefeatCondition) return 'Block_Base';
+  if (blockDef && blockDef.isTurret) return 'Block_Turrent_1';
+  const tid = String((blockDef && blockDef.typeId) || itemId || '').toUpperCase();
+  if (tid.indexOf('WOOD') >= 0) return 'Block_Wood';
+  if (tid.indexOf('STONE') >= 0) return 'Block_Stone';
+  if (tid.indexOf('IRON') >= 0) return 'Block_Iron';
+  return '';
 }
 
 export function updatePlaceGhost(match, mouseWorld) {
@@ -268,6 +287,12 @@ export function createPlacedBlock(match, itemId, gx, gy, blockDef, opts = {}) {
     projectileSolid: !blockDef.allowProjectilePass,
     allowProjectilePass: !!blockDef.allowProjectilePass,
     weaponId: blockDef.weaponId || null,
+    /** BlockArt group for Pivot_turrent / SizeView (runtime draw + muzzle). */
+    artId: resolvePlaceableArtId(blockDef, itemId),
+    resistPercent:
+      blockDef.resistPercent && typeof blockDef.resistPercent === 'object'
+        ? Object.assign({}, blockDef.resistPercent)
+        : { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 },
     detectRadius: blockDef.detectRadius || PATH_SIZE,
     healRadius: blockDef.healRadius || 0,
     healPerSec: blockDef.healPerSec || 0,

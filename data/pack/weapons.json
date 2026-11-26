@@ -29,7 +29,8 @@
       "reloadType": "MAGAZINE",
       "burstIntervalSec": 0.06,
       "muzzleLeadSec": 0.02,
-      "aiFireRangePath": 0.75
+      "aiFireRangePath": 0.75,
+      "bulletArtId": "Bullet_Tracer_1"
     },
     "SMG": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -57,7 +58,8 @@
       "reloadType": "MAGAZINE",
       "burstIntervalSec": 0.06,
       "muzzleLeadSec": 0.02,
-      "aiFireRangePath": 0.75
+      "aiFireRangePath": 0.75,
+      "bulletArtId": "Bullet_Tracer_1"
     },
     "AK47": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -85,7 +87,8 @@
       "reloadType": "MAGAZINE",
       "burstIntervalSec": 0.06,
       "muzzleLeadSec": 0.02,
-      "aiFireRangePath": 0.9
+      "aiFireRangePath": 0.9,
+      "bulletArtId": "Bullet_Tracer_2"
     },
     "SHOTGUN_SHELL": {
       "projectileMode": "PROJECTILE_RAYCAST",
@@ -469,7 +472,8 @@
       "explosionRadius": 141,
       "explosionDamage": 70,
       "burstIntervalSec": 0.06,
-      "muzzleLeadSec": 0.02
+      "muzzleLeadSec": 0.02,
+      "bulletArtId": "Bullet_Rpg"
     },
     "WEAPON_RPG": {
       "id": "WEAPON_RPG",
@@ -498,7 +502,8 @@
       "explosionRadius": 180,
       "explosionDamage": 110,
       "burstIntervalSec": 0.08,
-      "muzzleLeadSec": 0.03
+      "muzzleLeadSec": 0.03,
+      "bulletArtId": "Bullet_Rpg"
     }
   }
 }

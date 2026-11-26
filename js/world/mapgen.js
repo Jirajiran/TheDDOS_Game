@@ -96,6 +96,15 @@ export function spawnWorldBlock(match, itemId, gx, gy) {
     isOpen: false,
     color: def.color,
     team: def.team,
+    artId:
+      typeof def.artId === 'string' && def.artId.trim()
+        ? def.artId.trim()
+        : def.isDefeatCondition
+          ? 'Block_Base'
+          : def.isTurret
+            ? 'Block_Turrent_1'
+            : '',
+    weaponId: def.weaponId || null,
     pierceCost: typeof def.pierceCost === 'number' ? def.pierceCost : 1,
     collisionLayer: deriveCollisionLayer({
       team: def.team,

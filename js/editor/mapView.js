@@ -8,10 +8,27 @@ import { PATH_SIZE, clampRect, nextAreaId, worldSize } from './mapDoc.js';
 import {
   buildStructureMapIcon,
   buildUnitMapIcon,
+  buildVehicleMapIcon,
   ensureMapArtDefs,
   getParsedUnitArt,
   itemFootprint,
 } from './unitArt.js';
+
+function isVehicleItemDef(itemDef) {
+  if (!itemDef) return false;
+  return !!(
+    itemDef.kind === 'VEHICLE' ||
+    itemDef.isVehicle ||
+    /^Vehicle_/i.test(String(itemDef.artId || ''))
+  );
+}
+
+/** Unit Tool Draw may pick a Vehicle item template (unit-host). */
+function vehicleItemOf(doc, templateId) {
+  if (!doc || !templateId || !doc.items) return null;
+  const rec = doc.items[templateId];
+  return isVehicleItemDef(rec) ? rec : null;
+}
 
 const L3_GRID_SIZE = 64;
 
@@ -89,10 +106,12 @@ function hitArea(doc, x, y) {
 }
 
 function placedDimensions(doc, item) {
-  if (!item || item.kind === 'unit') {
+  if (!item) return { w: L3_GRID_SIZE, h: L3_GRID_SIZE };
+  const vehicle = vehicleItemOf(doc, item.templateId);
+  if (item.kind === 'unit' && !vehicle) {
     return { w: L3_GRID_SIZE, h: L3_GRID_SIZE };
   }
-  const itemDef = doc && doc.items && doc.items[item.templateId];
+  const itemDef = vehicle || (doc && doc.items && doc.items[item.templateId]);
   const fp = itemFootprint(itemDef);
   return {
     w: fp.w * L3_GRID_SIZE,
@@ -270,8 +289,19 @@ export function mountMapView(svg, api) {
     let chosenTeam = 1;
     if (isUnit) {
       tId = api.getToolUnitTemplate() || Object.keys(doc.units || {})[0] || 'Player';
-      const unitDef = doc.units && doc.units[tId];
-      defaultHp = (unitDef && unitDef.hpRange && unitDef.hpRange[1]) || (unitDef && unitDef.maxHp) || 100;
+      const vehicle = vehicleItemOf(doc, tId);
+      if (vehicle) {
+        const fp = itemFootprint(vehicle);
+        wPx = fp.w * L3_GRID_SIZE;
+        hPx = fp.h * L3_GRID_SIZE;
+        defaultHp = vehicle.maxHp != null ? vehicle.maxHp : 400;
+      } else {
+        const unitDef = doc.units && doc.units[tId];
+        defaultHp =
+          (unitDef && unitDef.hpRange && unitDef.hpRange[1]) ||
+          (unitDef && unitDef.maxHp) ||
+          100;
+      }
       chosenTeam = api.getToolUnitTeam ? api.getToolUnitTeam() : (tId === 'Player' ? 1 : 2);
     } else {
       tId = api.getToolObjTemplate() || Object.keys(doc.items || {})[0] || 'Wall_Wood';
@@ -585,62 +615,91 @@ export function mountMapView(svg, api) {
       group.appendChild(title);
 
       if (item.kind === 'unit') {
-        const unitDef = doc.units && doc.units[item.templateId];
-        const iconSvg = buildUnitMapIcon(
-          null,
-          doc,
-          unitDef || { id: item.templateId },
-          item.x,
-          item.y,
-          L3_GRID_SIZE,
-          L3_GRID_SIZE,
-          pack,
-          onPoolReady
-        );
-        if (iconSvg) {
-          group.appendChild(iconSvg);
-        } else {
-          const fallbackLabel = el('text', {
-            x: item.x + 32,
-            y: item.y + 30,
-            'text-anchor': 'middle',
-            'dominant-baseline': 'middle',
-            fill: '#f0f6fc',
-            'font-size': '10',
-            'font-weight': 'bold',
+        const vehicleDef = vehicleItemOf(doc, item.templateId);
+        if (vehicleDef) {
+          const iconSvg = buildVehicleMapIcon(
+            null,
+            doc,
+            vehicleDef,
+            item.x,
+            item.y,
+            dim.w,
+            dim.h,
+            pack,
+            onPoolReady
+          );
+          if (iconSvg) group.appendChild(iconSvg);
+          const frame = el('rect', {
+            x: item.x + 2,
+            y: item.y + 2,
+            width: Math.max(8, dim.w - 4),
+            height: Math.max(8, dim.h - 4),
+            rx: 4,
+            fill: 'none',
+            stroke: isSelected ? '#ffd700' : teamColor,
+            'stroke-width': isSelected ? 3.5 : 1.75,
           });
-          fallbackLabel.textContent = (item.templateId || 'Unit').slice(0, 7);
-          group.appendChild(fallbackLabel);
+          group.appendChild(frame);
+          appendHpBar(
+            group,
+            item.x + 6,
+            item.y + dim.h - 9,
+            Math.max(12, dim.w - 12),
+            5,
+            item.currentHp,
+            item.maxHp
+          );
+        } else {
+          const unitDef = doc.units && doc.units[item.templateId];
+          const iconSvg = buildUnitMapIcon(
+            null,
+            doc,
+            unitDef || { id: item.templateId },
+            item.x,
+            item.y,
+            L3_GRID_SIZE,
+            L3_GRID_SIZE,
+            pack,
+            onPoolReady
+          );
+          if (iconSvg) {
+            group.appendChild(iconSvg);
+          } else {
+            const fallbackLabel = el('text', {
+              x: item.x + 32,
+              y: item.y + 30,
+              'text-anchor': 'middle',
+              'dominant-baseline': 'middle',
+              fill: '#f0f6fc',
+              'font-size': '10',
+              'font-weight': 'bold',
+            });
+            fallbackLabel.textContent = (item.templateId || 'Unit').slice(0, 7);
+            group.appendChild(fallbackLabel);
+          }
+
+          const frame = el('rect', {
+            x: item.x + 1,
+            y: item.y + 1,
+            width: L3_GRID_SIZE - 2,
+            height: L3_GRID_SIZE - 2,
+            rx: 3,
+            fill: 'none',
+            stroke: isSelected ? '#ffd700' : teamColor,
+            'stroke-opacity': isSelected ? '1' : '0.45',
+            'stroke-width': isSelected ? 2.5 : 1.5,
+          });
+          group.appendChild(frame);
+
+          appendHpBar(group, item.x + 10, item.y + 56, 44, 4, item.currentHp, item.maxHp);
         }
-
-        const frame = el('rect', {
-          x: item.x + 1,
-          y: item.y + 1,
-          width: L3_GRID_SIZE - 2,
-          height: L3_GRID_SIZE - 2,
-          rx: 3,
-          fill: 'none',
-          stroke: isSelected ? '#ffd700' : teamColor,
-          'stroke-opacity': isSelected ? '1' : '0.45',
-          'stroke-width': isSelected ? 2.5 : 1.5,
-        });
-        group.appendChild(frame);
-
-        appendHpBar(group, item.x + 10, item.y + 56, 44, 4, item.currentHp, item.maxHp);
       } else {
         const itemDef = doc.items && doc.items[item.templateId];
-        const structureIcon = buildStructureMapIcon(
-          null,
-          doc,
-          itemDef || { id: item.templateId },
-          item.x,
-          item.y,
-          dim.w,
-          dim.h,
-          pack,
-          onPoolReady
-        );
-        group.appendChild(structureIcon);
+        const def = itemDef || { id: item.templateId };
+        const structureIcon = isVehicleItemDef(def)
+          ? buildVehicleMapIcon(null, doc, def, item.x, item.y, dim.w, dim.h, pack, onPoolReady)
+          : buildStructureMapIcon(null, doc, def, item.x, item.y, dim.w, dim.h, pack, onPoolReady);
+        if (structureIcon) group.appendChild(structureIcon);
 
         const frame = el('rect', {
           x: item.x + 2,
@@ -717,19 +776,40 @@ export function mountMapView(svg, api) {
       const ghostGroup = el('g', { opacity: '0.68', 'pointer-events': 'none' });
       if (isUnit) {
         const tId = api.getToolUnitTemplate() || Object.keys(doc.units || {})[0] || 'Player';
-        const unitDef = doc.units && doc.units[tId];
-        const icon = buildUnitMapIcon(
-          null,
-          doc,
-          unitDef || { id: tId },
-          gx,
-          gy,
-          L3_GRID_SIZE,
-          L3_GRID_SIZE,
-          pack,
-          onPoolReady
-        );
-        if (icon) ghostGroup.appendChild(icon);
+        const vehicleDef = vehicleItemOf(doc, tId);
+        if (vehicleDef) {
+          const fp = itemFootprint(vehicleDef);
+          wPx = fp.w * L3_GRID_SIZE;
+          hPx = fp.h * L3_GRID_SIZE;
+          gx = snapCoord(hoverPos.x, wPx, world.w);
+          gy = snapCoord(hoverPos.y, hPx, world.h);
+          const icon = buildVehicleMapIcon(
+            null,
+            doc,
+            vehicleDef,
+            gx,
+            gy,
+            wPx,
+            hPx,
+            pack,
+            onPoolReady
+          );
+          if (icon) ghostGroup.appendChild(icon);
+        } else {
+          const unitDef = doc.units && doc.units[tId];
+          const icon = buildUnitMapIcon(
+            null,
+            doc,
+            unitDef || { id: tId },
+            gx,
+            gy,
+            L3_GRID_SIZE,
+            L3_GRID_SIZE,
+            pack,
+            onPoolReady
+          );
+          if (icon) ghostGroup.appendChild(icon);
+        }
       } else {
         const tId = api.getToolObjTemplate() || Object.keys(doc.items || {})[0] || 'Wall_Wood';
         const itemDef = doc.items && doc.items[tId];
@@ -738,18 +818,11 @@ export function mountMapView(svg, api) {
         hPx = fp.h * L3_GRID_SIZE;
         gx = snapCoord(hoverPos.x, wPx, world.w);
         gy = snapCoord(hoverPos.y, hPx, world.h);
-        const icon = buildStructureMapIcon(
-          null,
-          doc,
-          itemDef || { id: tId },
-          gx,
-          gy,
-          wPx,
-          hPx,
-          pack,
-          onPoolReady
-        );
-        ghostGroup.appendChild(icon);
+        const def = itemDef || { id: tId };
+        const icon = isVehicleItemDef(def)
+          ? buildVehicleMapIcon(null, doc, def, gx, gy, wPx, hPx, pack, onPoolReady)
+          : buildStructureMapIcon(null, doc, def, gx, gy, wPx, hPx, pack, onPoolReady);
+        if (icon) ghostGroup.appendChild(icon);
       }
 
       const blocked = hasPlacedOverlap(doc, gx, gy, wPx, hPx, '');

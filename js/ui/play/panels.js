@@ -34,6 +34,11 @@ import {
   getWeaponIconHref,
   getWeaponIconLayout,
 } from '../../view/weaponBtnArt.js';
+import {
+  getTopWearSlotIconHref,
+  getShieldWearSlotIconHref,
+} from '../../view/unitVisual.js';
+import { armorSlotOf } from '../../assets/closedCatalog.js';
 
 export function installPlayPanels(api) {
   api.firstTspan = function firstTspan(el) {
@@ -1004,8 +1009,15 @@ export function installPlayPanels(api) {
   
     api.syncHpFill(hud.playerHp, hud.playerMaxHp, hud.dt || 0.016);
     api.syncDay(hud.simTimeSec || 0, !!hud.enemiesPresent);
-    api.state.wornArmorSlot =
-      hud.wornArmorSlot != null ? hud.wornArmorSlot : -1;
+    api.state.wornArmorTopSlot =
+      hud.wornArmorTopSlot != null ? hud.wornArmorTopSlot : -1;
+    api.state.wornArmorVestSlot =
+      hud.wornArmorVestSlot != null
+        ? hud.wornArmorVestSlot
+        : hud.wornArmorSlot != null
+          ? hud.wornArmorSlot
+          : -1;
+    api.state.wornArmorSlot = api.state.wornArmorVestSlot;
     api.state.wornShieldSlot =
       hud.wornShieldSlot != null ? hud.wornShieldSlot : -1;
     if (hud.backpackTier != null) api.setBackpackTier(hud.backpackTier);
@@ -1046,7 +1058,7 @@ export function installPlayPanels(api) {
         api.state.hpShakeT -= dt || 0.016;
         const s = Math.sin(api.state.hpShakeT * 60) * 2.5;
         api.setMatrix(bg, {
-          ...state.hpBgBase,
+          ...api.state.hpBgBase,
           e: api.state.hpBgBase.e + s,
           f: api.state.hpBgBase.f + s * 0.4,
         });
@@ -1173,7 +1185,10 @@ export function installPlayPanels(api) {
     api.setVisible(el, true);
     el.style.opacity = '1';
     const worn =
-      api.state.wornArmorSlot === index || api.state.wornShieldSlot === index;
+      api.state.wornArmorTopSlot === index ||
+      api.state.wornArmorVestSlot === index ||
+      api.state.wornArmorSlot === index ||
+      api.state.wornShieldSlot === index;
     api.ensureWornFill(el, worn && filled);
     api.ensureSelectFrame(el, index === activeHotbar);
     const num = api.findNumberHost(el);
@@ -1186,14 +1201,28 @@ export function installPlayPanels(api) {
     const isWeapon = kind === 'WEAPON';
     const count = slot.count || 0;
     api.setCountOnHost(num, count, !isWeapon && count > 0);
+    let href = null;
+    let layout = null;
+    if (isWeapon) {
+      href = getWeaponIconHref(slot.weaponId || slot.itemId);
+      layout = getWeaponIconLayout(slot.weaponId || slot.itemId);
+    } else if (kind === 'ARMOR' && slot.itemId) {
+      const def = getItemDef(slot.itemId);
+      // Helmet TOP only — Editor Asset_Top_* path. Vest stays color pad (do not touch).
+      if (def && armorSlotOf(def) === 'TOP') {
+        href = getTopWearSlotIconHref(slot.itemId);
+      }
+    } else if (kind === 'SHIELD' && slot.itemId) {
+      href = getShieldWearSlotIconHref(slot.itemId);
+    }
     api.ensureIconOverlay(
       el,
       slot.color || '#6a7a8a',
       true,
       SLOT_ICON,
       false,
-      getWeaponIconHref(slot.weaponId || slot.itemId),
-      getWeaponIconLayout(slot.weaponId || slot.itemId)
+      href,
+      layout
     );
   }
 

@@ -6,6 +6,8 @@ export * from './api.js';
 
 export {
   installPackData,
+  installPlayItemOverlay,
+  clearPlayItemOverlay,
   seedWeaponsFromRegistry,
   seedBlocksFromRegistry,
   seedItemsFromRegistry,

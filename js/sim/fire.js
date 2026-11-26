@@ -20,7 +20,7 @@ import {
   getActiveSlot,
   equipArmorOnUnit,
   equipShieldOnUnit,
-  ejectBrokenBasicShield,
+  ejectBrokenWearShield,
   isArmorSlot,
   isBackpackSlot,
   isShieldSlot,
@@ -72,6 +72,18 @@ import {
   applyDamageToUnit,
   getPlayerUnit,
 } from './unit.js';
+import {
+  applyDamageToVehicle,
+  findVehicleById,
+  flushVehicleDriverDamage,
+  vehicleAabb,
+  vehicleAnchorWorld,
+  vehicleTurretArmed,
+  VehicleTurretMode,
+} from './vehicle.js';
+import { turretAlignedForFire } from './vehicleDrive.js';
+import { blockTurretWorldPoints } from '../view/blockArt.js';
+import { getVehicleAnchors } from '../view/vehicleArt.js';
 export function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad, simTime) {
   const tick = Math.floor(((simTime != null ? simTime : match.simTime) || 0) * 60);
   let h =
@@ -136,29 +148,37 @@ function scheduleUnitVolley(match, unit, weapon, aimRad) {
   spawnShotVolley(match, unit, weapon, aimRad, simTime);
 }
 
-function turretOwner(block) {
+function turretOwnerAt(block, point, index) {
   return {
-    id: -block.id,
-    x: block.x + block.w / 2,
-    y: block.y + block.h / 2,
+    id: -(block.id * 100 + (index | 0)),
+    x: point.x,
+    y: point.y,
     radius: Math.min(block.w, block.h) * 0.35,
-    team: TEAM.PLAYER,
+    team: block.team != null ? block.team : TEAM.PLAYER,
     fromTurret: true,
     sourceBlockId: block.id,
   };
+}
+
+/** One shared weaponId — muzzle at every Pivot_turrent (or center). */
+function spawnTurretVolley(match, block, weapon, aim) {
+  const points = blockTurretWorldPoints(block);
+  for (let i = 0; i < points.length; i++) {
+    spawnProjectile(match, turretOwnerAt(block, points[i], i), weapon, aim);
+  }
 }
 
 function releaseTurretShot(match, block) {
   const weapon = getWeaponDef(block.muzzleWeaponId);
   block.muzzlePending = false;
   if (!weapon || !block.alive) return;
-  spawnProjectile(match, turretOwner(block), weapon, block.muzzleAimRad);
+  spawnTurretVolley(match, block, weapon, block.muzzleAimRad);
 }
 
 function scheduleTurretShot(match, block, weapon, aim) {
   const lead = muzzleLeadOf(weapon);
   if (lead <= 0) {
-    spawnProjectile(match, turretOwner(block), weapon, aim);
+    spawnTurretVolley(match, block, weapon, aim);
     return;
   }
   if (block.muzzlePending) releaseTurretShot(match, block);
@@ -484,10 +504,17 @@ export function spawnProjectile(match, owner, weapon, aimRad) {
   proj.blockPierceLeft = proj.pierceLeft; // shared budget (legacy field kept in sync)
   proj.pierceConfig = weapon.pierceConfig || null;
   proj.weaponId = weapon.id;
+  proj.bulletArtId =
+    typeof weapon.bulletArtId === 'string' && weapon.bulletArtId.trim()
+      ? weapon.bulletArtId.trim()
+      : null;
   proj.targetFaction = weapon.targetFaction || 'ENEMY';
   proj.hitMask = defaultProjectileHitMask(proj.team, proj.targetFaction);
   proj.hitBlockIds = [];
   proj.fromTurret = !!owner.fromTurret;
+  proj.fromVehicle = !!owner.fromVehicle;
+  proj.sourceVehicleId =
+    owner.sourceVehicleId != null ? owner.sourceVehicleId : -1;
   proj.sourceBlockId = owner.sourceBlockId != null ? owner.sourceBlockId : -1;
   proj.noLootOnPierce = true;
   proj.isBeam = false;
@@ -536,6 +563,9 @@ export function spawnBeam(match, owner, weapon, aimRad) {
     ownerId: owner.id != null ? owner.id : -1,
     sourceBlockId: owner.sourceBlockId != null ? owner.sourceBlockId : -1,
     fromTurret: !!owner.fromTurret,
+    fromVehicle: !!owner.fromVehicle,
+    sourceVehicleId:
+      owner.sourceVehicleId != null ? owner.sourceVehicleId : -1,
     durationLeft: weapon.beamDurationSec || 1,
     tickAcc: 0,
     tickInterval: 0.2,
@@ -552,7 +582,6 @@ export function tryTurretFire(match, blockId, aimRad) {
   if (block.fireCooldown > 0) return;
   const weapon = getWeaponDef(block.weaponId);
   if (!weapon) return;
-  const owner = turretOwner(block);
   const aim =
     typeof aimRad === 'number'
       ? aimRad
@@ -561,8 +590,12 @@ export function tryTurretFire(match, blockId, aimRad) {
         : block.turretTargetAimRad || 0;
 
   if (weapon.projectileMode === 'CONTINUOUS_BEAM') {
-    if (ownerHasActiveBeam(match, owner.id, block.id)) return;
-    spawnBeam(match, owner, weapon, aim);
+    const points = blockTurretWorldPoints(block);
+    for (let i = 0; i < points.length; i++) {
+      const owner = turretOwnerAt(block, points[i], i);
+      if (ownerHasActiveBeam(match, owner.id, block.id)) continue;
+      spawnBeam(match, owner, weapon, aim);
+    }
     const duration = weapon.beamDurationSec || 0;
     block.fireCooldown = duration + (weapon.cooldownSec || 0);
   } else {
@@ -607,6 +640,127 @@ export function decideTurretActions(match) {
       aimRad: aim,
     });
   }
+  return actions.concat(decideVehicleTurretActions(match));
+}
+
+function vehicleTurretWorldPoints(vehicle) {
+  const anchors = getVehicleAnchors(
+    vehicle.driverUnitId != null ? 'Driven' : 'Empty'
+  );
+  const locals =
+    anchors && anchors.turrets && anchors.turrets.length
+      ? anchors.turrets
+      : anchors && anchors.turret
+        ? [anchors.turret]
+        : [{ x: 0, y: 0 }];
+  const out = [];
+  for (let i = 0; i < locals.length; i++) {
+    out.push(vehicleAnchorWorld(vehicle, locals[i]));
+  }
+  return out;
+}
+
+function vehicleTurretOwnerAt(vehicle, point, index) {
+  return {
+    id: -(100000 + vehicle.id * 10 + (index | 0)),
+    x: point.x,
+    y: point.y,
+    radius: 18,
+    team: vehicle.team,
+    fromTurret: true,
+    fromVehicle: true,
+    sourceVehicleId: vehicle.id,
+  };
+}
+
+/** Fire vehicle gun — one shared weaponId from every Pivot_turrent. */
+export function tryVehicleTurretFire(match, vehicleId, aimRad) {
+  const vehicle = findVehicleById(match, vehicleId);
+  if (!vehicleTurretArmed(vehicle)) return;
+  if (vehicle.fireCooldown > 0) return;
+  const weapon = getWeaponDef(vehicle.weaponId);
+  if (!weapon) return;
+  if (typeof aimRad === 'number') {
+    vehicle.turretTargetAimRad = aimRad;
+  }
+  // Gate FIRE until barrel slewed onto target (Idea fireTolerance).
+  const want =
+    typeof aimRad === 'number'
+      ? aimRad
+      : typeof vehicle.turretTargetAimRad === 'number'
+        ? vehicle.turretTargetAimRad
+        : null;
+  if (want != null && !turretAlignedForFire(vehicle, want)) return;
+  const aim =
+    typeof vehicle.turretAimRad === 'number'
+      ? vehicle.turretAimRad
+      : want != null
+        ? want
+        : vehicle.facingRad || 0;
+  const points = vehicleTurretWorldPoints(vehicle);
+  if (weapon.projectileMode === 'CONTINUOUS_BEAM') {
+    for (let i = 0; i < points.length; i++) {
+      const owner = vehicleTurretOwnerAt(vehicle, points[i], i);
+      if (ownerHasActiveBeam(match, owner.id, -1)) continue;
+      spawnBeam(match, owner, weapon, aim);
+    }
+    const duration = weapon.beamDurationSec || 0;
+    vehicle.fireCooldown = duration + (weapon.cooldownSec || 0);
+  } else {
+    for (let i = 0; i < points.length; i++) {
+      spawnProjectile(
+        match,
+        vehicleTurretOwnerAt(vehicle, points[i], i),
+        weapon,
+        aim
+      );
+    }
+    vehicle.fireCooldown = weapon.cooldownSec || 0.4;
+  }
+  match.stats.shotsFired += 1;
+  playWeaponSfx(weapon.id);
+}
+
+/**
+ * Assist bot (or AI driver): auto aim+fire while vehicle armed.
+ * Player MANUAL skips auto-fire (player FIRE action handles shots).
+ */
+export function decideVehicleTurretActions(match) {
+  const actions = [];
+  const list = match.vehicles || [];
+  const units = match.pools.units;
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    if (!vehicleTurretArmed(v) || !v.weaponId) continue;
+    if (v.fireCooldown > 0) continue;
+    const driver = units[v.driverUnitId];
+    const playerDriven = driver && driver.role === 'player';
+    if (playerDriven && v.turretMode === VehicleTurretMode.MANUAL) continue;
+
+    let best = null;
+    let bestD = v.detectRadius || PATH_SIZE;
+    for (let u = 0; u < units.length; u++) {
+      const e = units[u];
+      if (!e.active || e.hiddenInVehicle) continue;
+      if (e.id === v.driverUnitId) continue;
+      if (!isHostileTeam(match, v.team, e.team)) continue;
+      const d = Math.hypot(e.x - v.x, e.y - v.y);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (!best) continue;
+    const aim = Math.atan2(best.y - v.y, best.x - v.x);
+    v.turretTargetAimRad = aim;
+    // Only emit FIRE when barrel is on target — else keep slewing.
+    if (!turretAlignedForFire(v, aim)) continue;
+    actions.push({
+      type: ActionType.FIRE,
+      vehicleId: v.id,
+      aimRad: typeof v.turretAimRad === 'number' ? v.turretAimRad : aim,
+    });
+  }
   return actions;
 }
 
@@ -645,6 +799,8 @@ export function entityCollisionLayer(ent) {
 
 export function canHitUnit(pOrBeam, unit) {
   if (!unit || !unit.active) return false;
+  // Driver is hit via vehicle pierce/explosion protection, not direct body shots.
+  if (unit.hiddenInVehicle) return false;
   if (pOrBeam.hitMask != null) {
     return layerHitsMask(entityCollisionLayer(unit), pOrBeam.hitMask);
   }
@@ -701,6 +857,7 @@ export function updateProjectiles(match, dt) {
         tryProjectileExplosion(match, p, {
           applyDamageToUnit,
           applyDamageToBlock,
+          applyDamageToVehicle,
         });
       }
       i = deactivateProjectileAt(pools, i);
@@ -734,10 +891,28 @@ export function updateProjectiles(match, dt) {
         p.blockPierceLeft = pierce;
         continue;
       }
+      if (hit.kind === 'vehicle') {
+        const cost = 2;
+        applyDamageToVehicle(match, hit.vehicle, p.damage, {
+          sourceTeam: p.team,
+          damageKind: 'PROJECTILE',
+          pierceToDriver: 0.35,
+          fromTurret: !!p.fromTurret,
+          impact: true,
+        });
+        if (cost > pierce) {
+          stopped = true;
+          break;
+        }
+        pierce -= cost;
+        p.pierceLeft = pierce;
+        p.blockPierceLeft = pierce;
+        continue;
+      }
       if (hit.kind === 'shield') {
         const unit = hit.unit;
         const abs = absorbDamageWithShield(unit, p.damage);
-        if (abs.broke) ejectBrokenBasicShield(match, unit);
+        if (abs.broke) ejectBrokenWearShield(match, unit);
         if (abs.absorbed > 0 && abs.leftover <= 0) playSfx('combat.hit.shield');
         if (abs.leftover > 0) {
           const dmg = scaledHitDamage(
@@ -803,6 +978,7 @@ export function updateProjectiles(match, dt) {
         tryProjectileExplosion(match, p, {
           applyDamageToUnit,
           applyDamageToBlock,
+          applyDamageToVehicle,
         });
       }
       i = deactivateProjectileAt(pools, i);
@@ -813,6 +989,31 @@ export function updateProjectiles(match, dt) {
 
   // Frame N hits become pending for frame N+1.
   swapBulletHitBuffers(match);
+}
+
+function segmentHitsVehicleAabb(p, v) {
+  const box = vehicleAabb(v);
+  const x0 = p.prevX;
+  const y0 = p.prevY;
+  const x1 = p.x;
+  const y1 = p.y;
+  // Coarse: either endpoint inside or closest point on segment near box center within radius.
+  const cx = box.x + box.w * 0.5;
+  const cy = box.y + box.h * 0.5;
+  const t = segmentClosestT(x0, y0, x1, y1, cx, cy);
+  const px = x0 + (x1 - x0) * t;
+  const py = y0 + (y1 - y0) * t;
+  const nx = Math.max(box.x, Math.min(px, box.x + box.w));
+  const ny = Math.max(box.y, Math.min(py, box.y + box.h));
+  const rad = (p.radius || 0) + 2;
+  return Math.hypot(px - nx, py - ny) <= rad;
+}
+
+function canHitVehicle(p, v) {
+  if (!v || !v.active) return false;
+  if (v.team != null && p.team === v.team) return false;
+  // Nature (no team) can be damaged by anyone.
+  return true;
 }
 
 export function collectProjectileSegmentHits(match, p, units) {
@@ -828,6 +1029,15 @@ export function collectProjectileSegmentHits(match, p, units) {
       hitBlock.y + hitBlock.h * 0.5
     );
     hits.push({ kind: 'block', t, block: hitBlock });
+  }
+  const vehicles = match.vehicles || [];
+  for (let vi = 0; vi < vehicles.length; vi++) {
+    const v = vehicles[vi];
+    if (!canHitVehicle(p, v)) continue;
+    if (p.fromVehicle && p.sourceVehicleId === v.id) continue;
+    if (!segmentHitsVehicleAabb(p, v)) continue;
+    const t = segmentClosestT(p.prevX, p.prevY, p.x, p.y, v.x, v.y);
+    hits.push({ kind: 'vehicle', t, vehicle: v });
   }
   for (let u = 0; u < units.length; u++) {
     const unit = units[u];
@@ -965,6 +1175,16 @@ export function castBeamRay(match, b, units, applyDamage) {
     if (hit) hits.push({ kind: 'block', t: hit.t, block });
   }
 
+  const vehicles = match.vehicles || [];
+  for (let vi = 0; vi < vehicles.length; vi++) {
+    const v = vehicles[vi];
+    if (!canHitVehicle(b, v)) continue;
+    if (b.fromVehicle && b.sourceVehicleId === v.id) continue;
+    const box = vehicleAabb(v);
+    const hit = rayHitsAABB(b.x0, b.y0, xMax, yMax, box.x, box.y, box.w, box.h);
+    if (hit) hits.push({ kind: 'vehicle', t: hit.t, vehicle: v });
+  }
+
   hits.sort((a, c) => a.t - c.t);
 
   let pierce = b.pierceLeft | 0;
@@ -974,7 +1194,9 @@ export function castBeamRay(match, b, units, applyDamage) {
     const cost =
       hit.kind === 'block'
         ? getBlockPierceCost(b.weaponId ? getWeaponDef(b.weaponId) : null, hit.block)
-        : getEntityPierceCost(hit.unit);
+        : hit.kind === 'vehicle'
+          ? 2
+          : getEntityPierceCost(hit.unit);
 
     if (applyDamage) {
       if (hit.kind === 'unit') {
@@ -993,6 +1215,14 @@ export function castBeamRay(match, b, units, applyDamage) {
           sourceY: b.y0,
         });
         if (dmg > 0) match.stats.damageDealt += dmg;
+      } else if (hit.kind === 'vehicle') {
+        applyDamageToVehicle(match, hit.vehicle, b.damage, {
+          sourceTeam: b.team,
+          damageKind: 'PROJECTILE',
+          pierceToDriver: 0.35,
+          fromTurret: !!b.fromTurret,
+          impact: true,
+        });
       } else {
         applyDamageToBlock(match, hit.block, b.damage, b.damageType, {
           sourceTeam: b.team,

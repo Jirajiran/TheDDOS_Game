@@ -60,7 +60,14 @@ export function formatCatalogId(raw) {
   return out.join('_');
 }
 
-export const UNIT_MODEL_IDS = ['model.unit.default_1', 'model.unit.default_2'];
+export const UNIT_MODEL_IDS = [
+  'model.unit.default_1',
+  'model.unit.default_2',
+  'model.unit.default_3',
+  'model.unit.default_4',
+  'model.unit.default_5',
+  'model.unit.default_6',
+];
 
 const WEAPON_CHOICE_KEYS = {
   ammoTypeId: true,
@@ -135,6 +142,7 @@ const FIELD_HELP = {
   model: 'Unit body SVG group from the pack art template (SizeView).',
   hpRange: 'Min/max HP roll for this unit template when it spawns or is placed.',
   speed: 'Walk speed in blocks per second (1 block = 64px). Min 0.01, max 64. Stored as world units internally.',
+  turnRateRadPerSec: 'Vehicle hull turn rate (rad/s). Facing slews toward move intent — no snap. Collider nose leads.',
   bulletSpeedPxSec: 'Bullet speed in blocks per second (same scale as walk Speed). Stored as world px/s.',
   'Bullet Spd (blocks/s)': 'Bullet speed in blocks per second (1 block = 64px).',
   'Speed (blocks/s)': 'Walk speed in blocks per second (1 block = 64px).',
@@ -145,7 +153,7 @@ const FIELD_HELP = {
   skills: 'Skill ids granted to this unit (passive or activatable).',
   startingLoadout: 'Starting inventory rows (items/weapons) this unit holds when it spawns. Hover a row to preview it in Trail.',
   currentSlot: 'Which loadout slot index is held/active first when the unit appears.',
-  weaponId: 'Pick a weapon id from the Weapons tab. This placeable/turret fires that template — gun stats stay on the Weapons sheet.',
+  weaponId: 'One shared weapon for every Pivot_turrent on this art (Base×4 / Turret×1 / Vehicle×N). Overlay uses Weapon_Turrent_* art when available; gun stats stay on the Weapons sheet.',
   defaultWeapon: 'Fallback gun id if loadout has no weapon. Set on the Units tab loadout when possible.',
   footprint: 'Occupied size in L3 cells (64×64). Minimum 1×1. Used for place overlap.',
   maxHp: 'Maximum hit points for this placeable template. Placed instances copy this as Max HP.',
@@ -179,6 +187,17 @@ const FIELD_HELP = {
   Art: 'Weapon SVG art group for preview and in-world draw (Weapons sheet).',
   Hold: 'Hold pose when a unit aims this weapon (Weapons sheet).',
   typeId: 'Internal placeable type tag. Not shown for Turrets in this editor.',
+  armorSlot: 'TOP = hat/helmet (Asset_Top_*). VEST = body vest — vest arms draw over skin arms.',
+  artId: 'Art group for this sheet type only (filtered — not the whole catalog). Empty = no invented art.',
+  modelId: 'Vehicle closed model only (model.vehicle.*). Unit sheet uses model (model.unit.*).',
+  previewHost: 'Weapon Settings preview: unit = skin under gun; empty = gun only.',
+  mobilityHpRatio: 'Hull HP ratio that triggers Mobility immobilized state.',
+  mobilityRepairChance: 'Deterministic wrench repair success chance (0–1).',
+  brokenClearSec: 'Seconds before a Broken wreck is cleared from the match.',
+  driverProtection: 'Pierce/explosion bleed to driver while mounted (absorbRatio, allowPierce, explosionFactor).',
+  startUnitDriven: 'Unit template that starts seated as driver (Driven). Empty = Nature/Empty.',
+  bulletArtId: 'Projectile tracer art (Bullet_* from ItemHold) for this weapon only.',
+  shotFrameArtId: 'Muzzle/shot frame art (Weapon_Turrent_*_Frame_shot) for this weapon.',
 };
 
 /** Append damage×armor multipliers for an armor column. */
@@ -298,6 +317,17 @@ export function toReadableLabel(str) {
     meleeRole: 'Role',
     maxStack: 'Max Stack',
     damageReduction: 'Dmg Reduct',
+    armorSlot: 'Armor Slot',
+    artId: 'Art Id',
+    modelId: 'Model Id',
+    mobilityHpRatio: 'Mobility HP %',
+    mobilityRepairChance: 'Repair Chance',
+    brokenClearSec: 'Broken Clear Sec',
+    driverProtection: 'Driver Protect',
+    startUnitDriven: 'Start Unit Driven',
+    bulletArtId: 'Bullet Art',
+    shotFrameArtId: 'Shot Frame',
+    previewHost: 'Preview Host',
     markerColor: 'Marker',
     shieldMaxHp: 'Shield HP',
     shieldRadius: 'Radius',
@@ -618,15 +648,17 @@ export function buildCatalogListPicker(opts) {
     if (value && onHoverId) onHoverId(value);
   });
 
-  menu.addEventListener('pointerleave', () => {
-    if (onHoverEnd) onHoverEnd();
-  });
+  // Do not clear trail on menu pointerleave — moving toward Trail must not
+  // collapse the open picker / interrupt list pointing.
+  menu.addEventListener('pointerleave', () => {});
 
   if (typeof document !== 'undefined' && !document.documentElement.dataset.editorCatalogPicker) {
     document.documentElement.dataset.editorCatalogPicker = '1';
     document.addEventListener('pointerdown', (event) => {
       const t = event.target;
       if (t && t.closest && t.closest('.editor-catalog-picker')) return;
+      // Clicks on Trail preview must not close an open art picker mid-select.
+      if (t && t.closest && t.closest('#editor-placed-tray')) return;
       document.querySelectorAll('.editor-catalog-picker .tool-picker-menu').forEach((node) => {
         if (node.hidden) return;
         node.hidden = true;
@@ -664,6 +696,13 @@ function renderItemLine(parent, row, ctx, onRemove) {
       row.itemId = id;
       const cap = ctx.stackCap ? ctx.stackCap(row.itemId) : 0;
       if (cap > 0 && (row.count | 0) > cap) row.count = cap;
+      if (ctx.loadoutWeapon && ctx.canWear) {
+        if (id && ctx.canWear(id)) {
+          if (row.active !== true && row.active !== false) row.active = false;
+        } else {
+          delete row.active;
+        }
+      }
       if (ctx.trailRelease) ctx.trailRelease();
       ctx.touch(true);
     },
@@ -714,7 +753,29 @@ function renderItemLine(parent, row, ctx, onRemove) {
     });
     line.appendChild(field('', input, 'is-short'));
   }
-  if ('active' in row && (!ctx.canWear || ctx.canWear(row.itemId))) {
+  // Vest / Helmet / Shield / Shield Energy — same On checkbox in unit loadout.
+  const wearable =
+    !!(ctx.canWear && row.itemId && ctx.canWear(row.itemId));
+  if (ctx.loadoutWeapon) {
+    if (wearable) {
+      if (row.active !== true && row.active !== false) row.active = false;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = row.active === true;
+      input.title = 'Wear / active';
+      input.addEventListener('change', () => {
+        row.active = input.checked;
+        ctx.touch(false);
+      });
+      line.appendChild(field('', input, 'is-check'));
+    } else {
+      if ('active' in row) delete row.active;
+      const spacer = document.createElement('span');
+      spacer.className = 'is-check';
+      spacer.setAttribute('aria-hidden', 'true');
+      line.appendChild(field('', spacer, 'is-check'));
+    }
+  } else if ('active' in row && wearable) {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = row.active === true;
@@ -889,7 +950,34 @@ function renderAiBehaviorPanel(parent, record, shape, ctx) {
   parent.appendChild(openBtn);
 }
 
+/** Drop legacy Unit keys that still hang on old map sheets. */
+function migrateUnitRecord(record) {
+  if (!record) return;
+  if (Array.isArray(record.activeSkills) && !Array.isArray(record.skills)) {
+    record.skills = record.activeSkills.slice();
+  }
+  if (ownKey(record, 'activeSkills')) delete record.activeSkills;
+  if (!record.model || typeof record.model !== 'string') {
+    record.model = 'model.unit.default_1';
+  }
+  if (!Array.isArray(record.startingLoadout)) record.startingLoadout = [];
+  if (record.currentSlot == null) record.currentSlot = 0;
+  // Strip obsolete one-off keys that confused old Settings layouts.
+  const drop = [
+    'weapon',
+    'heldWeapon',
+    'armorId',
+    'vestId',
+    'helmetId',
+    'wearIds',
+  ];
+  for (let i = 0; i < drop.length; i++) {
+    if (ownKey(record, drop[i])) delete record[drop[i]];
+  }
+}
+
 function renderUnitSections(parent, record, shape, ctx) {
+  migrateUnitRecord(record);
   appendSectionTitle(parent, 'Identity & Stats');
   if (ownKey(record, 'id') || hasRecordKey(record, shape, 'id')) {
     renderUnitField(parent, record, shape, ctx, 'id');
@@ -978,7 +1066,19 @@ function renderObject(parent, record, shape, ctx, isRoot, objOpts) {
     }
     renderValue(host, key, value, sample, (next) => {
       record[key] = next;
-      ctx.touch(key === 'id' || key === 'model');
+      if (ctx.afterField) ctx.afterField(key, next);
+      const refreshArt =
+        key === 'id' ||
+        key === 'model' ||
+        key === 'modelId' ||
+        key === 'artId' ||
+        key === 'armorSlot' ||
+        key === 'startUnitDriven' ||
+        key === 'previewHost' ||
+        key === 'bulletArtId' ||
+        key === 'shotFrameArtId' ||
+        key === 'weaponId';
+      ctx.touch(refreshArt);
     }, ctx, record, isRoot && key === 'id', objOpts);
   }
 }
@@ -1034,6 +1134,25 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
     parent.appendChild(note);
     return;
   }
+  // Vehicle turn / accel keys must stay number inputs even if a stale string leaked in.
+  const FORCE_NUMBER = {
+    turnRateRadPerSec: true,
+    speedBase: true,
+    speedMax: true,
+    accel: true,
+    brake: true,
+    ramSpeedMin: true,
+    ramDamage: true,
+    ramCooldownSec: true,
+    mobilityHpRatio: true,
+    mobilityRepairChance: true,
+    brokenClearSec: true,
+  };
+  if (FORCE_NUMBER[key] && typeof value !== 'number') {
+    value = Number(value);
+    if (!isFinite(value)) value = 0;
+    if (holder) holder[key] = value;
+  }
   if (typeof value === 'number') {
     const numberClass = fullWidth ? '' : 'is-short';
     if (key === 'currentSlot') {
@@ -1070,6 +1189,21 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         key === 'bulletSpeedPxSec' ? 'Bullet Spd (blocks/s)' : 'Speed (blocks/s)';
       const lab = field(label, input, numberClass, helpCtxOf(ctx, () => input.value));
       parent.appendChild(lab);
+      return;
+    }
+    if (key === 'turnRateRadPerSec') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.01';
+      input.min = '0';
+      input.value = String(value);
+      input.addEventListener('change', () => {
+        let next = Number(input.value);
+        if (!isFinite(next) || next < 0) next = 0;
+        input.value = String(next);
+        setValue(next);
+      });
+      parent.appendChild(field(key, input, numberClass, helpCtxOf(ctx, () => input.value)));
       return;
     }
     if (key === 'priorityScore') {
@@ -1162,8 +1296,53 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       return;
     }
     const options = ctx.choices(key, value);
+    const artTrailKeys = {
+      artId: true,
+      bulletArtId: true,
+      shotFrameArtId: true,
+      modelId: true,
+    };
+    if (artTrailKeys[key] && ctx.choices) {
+      const ids = (options || []).filter(Boolean);
+      const picker = buildCatalogListPicker({
+        ids,
+        value: value || '',
+        allowEmpty: true,
+        emptyLabel: '(none)',
+        formatId: (id) => id,
+        onChange: (id) => setValue(id),
+        onHoverId: (id) => {
+          if (ctx.trailPreview) ctx.trailPreview('artGroup', id);
+        },
+        onHoverEnd: () => {
+          if (ctx.trailRelease) ctx.trailRelease();
+        },
+      });
+      parent.appendChild(field(key, picker, '', helpCtxOf(ctx, () => value || '')));
+      return;
+    }
+    if (key === 'previewHost') {
+      const select = document.createElement('select');
+      ['unit', 'empty'].forEach((opt) => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt === 'unit' ? 'Unit + weapon' : 'Weapon only';
+        select.appendChild(option);
+      });
+      select.value = value === 'empty' ? 'empty' : 'unit';
+      select.addEventListener('change', () => setValue(select.value));
+      parent.appendChild(field(key, select, '', helpCtxOf(ctx, () => select.value)));
+      return;
+    }
     const select = document.createElement('select');
     const seen = {};
+    if (!value) {
+      const blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '(none)';
+      select.appendChild(blank);
+      seen[''] = true;
+    }
     for (let i = 0; i < options.length; i++) {
       if (seen[options[i]]) continue;
       seen[options[i]] = true;
@@ -1178,7 +1357,7 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
       option.textContent = value;
       select.appendChild(option);
     }
-    select.value = value;
+    select.value = value || '';
     select.addEventListener('change', () => setValue(select.value));
     parent.appendChild(field(key, select, '', helpCtxOf(ctx, () => select.value)));
     return;
@@ -1247,7 +1426,11 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         block.appendChild(input);
       }
     } else if (itemList) {
-      if (list[0]) lineHead(block, itemHead(list[0]), true);
+      const headSample =
+        key === 'startingLoadout'
+          ? Object.assign({}, list[0] || { itemId: '', count: 1 }, { active: false })
+          : list[0];
+      if (headSample) lineHead(block, itemHead(headSample), true);
       for (let i = 0; i < list.length; i++) {
         renderItemLine(block, list[i], childCtx, () => {
           list.splice(i, 1);

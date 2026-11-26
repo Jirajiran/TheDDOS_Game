@@ -41,6 +41,11 @@ import {
   registerSenseBlock,
   unregisterSenseBlock,
 } from '../ai/senseIndex.js';
+import {
+  tryVehicleInteract,
+  vehicleInteractHint,
+  unitIsDriving,
+} from './vehicle.js';
 export function getBlock(match, id) {
   return match.blockById[id] || null;
 }
@@ -157,17 +162,23 @@ export function findInteractTarget(match, unit, radius = GAME_PACK.interactRadiu
 }
 
 export function tryInteract(match, unit) {
+  // Vehicle enter/exit shares E / INTERACT (Unified Input).
+  if (tryVehicleInteract(match, unit)) return;
+
   const best = findInteractTarget(match, unit);
   if (!best) return;
 
   if (best.canToggle && best.isDoor) {
-    // Enemies cannot open — player only reaches here.
+    // Enemies cannot open — player / driver only.
+    if (unit.role !== 'player') return;
     best.isOpen = !best.isOpen;
     match.interactPrompt = best.isOpen ? 'Door open' : 'Door closed';
     return;
   }
 
   // Gen / Base → request UI panel (app opens receive panel; no window.prompt).
+  if (unit.role !== 'player') return;
+
   if (best.isGen && best.genRate) {
     match.pendingUi = {
       type: 'receive-gen',
@@ -430,6 +441,12 @@ export function applyDamageToBlock(match, block, baseDamage, damageType, ctx = {
     damageType,
     block.armorType || 'DEFAULT'
   );
+  const resist =
+    block.resistPercent &&
+    block.resistPercent[damageType || 'DEFAULT'];
+  if (typeof resist === 'number' && resist !== 0) {
+    dmg *= Math.max(0, 1 - resist / 100);
+  }
   if (block.isWire && damageType === 'DEFAULT') {
     dmg *= WIRE_MELEE_MULT;
   }
@@ -527,7 +544,11 @@ export function updateInteractPrompt(match) {
     return;
   }
   // Keep last explicit prompt briefly; refresh proximity hint.
-  let hint = '';
+  let hint = vehicleInteractHint(match, player);
+  if (unitIsDriving(player)) {
+    if (hint) match.interactPrompt = hint;
+    return;
+  }
   const pack = GAME_PACK;
   for (let i = 0; i < match.blocks.length; i++) {
     const b = match.blocks[i];

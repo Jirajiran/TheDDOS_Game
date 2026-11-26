@@ -1,9 +1,17 @@
 /**
- * Raster Weapon_* groups from Unit_Template.svg onto the gun mount.
+ * Raster Weapon_* groups from ItemHold.svg onto the gun mount.
  * Gameplay ids stay; this file is visual only.
  */
 
-const BTN_SVG_URL = 'Asset/AssetSVG/Unit/Unit_Template.svg?v=20261025a';
+import {
+  BULLET_ART_IDS,
+  ITEM_HOLD_FILE,
+  UNIT_TEMPLATE_FILE,
+} from '../assets/closedCatalog.js';
+
+/** Guns / bullets live in ItemHold; Action_* arm poses stay on Unit_Template. */
+const HOLD_SVG_URL = ITEM_HOLD_FILE + '?v=20261126a';
+const UNIT_SVG_URL = UNIT_TEMPLATE_FILE + '?v=20261126a';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -332,16 +340,27 @@ async function rasterIcon(sourceDoc, defs, groupId) {
 export function preloadWeaponBtnArt(table) {
   if (_load) return _load;
   _load = (async () => {
-    let text = '';
+    let holdText = '';
+    let unitText = '';
     try {
-      const res = await fetch(BTN_SVG_URL);
-      if (!res.ok) return;
-      text = await res.text();
+      const [holdRes, unitRes] = await Promise.all([
+        fetch(HOLD_SVG_URL),
+        fetch(UNIT_SVG_URL),
+      ]);
+      if (holdRes.ok) holdText = await holdRes.text();
+      if (unitRes.ok) unitText = await unitRes.text();
     } catch (e) {
       return;
     }
-    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
-    _armPoses = readActionArmPoses(doc);
+    if (unitText) {
+      const unitDoc = new DOMParser().parseFromString(unitText, 'image/svg+xml');
+      if (!unitDoc.querySelector('parsererror')) {
+        _armPoses = readActionArmPoses(unitDoc);
+      }
+    }
+    if (!holdText) return;
+    const doc = new DOMParser().parseFromString(holdText, 'image/svg+xml');
+    if (doc.querySelector('parsererror')) return;
     const defs = doc.querySelector('defs');
     if (!defs) return;
     const ids = Object.keys(table);
@@ -380,8 +399,12 @@ export function preloadWeaponBtnArt(table) {
         _images.set('icon:' + id, icon);
       }
     }
-    const rocket = await rasterProjectile(doc, defs, 'Bullet_Rpg');
-    _images.set('proj:Bullet_Rpg', rocket);
+    // All closed Bullet_* arts — weapons pick via bulletArtId, not hardcode.
+    for (let b = 0; b < BULLET_ART_IDS.length; b++) {
+      const artId = BULLET_ART_IDS[b];
+      const img = await rasterProjectile(doc, defs, artId);
+      _images.set('proj:' + artId, img);
+    }
   })();
   return _load;
 }

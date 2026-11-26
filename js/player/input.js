@@ -2,6 +2,7 @@ import {
   makeAimAction,
   makeFireAction,
   makeHarvestAction,
+  makeDriveAction,
   makeMoveAction,
   makePlaceAction,
   makeCancelReloadAction,
@@ -9,6 +10,7 @@ import {
   makeCastSkillAction,
   makeEquipWornAction,
   makeSelectHotbarAction,
+  makeToggleVehicleTurretAction,
 } from './actions.js';
 import { GAME_PACK, L3_SIZE } from '../config.js';
 import {
@@ -22,7 +24,7 @@ import {
 
 /**
  * Local human input → Action objects each frame.
- * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · RMB cancel reload · Q Fist · E interact · F craft · 1-0 hotbar
+ * WASD · AIM · FIRE/PLACE/HARVEST LMB · R reload · RMB cancel reload · Q Fist · E interact · T vehicle turret · F craft · 1-0 hotbar
  * When uiBlocked (panel open), suppress gameplay actions but still allow F/E/Esc toggle.
  * Hotbar drag sets actionBusy — suppress fire/place/harvest while held.
  * Chat mode: keys type into input; canvas mousedown dismisses chat then fires (enemy interrupt).
@@ -44,6 +46,7 @@ export function createInput(canvas, hooks = {}) {
   let healSkillPressed = false;
   let meleeVolumeTogglePressed = false;
   let chatTogglePressed = false;
+  let turretTogglePressed = false;
   let wheelDelta = 0;
   const digitPress = [];
   let uiBlocked = false;
@@ -147,6 +150,10 @@ export function createInput(canvas, hooks = {}) {
       fireHeld = true;
     }
     if (e.code === 'KeyR') reloadPressed = true;
+    if (e.code === 'KeyT') {
+      turretTogglePressed = true;
+      e.preventDefault();
+    }
     if (e.code === 'KeyQ') {
       fistPressed = true;
       e.preventDefault();
@@ -238,6 +245,23 @@ export function createInput(canvas, hooks = {}) {
     return { dx, dy };
   }
 
+  /** Tank: W forward, S reverse, A/D turn (not world walk). */
+  function driveAxis(stick) {
+    if (stick && stick.shown) {
+      return {
+        throttle: stick.moveY != null ? -stick.moveY : 0,
+        steer: stick.moveX || 0,
+      };
+    }
+    let throttle = 0;
+    let steer = 0;
+    if (keys.KeyW || keys.ArrowUp) throttle += 1;
+    if (keys.KeyS || keys.ArrowDown) throttle -= 1;
+    if (keys.KeyA || keys.ArrowLeft) steer -= 1;
+    if (keys.KeyD || keys.ArrowRight) steer += 1;
+    return { throttle, steer };
+  }
+
   function applyStickLook(viewW, viewH) {
     const stick = stickPose();
     if (!stick || !stick.shown) return stick;
@@ -271,7 +295,8 @@ export function createInput(canvas, hooks = {}) {
     };
   }
 
-  function poll(playerUnitId, camera, _viewW, _viewH, activeHotbar, inventory) {
+  function poll(playerUnitId, camera, _viewW, _viewH, activeHotbar, inventory, opts) {
+    const driving = !!(opts && opts.driving);
     const stick = applyStickLook(_viewW, _viewH);
     const escaped = escapePressed;
     escapePressed = false;
@@ -289,6 +314,7 @@ export function createInput(canvas, hooks = {}) {
       cancelReloadPressed = false;
       fistPressed = false;
       healSkillPressed = false;
+      turretTogglePressed = false;
       wheelDelta = 0;
       digitPress.length = 0;
       if (stick) {
@@ -324,10 +350,17 @@ export function createInput(canvas, hooks = {}) {
     if (uiBlocked) {
       // Panel open: MOVE + AIM (mouse facing). No fire / hotbar / place.
       // Gen must keep mouse aim — AIM after MOVE so facing is not WASD-only.
-      const { dx, dy } = currentMove(stick);
       const actions = [];
-      if (dx !== 0 || dy !== 0) {
-        actions.push(makeMoveAction(playerUnitId, dx, dy));
+      if (driving) {
+        const { throttle, steer } = driveAxis(stick);
+        if (throttle !== 0 || steer !== 0) {
+          actions.push(makeDriveAction(playerUnitId, throttle, steer));
+        }
+      } else {
+        const { dx, dy } = currentMove(stick);
+        if (dx !== 0 || dy !== 0) {
+          actions.push(makeMoveAction(playerUnitId, dx, dy));
+        }
       }
       const aim = makeAimAction(
         playerUnitId,
@@ -360,8 +393,8 @@ export function createInput(canvas, hooks = {}) {
         fistTogglePressed: false,
         healSkillTogglePressed: false,
         meleeVolumeTogglePressed: meleeVolToggle,
-        moveDx: dx,
-        moveDy: dy,
+        moveDx: driving ? 0 : (currentMove(stick).dx || 0),
+        moveDy: driving ? 0 : (currentMove(stick).dy || 0),
         uiBlocked: true,
         actionBusy,
         craftingState: true,
@@ -369,7 +402,8 @@ export function createInput(canvas, hooks = {}) {
     }
 
   const actions = [];
-  const { dx, dy } = currentMove(stick);
+  const footMove = currentMove(stick);
+  const tank = driving ? driveAxis(stick) : null;
 
   // Hotbar select first in the list (sim also applies SELECT in pass-1).
   let hotbarDelta = 0;
@@ -404,7 +438,11 @@ export function createInput(canvas, hooks = {}) {
     }
   }
 
-  actions.push(makeMoveAction(playerUnitId, dx, dy));
+  if (driving && tank) {
+    actions.push(makeDriveAction(playerUnitId, tank.throttle, tank.steer));
+  } else {
+    actions.push(makeMoveAction(playerUnitId, footMove.dx, footMove.dy));
+  }
 
   const zoom = camera.zoom > 0 ? camera.zoom : 1;
   let worldX = camera.x + mouseScreenX / zoom;
@@ -452,6 +490,10 @@ export function createInput(canvas, hooks = {}) {
       if (firePressed) {
         actions.push(makeHarvestAction(playerUnitId, worldX, worldY));
       }
+      // Space/hold still emits FIRE — sim routes to vehicle turret when driving.
+      if (firePressed || fireHeld) {
+        actions.push(makeFireAction(playerUnitId));
+      }
     } else if (isWeaponSlot(slot)) {
       if (firePressed || fireHeld) {
         actions.push(makeFireAction(playerUnitId));
@@ -460,8 +502,10 @@ export function createInput(canvas, hooks = {}) {
       if (firePressed) {
         actions.push(makeEquipWornAction(playerUnitId));
       }
+    } else if (firePressed || fireHeld) {
+      // Empty hands: vehicle MANUAL fire while driving (tryFire no-ops on foot).
+      actions.push(makeFireAction(playerUnitId));
     }
-    // Empty hands: no invented FIST cast — skills only via Q/C / Skill_Show from sheet.
   }
   firePressed = false;
   if (stick && stick.placeRelease) stick.placeRelease = false;
@@ -473,6 +517,10 @@ export function createInput(canvas, hooks = {}) {
   healSkillPressed = false;
   const interactToggle = interactPressed;
   interactPressed = false;
+  if (turretTogglePressed) {
+    actions.push(makeToggleVehicleTurretAction(playerUnitId));
+    turretTogglePressed = false;
+  }
 
   if (reloadPressed) {
     actions.push(makeReloadAction(playerUnitId));
@@ -495,8 +543,8 @@ export function createInput(canvas, hooks = {}) {
     fistTogglePressed: fistToggle,
     healSkillTogglePressed: healToggle,
     meleeVolumeTogglePressed: meleeVolToggle,
-    moveDx: dx,
-    moveDy: dy,
+    moveDx: driving ? (tank && tank.steer) || 0 : footMove.dx,
+    moveDy: driving ? (tank && tank.throttle) || 0 : footMove.dy,
     uiBlocked: false,
     actionBusy,
     chatMode: false,

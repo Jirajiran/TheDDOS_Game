@@ -1,7 +1,0 @@
-/**
- * Animate classic-script stub — หลีกเลี่ยง SyntaxError จาก export ใน publish HTML
- */
-(function () {
-	"use strict";
-	window.MapView = window.MapView || {};
-})();

@@ -12,6 +12,8 @@ import {
   getWeaponCoreImage,
   preloadWeaponBtnArt,
 } from './weaponBtnArt.js';
+import { preloadBlockArt } from './blockArt.js';
+import { preloadVehicleArt } from './vehicleArt.js';
 
 /** Same local frame as Unit_Template draw (SizeView is 64 wide). */
 const UNIT_LOCAL_W = 64;
@@ -80,6 +82,21 @@ export const WEAPON_BTN_ART = Object.freeze({
     group: 'Weapon_barret_50_cal',
     icon: 'Icon_barret_50_cal',
     pose: 'heavy',
+  }),
+  Weapon_Turrent_1: Object.freeze({
+    group: 'Weapon_Turrent_1',
+    shotFrame: 'Weapon_Turrent_1_Frame_shot',
+    pose: 'standard',
+  }),
+  Weapon_Turrent_2: Object.freeze({
+    group: 'Weapon_Turrent_2',
+    shotFrame: 'Weapon_Turrent_2_Frame_shot',
+    pose: 'standard',
+  }),
+  Weapon_Turrent_3: Object.freeze({
+    group: 'Weapon_Turrent_3',
+    shotFrame: 'Weapon_Turrent_3_Frame_shot',
+    pose: 'standard',
   }),
 });
 
@@ -402,6 +419,9 @@ export function getShieldArt(shieldId) {
  * Optional bitmapSrc entries get one Image each (never recreated on equip).
  */
 export function preloadEquipArtCache() {
+  // Vehicle / Block pivot art loads in parallel; weapons still gate the equip path cache.
+  preloadVehicleArt();
+  preloadBlockArt();
   if (_pathCache) return preloadWeaponBtnArt(WEAPON_BTN_ART);
   _pathCache = new Map();
   _imageCache = new Map();
@@ -509,8 +529,26 @@ export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
   const rimX = unit.x + cos * r;
   const rimY = unit.y + sin * r;
 
-  if (unit.activeArmorId) {
-    drawArmorMarker(ctx, unit, facing, r, unit.x, unit.y, zoom, lw, cache);
+  // SVG overlays handle TOP/VEST when artId is set; plate marker is fallback only.
+  const vestId = unit.activeArmorVestId || unit.activeArmorId;
+  const vestDef = vestId ? getItemDef(vestId) : null;
+  const topDef = unit.activeArmorTopId ? getItemDef(unit.activeArmorTopId) : null;
+  if (vestDef && !vestDef.artId) {
+    drawArmorMarker(ctx, unit, facing, r, unit.x, unit.y, zoom, lw, cache, vestId);
+  }
+  if (topDef && !topDef.artId) {
+    drawArmorMarker(
+      ctx,
+      unit,
+      facing,
+      r,
+      unit.x,
+      unit.y,
+      zoom,
+      lw,
+      cache,
+      unit.activeArmorTopId
+    );
   }
 
   const held = resolveHeldVisual(unit, opts);
@@ -553,7 +591,11 @@ export function drawUnitEquipCosmetics(ctx, unit, zoom, opts = {}) {
   }
 
   if (unit.shield && unit.shield.enabled && !unit.shield.broken && unit.shield.hp > 0) {
-    drawShieldMarker(ctx, unit, facing, r, zoom, lw, cache);
+    // SVG overlay from ItemHold when artId is set; marker is fallback only.
+    const shDef = unit.activeShieldId ? getItemDef(unit.activeShieldId) : null;
+    if (!(shDef && shDef.artId)) {
+      drawShieldMarker(ctx, unit, facing, r, zoom, lw, cache);
+    }
   }
 }
 
@@ -729,8 +771,9 @@ function drawHeldTool(ctx, unit, aim, r, rimX, rimY, zoom, lw, toolId, isPlayer,
   ctx.restore();
 }
 
-function drawArmorMarker(ctx, unit, aim, r, rimX, rimY, zoom, lw, cache) {
-  const art = getArmorArt(unit.activeArmorId);
+function drawArmorMarker(ctx, unit, aim, r, rimX, rimY, zoom, lw, cache, armorId) {
+  const id = armorId || unit.activeArmorId;
+  const art = getArmorArt(id);
   if (!art) return;
   const path = cache.get('armor:plate');
 
@@ -739,7 +782,7 @@ function drawArmorMarker(ctx, unit, aim, r, rimX, rimY, zoom, lw, cache) {
   ctx.rotate(aim);
   const scale = r / 12;
   ctx.scale(scale, scale);
-  const worn = getItemDef(unit.activeArmorId);
+  const worn = getItemDef(id);
   const plate = (worn && worn.color) || art.color;
   ctx.fillStyle = plate;
   ctx.strokeStyle = plate;

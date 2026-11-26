@@ -57,10 +57,88 @@ export let CRAFT_CATEGORIES = Object.freeze([]);
 let _armorItems = Object.freeze(Object.create(null));
 let _armorTypes = Object.freeze(['DEFAULT', 'BULLET', 'EXPLOSION', 'LAZER']);
 export let ACTOR_REGISTRY = Object.freeze(Object.create(null));
+/** Map/editor items for this match — win over pack on same id (Test Play / room map). */
+let _playItemOverlay = Object.freeze(Object.create(null));
 let _day = null;
 let _rules = null;
 let _ready = false;
 let _version = '0';
+
+/**
+ * Editor wear tabs (Helmet/Vest/Shield) must resolve as runtime ARMOR/SHIELD.
+ * Map sheets may still carry itemKind / legacy kind strings after category split.
+ */
+function normalizePlayWearItem(src) {
+  if (!src || typeof src !== 'object') return src;
+  const item = Object.assign({}, src);
+  const kind = String(item.kind || '');
+  const itemKind = String(item.itemKind || '');
+  const slot = String(item.armorSlot || '').toUpperCase();
+  const isHelmet =
+    itemKind === 'Helmet' ||
+    kind === 'Helmet' ||
+    slot === 'TOP' ||
+    slot === 'HEAD' ||
+    slot === 'HAT';
+  const isVest =
+    itemKind === 'Vest' ||
+    kind === 'Vest' ||
+    (kind === 'ARMOR' && !isHelmet) ||
+    (itemKind === 'Armor' && !isHelmet);
+  const isShieldEnergy =
+    itemKind === 'Shield Energy' || kind === 'Shield Energy';
+  const isShield =
+    kind === 'SHIELD' ||
+    kind === 'Shield' ||
+    itemKind === 'Shield' ||
+    isShieldEnergy;
+  if (isHelmet) {
+    item.kind = 'ARMOR';
+    item.armorSlot = 'TOP';
+    item.itemKind = 'Helmet';
+  } else if (isShield) {
+    item.kind = 'SHIELD';
+    item.itemKind = isShieldEnergy ? 'Shield Energy' : 'Shield';
+    delete item.armorSlot;
+  } else if (isVest) {
+    item.kind = 'ARMOR';
+    item.armorSlot = 'VEST';
+    item.itemKind = 'Vest';
+  }
+  if (!item.id && src.id) item.id = src.id;
+  return item;
+}
+
+/** Clear map-scoped item overlay (new match / pack reinstall). */
+export function clearPlayItemOverlay() {
+  _playItemOverlay = Object.freeze(Object.create(null));
+}
+
+/**
+ * Install editor/map item catalog for lookups during play.
+ * Overlay wins on id collision so Host loadout ids from the map resolve.
+ * @param {Record<string, object>|null|undefined} itemsMap
+ */
+export function installPlayItemOverlay(itemsMap) {
+  const next = Object.create(null);
+  if (itemsMap && typeof itemsMap === 'object') {
+    const keys = Object.keys(itemsMap);
+    for (let i = 0; i < keys.length; i++) {
+      const id = keys[i];
+      const raw = itemsMap[id];
+      if (!raw || raw.pending) continue;
+      const normalized = normalizePlayWearItem(raw);
+      if (!normalized) continue;
+      const record = Object.assign({}, normalized, {
+        id: normalized.id || id,
+      });
+      next[id] = Object.freeze(record);
+      const upper = String(id).toUpperCase();
+      if (upper !== id && !next[upper]) next[upper] = next[id];
+    }
+  }
+  _playItemOverlay = Object.freeze(next);
+}
 
 function markReady() {
   _ready =
@@ -83,6 +161,7 @@ export function getDefsVersion() {
 /** Install pack JSON docs. Does not merge a second hardcoded catalog. */
 export function installPackData(pack) {
   if (!pack) return _ready;
+  clearPlayItemOverlay();
 
   if (pack.weapons && pack.weapons.weapons) {
     WEAPON_REGISTRY = freezeMap(pack.weapons.weapons);
@@ -92,6 +171,29 @@ export function installPackData(pack) {
   }
   if (pack.items && pack.items.items) {
     ITEM_REGISTRY = freezeMap(pack.items.items);
+  }
+  // Placeable art lives on items.json — copy artId onto blocks so gameplay
+  // getBlockDef matches Editor Item art (Block_Base / walls / turrets).
+  if (Object.keys(ITEM_REGISTRY).length && Object.keys(BLOCK_REGISTRY).length) {
+    const merged = Object.create(null);
+    const bids = Object.keys(BLOCK_REGISTRY);
+    for (let i = 0; i < bids.length; i++) {
+      const id = bids[i];
+      const b = BLOCK_REGISTRY[id];
+      const item = ITEM_REGISTRY[id];
+      if (
+        b &&
+        item &&
+        typeof item.artId === 'string' &&
+        item.artId.trim() &&
+        !(b.artId && String(b.artId).trim())
+      ) {
+        merged[id] = Object.freeze(Object.assign({}, b, { artId: item.artId.trim() }));
+      } else {
+        merged[id] = b;
+      }
+    }
+    BLOCK_REGISTRY = Object.freeze(merged);
   }
   if (pack.skills && pack.skills.skills) {
     SKILL_REGISTRY = freezeMap(pack.skills.skills);
@@ -206,7 +308,16 @@ export function getBlock(id) {
 }
 
 export function getItem(id) {
-  return id ? ITEM_REGISTRY[id] || null : null;
+  if (!id) return null;
+  // Map overlay first — editor Host loadout / custom Helmet·Vest·Shield sheets.
+  if (_playItemOverlay[id]) return _playItemOverlay[id];
+  if (ITEM_REGISTRY[id]) return ITEM_REGISTRY[id];
+  const upper = String(id).toUpperCase();
+  if (upper !== id) {
+    if (_playItemOverlay[upper]) return _playItemOverlay[upper];
+    if (ITEM_REGISTRY[upper]) return ITEM_REGISTRY[upper];
+  }
+  return null;
 }
 
 export function getSkill(id) {

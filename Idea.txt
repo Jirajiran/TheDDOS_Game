@@ -1,162 +1,65 @@
- Program Function (Functional Thinking) คือการเปลี่ยนมุมมองจากการเขียนโค้ดสั่งให้บอท "เปลี่ยนสถานะไปมา" มาเป็นการมองสมองของบอทเป็น เครื่องจักรแปลงข้อมูล (Data Transformation Pipeline) ที่รับค่าสภาพแวดล้อมเป็น Input แล้วคำนวณคืนค่าการตัดสินใจออกมาเป็น Output โดยไม่เข้าไปแก้ไขค่าตัวแปรในโลกของเกมโดยตรง   1. หลักคิด 3 ข้อของการออกแบบฟังก์ชันให้ Bot คำนวณFunction as Mapping (รับ Input คืน Output ที่แน่นอน): ในทางคณิตศาสตร์และ Functional Programming ฟังก์ชันคือความสัมพันธ์ที่รับ Input เข้ามาประมวลผลแล้วคืนค่า Output ใหม่ออกไป เช่น ฟังก์ชัน CalculateDamage(60, 15) ที่แปลงค่าพลังโจมตีและป้องกันให้กลายเป็นค่าความเสียหาย 45 เมื่อนำมาใช้กับบอท ฟังก์ชันคำนวณจะทำหน้าที่เพียง "คิดเลขแล้วส่งคำตอบกลับ" (Pure Function) โดยห้ามสั่งลด HP ห้ามสั่งวาร์ป หรือเปลี่ยนค่า GameObject ภายนอกด้วยตัวเอง   Context-Free Transformation (แปลงข้อมูลโดยไม่ยึดติดตัวตน): ฟังก์ชันคำนวณที่ดีไม่จำเป็นต้องรู้บริบทหรือตัวตนของวัตถุ เช่น ฟังก์ชัน CalculateRemainingHP(currentHP, damage) ไม่ต้องรู้ว่า HP นี้เป็นของ Player หรือ Enemy แต่ต้องการรู้เพียงตัวเลข currentHP กับ damage เพื่อคำนวณเป็นค่า HP ชุดใหม่ ในระดับสมองบอท ฟังก์ชันคำนวณคะแนนจึงไม่ควรสนว่าบอทเป็นอาชีพอะไร แต่รับเพียงตัวเลขจาก Blackboard (เช่น hpRatio, distance, baseWeight) แล้วแปลงเป็นคะแนน priority   Continuous Transformation (ต่อท่อคำนวณเป็นลำดับขั้น): การตัดสินใจที่ซับซ้อนของบอทเกิดจากการนำฟังก์ชันขนาดเล็กหลายตัวมาเชื่อมต่อกันเป็นขั้นตอนต่อเนื่อง โดยนำ Output ของฟังก์ชันหนึ่งไปเป็น Input ของฟังก์ชันถัดไป เช่น นำ Attack และ Defense เข้า CalculateDamage เพื่อหา Damage จากนั้นส่ง Damage พร้อม Current HP เข้า CalculateRemainingHP เพื่อคำนวณเป็น New HP   2. เปรียบเทียบวิธีคิด: แบบ State เดิม vs แบบ Program Functionมิติการออกแบบการคิดแบบ Stateful / Imperative (FSM เดิม)การคิดแบบ Program Function (Functional)หน้าที่ของโค้ดตรวจสอบเงื่อนไขแล้วสั่งเปลี่ยน State หรือแก้ค่าตัวแปรทันทีรับข้อมูลชุดหนึ่งเข้ามาคำนวณ แล้วแปลงเป็นข้อมูลชุดใหม่   การผูกติดกับข้อมูลโค้ดมักผูกกับตัวตน เช่น เช็คว่าเป็น Player หรือบอทสายไหนแยกขาดจากตัวตน รับเฉพาะค่าตัวแปรที่จำเป็นต่อการคำนวณ   โครงสร้างการทำงานใช้ if-else ซ้อนกันหลายชั้นและกระโดดข้าม State ไปมาต่อท่อฟังก์ชันเป็นลำดับขั้นชัดเจน (Input → Transform → Output)   การทดสอบและดีบักยาก เพราะผลลัพธ์ขึ้นอยู่กับลำดับการเปลี่ยน State ก่อนหน้าง่าย เพราะหากใส่ Input ชุดเดิม จะได้ Output เดิมเสมอ3. การวาง Pipeline ให้ Bot คิดคำนวณในแต่ละเฟรม (Tick)เมื่อนำแนวคิดการแปลงข้อมูลแบบต่อเนื่อง มาประกอบเข้ากับสถาปัตยกรรม Blackboard → Mediator → Stage → Actions สมองของบอทใน 1 เฟรมจะทำงานเป็นท่อคำนวณ 4 ขั้นตอน:   อ่านข้อมูลและคัดกรอง (Sense & Filter): ดึงสถานะปัจจุบันของบอทและเป้าหมายรอบตัวจาก Blackboard โดยควรเลือกใช้โครงสร้างข้อมูลแบบ Hash Table อย่าง Dictionary<TKey, TValue> หรือ HashSet<T> ในการเก็บและค้นหาข้อมูลเป้าหมาย เพื่อให้ตรวจสอบสถานะได้รวดเร็วคงที่ในระดับ $O(1)$   แปลงข้อมูลเป็นคะแนน (Transform to Priority): ส่งค่าตัวเลขจาก Blackboard เข้าฟังก์ชันคำนวณของแต่ละ Goal (baseWeight + eventBoost + factors) เพื่อแปลงข้อมูลสถานการณ์ให้กลายเป็นตัวเลขคะแนนความสำคัญ   เลือกผู้ชนะและจับคู่การทำงาน (Select & Map Stage): หา Goal ที่ได้คะแนนสูงสุด (argmax) แล้วใช้ Dictionary<TKey, TValue> แปลง Goal นั้นให้กลายเป็น Stage ผ่านตาราง GoalToStage ด้วยความเร็ว $O(1)$ (หรือหากต้องการให้ระบบจัดเรียงลำดับความสำคัญของตัวเลือกตลอดเวลา สามารถใช้โครงสร้าง Balanced Tree อย่าง SortedDictionary<TKey, TValue> หรือ SortedSet<T> ที่เรียงลำดับให้อัตโนมัติในระดับ $O(\log n)$)   แปลงแผนการเป็นคำสั่ง (Action Transformation): ส่งข้อมูลเป้าหมายบน Blackboard เข้าฟังก์ชันของ Stage ที่ถูกเลือก เพื่อคำนวณและคืนค่าลิสต์คำสั่ง Actions[] (MOVE, AIM, FIRE) ออกไปให้ระบบเกมนำไปสั่งงานตัวละคร4. ตัวอย่างการเขียนฟังก์ชันคำนวณของ Bot แบบต่อท่อตัวอย่างการเขียนฟังก์ชันแยกย่อยที่รับ Input แล้วคืน Output ต่อเนื่องกันคล้ายกับคู่ฟังก์ชัน CalculateDamage และ CalculateRemainingHP:   C#// ขั้นที่ 1: Function แปลงสภาพแวดล้อม (Input) เป็นคะแนนของ Goal (Output)
-// ไม่สนใจว่าบอทคือใคร รู้แค่ตัวเลขปัจจัยที่ส่งเข้ามา
-static int CalculateEngagePriority(int baseWeight, int eventBoost, float distance, float maxRange, bool hasTarget)
-{
-    if (!hasTarget) return int.MinValue; // ไม่มีเป้า ให้คะแนนต่ำสุด
-    int proximityBonus = (int)(Math.Max(0, 1.0f - (distance / maxRange)) * 100);
-    return baseWeight + eventBoost + proximityBonus;
-}
+1. Shield System (ระบบโล่)
+พฤติกรรมเมื่อพัง: หากโล่แตก/พัง ให้ลบหรือนำออกจาก Slot ทันที
 
-// ขั้นที่ 2: Function เลือก Goal ผู้ชนะแล้ว Mapping ไปเป็นชื่อ Stage
-static string ResolveActiveStage(Dictionary<string, int> goalScores, Dictionary<string, string> goalToStage)
-{
-    string bestGoal = "REACH_PATH_GOAL";
-    int highestScore = int.MinValue;
+ข้อยกเว้น: โล่ประเภท Shield Energy ไม่ต้องหายไปจาก Slot เมื่อพัง (ให้รอฟื้นฟูหรือจัดการสถานะตามกลไกของ Energy Shield แทน)
 
-    foreach (var pair in goalScores)
-    {
-        if (pair.Value > highestScore)
-        {
-            highestScore = pair.Value;
-            bestGoal = pair.Key;
-        }
-    }
-    return goalToStage[bestGoal]; // ค้นหา Stage ใน O(1)
-}
+2. Vehicle & Turret System (ระบบยานพาหนะ ป้อมปืน และ AI ผู้ขับ)
+โครงสร้างการสืบทอด (Inheritance):
 
-// ขั้นที่ 3: นำ Output ของแต่ละขั้นมาต่อท่อเข้าด้วยกัน (Continuous Transformation)
-int engageScore = CalculateEngagePriority(500, 150, currentDistance, 10.0f, target != null);
-string nextStage = ResolveActiveStage(currentScores, goalToStageMap);
+Vehicle สืบทอดมาจาก Unit และปรับแต่งระบบการเคลื่อนที่ (Movement) ใหม่
 
-โจทย์ คือ การคำนวณค่าความสำคัญ ต่อ เป้าหมาย ต้องดูจาก input?
+Turret บนรถ สืบทอดมาจาก Turret และสืบทอดต่อจาก Unit สำหรับการหมุนและการถือ Weapon
 
-ใช่ครับ การคำนวณค่าความสำคัญ (priority) ของทุก Goal ใน js/ai/mediator.js ต้องมองเป็น Pure Function ที่ตัดสินใจจาก Input 100% โดยสิ่งที่ฟังก์ชันคำนวณ "รู้" มีแค่ชุดข้อมูล Input ที่ถูกป้อนเข้ามาในเฟรมนั้นเท่านั้น ห้ามไปแอบดึงสถานะของ Stage อื่น หรือคาดเดาบทบาทนอกเหนือจากตัวเลขที่มีอยู่   
-AI-Stage-Goals-and-Actions.txt
-+ 1
+ปัญหาที่พบ:
 
-หากอิงตามสมการหลักของสถาปัตยกรรมนี้:   
-AI-Stage-Goals-and-Actions.txt
+Movement ทะลุขอบฉาก: ยานพาหนะยังเคลื่อนที่ทะลุออกนอกฉากไปได้ เหมือนไม่ได้รับการสืบทอดหรือ override ส่วนของ Collider / ขอบเขตการเคลื่อนที่จาก Unit อย่างถูกต้อง
 
-priority
-[
-Goal
-]
-=
-baseWeight
-[
-Goal
-]
-+
-Σ
-eventBoost
-[
-Event
-→
-Goal
-]
-+
-factors
-(
-…
-)
-priority[Goal]=baseWeight[Goal]+ΣeventBoost[Event→Goal]+factors(…)
-"Input" ที่ส่งเข้ามาให้ฟังก์ชันคำนวณในแต่ละ Mediator.tick จะถูกแยกออกเป็น 3 กลุ่มข้อมูล อย่างชัดเจนครับ:
+Turret หันแบบกระตุก/ทันที (Snap rotation): ป้อมปืนควรค่อย ๆ หมุนหันตามเป้าหมาย แต่ปัจจุบันกลับหันตัดช่วงหรือหันทันที เหมือนไม่ได้ใช้ระบบการหมุนที่สืบทอดมา
 
-1. กลุ่มข้อมูล Input 3 แหล่งสำหรับการคำนวณ Priority
-แหล่งที่มาของ Input	ตัวแปรที่ส่งเข้าฟังก์ชัน	บทบาทในการคำนวณคะแนน
-1. Static Config / Pack		
-
-(ข้อมูลตั้งต้นประจำตัว) | baseWeight[Goal], allowedGoals, thresholds (เช่น retreatHpRatio, preferredRange) | กำหนด "น้ำหนักพื้นฐานและนิสัย" ของบอทตั้งแต่เกิด (เช่น ตัวพังฐานมี DESTROY_BASE สูงกว่าปกติ) |
-| 2. Frame Events   
-AI-Stage-Goals-and-Actions.txt
+AI / Bot ขับรถไม่ได้: Bot ผู้ขับไม่รู้วิธีสั่งการหรือคำนวณการเคลื่อนที่ตามรูปแบบ Movement ใหม่ของ Vehicle (หรือขาด interface/API ที่รองรับการเคลื่อนที่แบบใหม่)
 
 
-(สิ่งเร้าในรอบเฟรม) | eventBoost (
-Δ
-priority
-Δpriority) และ eventFlags จาก js/ai/senseIndex.js หรือระบบความเสียหาย | บอก "เหตุการณ์ฉับพลัน" ที่เพิ่งเกิดขึ้น เช่น โดนยิง (HIT_BY_PLAYER_BULLET), เจอศัตรู (SPOTTED_PLAYER), หรือหลุดโซน (LEFT_GENERAL_SECTOR) |
-| 3. State & Blackboard Snapshot   
-AI-Stage-Goals-and-Actions.txt
-+ 1
+3. Bullet / Projectile Assets (ระบบกระสุนและ Asset)
+ประเด็นที่ต้องตรวจสอบ: ยืนยันว่าเกมกำลังเรียกใช้ Asset กระสุนตัวจริง (ตัวใหม่ที่วาดมาแล้ว) หรือยังดึง ของเก่า มาใช้อยู่
+
+ข้อสงสัย: มีการปะปนหรือรวมกันของ Asset เก่าและใหม่ในโปรเจกต์/Prefab/ระบบกระสุนหรือไม่ ทำให้ไม่แน่ใจว่าตัวไหนถูกใช้งานจริง
 
 
-(สภาพปัจจุบัน ณ วินาทีนั้น) | hp, maxHp, x, y, weaponId, combatTargetId, combatLockTimer, seekX, seekY, inGeneralSector | ใช้คำนวณในพจน์ factors(...) เพื่อปรับคะแนนตามความได้เปรียบเสียเปรียบจริง เช่น ระยะห่างศัตรู หรือสัดส่วนเลือด (hpRatio) |   
-AI-Stage-Goals-and-Actions.txt
-+ 1
+แนวคิดการออกแบบ
+1. การสร้างเส้นกราฟจำลองจาก "ความเร็วต้น" (Velocity-Aware Curve Generation)แนวคิดที่ให้บอทไม่ต้องรับรู้ความเร็วต้นตลอดเวลา แต่ใช้ความเร็วต้นเป็นตัวแปรตั้งต้นในการสร้างเส้นกราฟ (Spline) สามารถทำได้ผ่าน Hermite Spline หรือ Cubic Bezier Curve:สมการเวกเตอร์เริ่มต้น ($P_0$ และ $T_0$): เมื่อเริ่มคำนวณเส้นทาง ให้ดึงตำแหน่งปัจจุบันเป็นจุดเริ่มต้น ($P_0$) และนำ เวกเตอร์ความเร็วปัจจุบัน ($\vec{v}_0$) มาคูณกับค่าคงที่ของแรงเฉื่อย (Momentum Factor) เพื่อสร้างเป็น จุดควบคุมแรก (Control Point / Tangent $T_0$)ผลลัพธ์ที่ได้: หากรถกำลังวิ่งมาด้วยความเร็วสูง เส้นกราฟที่ถูกสร้างขึ้นจะมีรัศมีโค้งที่กว้างและทอดยาวไปข้างหน้าตามทิศทางเดิมก่อนจะค่อยๆ โค้งเข้าหาเป้าหมาย ทำให้รถไม่หักเลี้ยวกะทันหัน (ไม่หักดิบ) โดยที่ตัวบอทในเฟรมถัดๆ ไปแค่ "ไถลตามจุดบนเส้นกราฟ" ไปเรื่อยๆการเก็บค่าความโค้งล่วงหน้า (Curvature Profiling): ระหว่างที่สร้างจุดตัวอย่าง splinePoints[] ให้คำนวณค่าความโค้ง (curvature[]) เก็บไว้ด้วย เพื่อให้ระบบขับเคลื่อนรู้ล่วงหน้าว่าต้องผ่อนคันเร่งก่อนถึงโค้งหักศอก2. การเคลื่อนที่ตามเส้น (Pure Pursuit / Spline Following)เมื่อมีเส้นกราฟใน Blackboard แล้ว บอท (หรือส่วนตัวถัง Hull) ไม่ต้องคิดหาทางใหม่ทุกเฟรม:Lookahead Point: บอทจะเลื่อนตัวชี้ (splineCursor) ไปข้างหน้าตามระยะมองล่วงหน้า (Lookahead Distance) บนเส้นกราฟ แล้วส่งเวกเตอร์ทิศทางไปยังตัวควบคุมการเคลื่อนที่การควบคุมพวงมาลัย (Steering): ในชั้นฟิสิกส์ จะแปลงเวกเตอร์เป้าหมายเป็นแรงขับเคลื่อนและมุมเลี้ยวแบบ Bicycle / Ackermann Steering (รัศมีวงเลี้ยวแปรผันตามความเร็ว) แต่หากรถหยุดนิ่ง (currentSpeed <= minTurnSpeed) สามารถปลดล็อกโหมด Pivot Turn เพื่อหมุนตัวถังอยู่กับที่ให้ตรงกับทิศทางเริ่มต้นของเส้นกราฟก่อนออกตัวได้3. การเก็บตัวแปรสิ่งกีดขวางและการหลบหลีก (Obstacle Avoidance)เพื่อไม่ให้ต้องคำนวณเส้นกราฟใหม่ทั้งหมดทุกครั้งที่เจอสิ่งกีดขวางเล็กน้อย ให้แบ่งการหลบออกเป็น 2 ระดับ:ระดับที่ 1: การเบี่ยงหลบชั่วคราว (Local Steering / Raycast Offset)เก็บข้อมูลสิ่งกีดขวางรอบตัวในระยะสายตา (เช่น ผ่าน senseIndex หรือ Raycast รูปพัดด้านหน้า)หากมีสิ่งกีดขวางขวางอยู่บนเส้นกราฟ ให้บวก เวกเตอร์แรงผลักด้านข้าง (Lateral Offset) เข้าไปกับจุด Lookahead Point ชั่วคราว ทำให้รถเบี่ยงออกด้านข้างเพื่อหลบสิ่งกีดขวาง แล้วค่อยๆ ดึงตัวเองกลับเข้าสู่เส้นกราฟหลักเมื่อพ้นระยะ โดยไม่ต้องสร้างกราฟใหม่ระดับที่ 2: การอ้อมสิ่งกีดขวางขนาดใหญ่ (Virtual Waypoint / Tangent Orbit)หากสิ่งกีดขวางปิดตายเส้นทางด้านหน้าทั้งหมด (เช่น กลุ่มยูนิตยืนขวางเต็มช่องทาง) ระบบจะคำนวณจุดศูนย์กลางและรัศมีของกลุ่มสิ่งกีดขวาง แล้วสร้าง จุดแวะชั่วคราว (virtualWaypoint) ที่มุมสัมผัสด้านข้าง ($\pm 90^\circ$ ถึง $\pm 135^\circ$) เพื่อให้รถตีวงอ้อมโอบสิ่งกีดขวางนั้น ก่อนจะกลับเข้าเส้นทางหลัก4. เงื่อนไขการคำนวณเส้นทางใหม่เมื่อเกิดการชน (Collision & Re-pathing)หากเกิดการชน หรือรถเบี่ยงหลบจนหลุดออกจากเส้นกราฟเดิมไปไกล ระบบควรมีกลไก Reset และคำนวณกราฟใหม่ (Re-compute Spline) ใน 3 กรณีนี้:เกิดการปะทะ (OnCollision / Impact Event): เมื่อชนเข้ากับสิ่งกีดขวาง ความเร็วต้น ($\vec{v}_0$) จะเปลี่ยนไปอย่างกะทันหัน (เช่น ความเร็วลดลงเหลือ 0 หรือเด้งถอยหลัง) ให้ล้างเส้นกราฟเก่าทิ้งทันที แล้วใช้ ความเร็วหลังการชน ($\vec{v}_{\text{new}}$) เป็นค่าตั้งต้นในการสร้างเส้นกราฟชุดใหม่หลุดออกนอกระยะเส้นทาง (Off-Track Threshold): หากรถถูกแรงระเบิดหรือถูกเบียดจนระยะห่างจากจุดปัจจุบันไปยังจุดที่ใกล้ที่สุดบน splinePoints[] เกินค่าที่กำหนด (maxDeviationDistance) ให้สั่งคำนวณเส้นกราฟใหม่จากตำแหน่งและความเร็วปัจจุบันรถติดหล่ม / ขยับไม่ได้ (Stuck Escalation): หากบอทพยายามเร่งเครื่องแล้วแต่ระยะทางขยับน้อยกว่าเกณฑ์นานเกินเวลาที่กำหนด (เช่น 1.2 วินาที) ให้ส่งสัญญาณ PATH_BLOCKED เพื่อให้ระบบวางแผนระดับบน (Path Planner / General) เปลี่ยนจุดหมายย่อย (Pivot) หรือสั่งถอยหลังตั้งหลักก่อนสร้างเส้นกราฟใหม่ข้อควรระวังเพิ่มเติมสำหรับการออกแบบ 2D:ระยะ Lookahead แบบแปรผัน (Dynamic Lookahead): ควรปรับระยะมองล่วงหน้าบนเส้นกราฟให้แปรผันตามความเร็ว (Lookahead = baseDist + currentSpeed * k) ถ้ารถวิ่งเร็วแล้วยังใช้ระยะมองใกล้เกินไป รถจะส่ายไปมา (Oscillation) บนเส้นกราฟ แต่ถ้ามองไกลขึ้นตอนวิ่งเร็ว รถจะเข้าโค้งได้นุ่มนวลขึ้นมากครับ
 
-2. หลักการแปลง Input เป็นคะแนน (Input-Driven Scoring Rules)
-เมื่อฟังก์ชันรับ Input ทั้ง 3 กลุ่มเข้ามาแล้ว วิธีคิดแบบ Program Function จะใช้กฎ 3 ข้อนี้ในการแปลง Input ให้กลายเป็นตัวเลขคะแนน:
+การใช้ระบบ Hybrid (เลี้ยวตีวงแบบรถยนต์ตอนวิ่ง + หมุนตัวถังอยู่กับที่แบบรถถังตอนหยุดนิ่ง) เป็นวิธีที่ลงตัวที่สุดสำหรับเกม 2D เพราะทำให้รถดูมีน้ำหนักสมจริงตอนวิ่ง แต่ไม่ติดบั๊กเลี้ยวไม่พ้นตามซอกแคบๆเมื่อนำกลไกนี้มาผสานเข้ากับท่อ Stage (APPROACH_PATH) $\rightarrow$ MOVE(dx, dy) $\rightarrow$ applyActions (Unified Input) จะสามารถวางโครงสร้างสมการและลอจิกได้ 3 ส่วนดังนี้ครับ:1. การสร้างเส้นกราฟจำลอง (Spline) ตามสไตล์รถยนต์และรถถังเมื่อเริ่มออกตัวหรือคำนวณเส้นทางใหม่ (Re-path) ให้สร้างเส้นโค้ง Cubic Bezier โดยดูสถานะความเร็วต้น ($\vec{v}_0$) เป็นตัวกำหนดจุดควบคุมแรก ($P_1$):กรณีที่ 1: รถกำลังเคลื่อนที่อยู่ (currentSpeed > minTurnSpeed) — สไตล์รถยนต์
+นำเวกเตอร์ความเร็วปัจจุบันมาคำนวณเป็นจุดควบคุมแรก เพื่อให้เส้นโค้งทอดยาวไปตามแรงเฉื่อยเดิมก่อนเลี้ยว:$$P_1 = P_0 + (\vec{v}_0 \times \text{momentumFactor})$$(ทำให้รถไม่หักดิบ แต่ค่อยๆ ตีวงโค้งเข้าหาจุดหมาย)กรณีที่ 2: รถหยุดนิ่ง (currentSpeed <= minTurnSpeed) — สไตล์รถถัง
+ไม่จำเป็นต้องดัดโค้งรับแรงเฉื่อยเริ่มต้น ให้วางจุดควบคุมแรก ($P_1$) ชี้ตรงไปยังจุดหมายถัดไป ($P_2$) ได้เลย เพราะเดี๋ยวตัวถังจะใช้วิธีหมุนอยู่กับที่ (Pivot Turn) ให้ตรงกับมุมเริ่มต้นของเส้นกราฟก่อนเร่งเครื่องออกตัว2. การแปลงคำสั่ง MOVE(dx, dy) ในชั้น applyActions (Hybrid Physics)ในฝั่งบอท (Stage APPROACH_PATH) ยังคงทำหน้าที่แค่เลื่อนตัวชี้ splineCursor และหลบสิ่งกีดขวางเพื่อส่งเวกเตอร์ MOVE(dx, dy) ออกมาตามปกติ ส่วนการตัดสินใจว่าจะ "หมุนอยู่กับที่" หรือ "วิ่งตีวงโค้ง" จะอยู่ในฟังก์ชัน applyActions ของ Vehicle:JavaScriptfunction applyVehicleMovement(vehicle, targetDx, targetDy, curvature, dt) {
+  const targetAngle = Math.atan2(targetDy, targetDx);
+  const angleDiff = normalizeAngle(targetAngle - vehicle.heading); // ส่วนต่างมุม (-PI ถึง PI)
+  const isStopped = vehicle.currentSpeed <= vehicle.minTurnSpeed;
 
-ใช้ Input เป็นตัวคัดกรองสิทธิ์ (Hard Gate / 
-−
-∞
-−∞):
-ก่อนจะบวกเลขใดๆ ฟังก์ชันต้องเช็ค Input ที่จำเป็นก่อนเสมอ เช่น หาก Goal ไม่อยู่ใน allowedGoals, หรือ Goal คือ ELIMINATE_PLAYER แต่ Input บอกว่า combatTargetId === null, หรือ Goal คือ SEEK_HEAL_POINT แต่ seekX === null ฟังก์ชันต้องคืนค่า 
-−
-∞
-−∞ ทันทีเพื่อตัด Goal นั้นออกจากการเลือก   
-AI-Stage-Goals-and-Actions.txt
-
-คำนวณ factors จากตัวเลขเพียวๆ (Context-Free Math):
-ฟังก์ชันคำนวณ factors จะไม่สนว่าเป้าหมายเป็น "บอส" หรือ "หมอ" แต่จะหยิบตัวเลขจาก Input มาเข้าสูตรคณิตศาสตร์ตรงๆ เช่น:   
-AI-Stage-Goals-and-Actions.txt
-
-ปัจจัยระยะทาง (Proximity Factor): ยิ่ง distance เข้าใกล้ระยะหวังผล (preferredRange) ยิ่งบวกคะแนนให้ ELIMINATE_* เพิ่ม
-
-ปัจจัยการล็อกเป้า (Aggro Lock Factor): นำค่า combatLockTimer ที่เหลืออยู่มาคูณเป็นโบนัส เพื่อไม่ให้บอทเปลี่ยนใจสลับเป้าไปมาทุกเฟรม   
-AI-Stage-Goals-and-Actions.txt
-
-ปัจจัยความเสี่ยง (HP Risk Factor): นำ hpRatio (hp / maxHp) มาเทียบกับ retreatHpRatio เพื่อปลดล็อกคะแนนของ SURVIVE_RETREAT   
-AI-Stage-Goals-and-Actions.txt
-
-Deterministic 100% (Input เดิม = Output เดิม):
-เพราะสมการดึงค่ามาจาก Input 3 ก้อนนี้เท่านั้น หากเราบันทึกค่า Config + Events + Blackboard Snapshot ของเฟรมที่บอททำงานผิดพลาดไว้ เราสามารถโยน Input ชุดเดิมกลับเข้าฟังก์ชันคำนวณเพื่อดีบักได้ทันทีโดยไม่ต้องรันเกมใหม่ทั้งหมด   
-AI-Stage-Goals-and-Actions.txt
-
-3. ตัวอย่างโครงสร้าง Pure Function ใน js/ai/mediator.js
-JavaScript
-// Pure Function: รับเฉพาะ Input (config, unitState, bbSnapshot) -> คืนค่า Map ของคะแนน priority
-function evaluateGoalPriorities(config, unitState, bb) {
-  const scores = {};
-  const hpRatio = unitState.hp / Math.max(1, unitState.maxHp);
-
-  for (const goal of config.allowedGoals) {
-    // 1. Input พื้นฐาน: baseWeight + Σ eventBoost[cite: 2, 3]
-    const base = config.baseWeight[goal] ?? 0;
-    const boost = bb.decision.eventBoosts[goal] ?? 0;
-
-    // 2. Input สถานการณ์: คำนวณ factors และเช็คเงื่อนไขตัดสิทธิ์ (-Infinity)[cite: 1, 2]
-    let factorScore = 0;
-
-    if (goal === 'ELIMINATE_PLAYER' || goal === 'ELIMINATE_TARGET') {
-      if (!bb.decision.combatTargetId) {
-        scores[goal] = -Infinity; // ไม่มีเป้าใน Blackboard ตัดสิทธิ์ทันที[cite: 1, 2]
-        continue;
-      }
-      const lockBonus = bb.decision.combatLockTimer > 0 ? 150 : 0; // กันอาการเปลี่ยนเป้าไปมา[cite: 1, 2]
-      const proximityBonus = Math.max(0, 100 - bb.decision.targetDistance);
-      factorScore = lockBonus + proximityBonus;
-    } 
-    else if (goal === 'SEEK_HEAL_POINT') {
-      if (hpRatio > config.thresholds.retreatHpRatio || bb.survival.seekX === null) {
-        scores[goal] = -Infinity; // เลือดยังไม่ต่ำหรือไม่มีพิกัดจุดฮีล[cite: 1]
-        continue;
-      }
-      factorScore = (1.0 - hpRatio) * 200; // ยิ่งเลือดน้อย ยิ่งอยากไปจุดฮีล[cite: 1, 2]
-    } 
-    else if (goal === 'SURVIVE_RETREAT') {
-      if (hpRatio > config.thresholds.retreatHpRatio) {
-        scores[goal] = -Infinity;[cite: 1]
-        continue;
-      }
-      factorScore = (1.0 - hpRatio) * 150;
-    }
-
-    // 3. รวมผลลัพธ์เป็นคะแนนสุทธิของ Goal นี้[cite: 2, 3]
-    scores[goal] = base + boost + factorScore;
+  // โหมด 1: รถถัง (Pivot Turn) — ทำงานเมื่อรถหยุดนิ่งและมุมหันยังไม่ตรงกับเส้นกราฟ
+  if (isStopped && Math.abs(angleDiff) > vehicle.pivotThresholdRad) {
+    const turnDir = Math.sign(angleDiff);
+    const turnStep = vehicle.pivotTurnSpeed * dt;
+    
+    // หมุนตัวถังอยู่กับที่จนกว่าจะตรงทิศทางเส้นกราฟ
+    vehicle.heading += Math.abs(angleDiff) < turnStep ? angleDiff : turnDir * turnStep;
+    vehicle.currentSpeed = 0; // ล็อกความเร็วไว้จนกว่าจะหันเสร็จ
+    return;
   }
 
-  return scores; // Output ส่งต่อไปให้ argmax เลือก activeGoal[cite: 2, 3]
-}
-ในส่วนของ Input กลุ่มที่ 2 และ 3 คุณอยากให้เราลงลึกเรื่อง วิธีออกแบบสมการ factors ของแต่ละ Goal (เช่น สูตรคำนวณความคุ้มค่าในการเลือกยิง PLAYER เทียบกับ BLOCK_BASE) หรือ การจัดโครงสร้างข้อมูล Input บน Blackboard ให้คลีนขึ้นก่อนดีครับ?
+  // โหมด 2: รถยนต์ (Ackermann / Bicycle Steering) — ทำงานเมื่อออกตัววิ่งแล้ว
+  // 1. คำนวณความเร็วเป้าหมาย (ชะลอความเร็วอัตโนมัติถ้าข้างหน้าเป็นโค้งหักศอก)
+  const maxAllowedSpeed = vehicle.maxSpeed * (1 - curvature * vehicle.cornerBrakeFactor);
+  vehicle.currentSpeed = moveTowards(vehicle.currentSpeed, maxAllowedSpeed, vehicle.accel * dt);
 
+  // 2. จำกัดองศาการเลี้ยว (Steer Angle) ไม่ให้หักเกินลิมิตของล้อรถยนต์
+  const steerAngle = clamp(angleDiff, -vehicle.maxSteerAngle, vehicle.maxSteerAngle);
+  
+  // 3. อัตราการหมุนตัวถังแปรผันตามความเร็วและฐานล้อ (ยิ่งวิ่งช้า วงเลี้ยวยิ่งแคบ)
+  const angularVelocity = (vehicle.currentSpeed / vehicle.wheelBase) * Math.sin(steerAngle);
+  vehicle.heading += angularVelocity * dt;
+
+  // 4. อัปเดตเวกเตอร์ความเร็วตามทิศหัวรถ (ลดการไถลด้านข้างด้วย Grip)
+  vehicle.vx = Math.cos(vehicle.heading) * vehicle.currentSpeed;
+  vehicle.vy = Math.sin(vehicle.heading) * vehicle.currentSpeed;
+}
+3. ลำดับการแก้ปัญหาเมื่อเกิดการชน (Collision Recovery)เมื่อรถวิ่งชนสิ่งกีดขวางจนความเร็วตกลงมาเป็น 0 ระบบ Hybrid นี้จะช่วยให้การกู้คืนเส้นทางทำได้ง่ายขึ้นมาก:จังหวะปะทะ (OnCollision): ความเร็ว currentSpeed ถูกตัดเป็น 0 ทันที และล้างเส้นกราฟเก่าทิ้งจังหวะถอยหลังตั้งหลัก (Reverse Step): หากระยะห่างด้านหน้ารถชิดสิ่งกีดขวางเกินระยะปลอดภัย (frontClearance < minSafeDist) ให้บอทส่งคำสั่งถอยหลังตรงๆ เป็นเวลาสั้นๆ (เช่น 0.4 วินาที) เพื่อให้มีพื้นที่ว่างด้านหน้ารถจังหวะหมุนตัวถัง + สร้างกราฟใหม่: เมื่อถอยจนได้ระยะและหยุดนิ่ง (currentSpeed === 0) ระบบจะสร้างเส้นกราฟชุดใหม่ไปทางช่องว่างที่หลบสิ่งกีดขวาง แล้วเข้า โหมดรถถัง (Pivot Turn) หมุนตัวถังอยู่กับที่ให้หันหน้าเข้าหาเส้นกราฟใหม่จนตรง ก่อนจะเร่งเครื่องวิ่งต่อใน โหมดรถยนต์ ทันทีข้อดีของการผสาน 2 ระบบนี้เข้ากับสถาปัตยกรรมเดิม:ป้อมปืน (Turret) เล็งแม่นยำขึ้น: เพราะ Turret ผูกติดกับพิกัดของ Hull การที่ตัวถังค่อยๆ โค้งหรือหมุนด้วยความเร็วเชิงมุมที่แน่นอน ทำให้ระบบคำนวณดักทางกระสุน (Lead Target) ของป้อมปืนไม่ต้องรับมือกับแรงกระชากกะทันหันรองรับ BUFF_MOBILITY_KILL ได้ทันที: หากรถโดนยิงจนติดสถานะ Mobility Kill แค่ตั้งค่า maxSpeed = 0 และ pivotTurnSpeed = 0 รถจะหยุดนิ่งและล็อกตัวถังทันที โดยที่ Turret ด้านบนยังหมุนยิงต่อได้ตามปกติ

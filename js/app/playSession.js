@@ -159,7 +159,18 @@ export function createPlaySession(hub) {
         enemiesPresent: (match.enemiesAlive || 0) > 0,
         slots: match.inventory || [],
         activeHotbar: match.activeHotbar || 0,
-        wornArmorSlot: match.wornArmorSlot != null ? match.wornArmorSlot : -1,
+        wornArmorSlot: match.wornArmorVestSlot != null
+          ? match.wornArmorVestSlot
+          : match.wornArmorSlot != null
+            ? match.wornArmorSlot
+            : -1,
+        wornArmorTopSlot:
+          match.wornArmorTopSlot != null ? match.wornArmorTopSlot : -1,
+        wornArmorVestSlot: match.wornArmorVestSlot != null
+          ? match.wornArmorVestSlot
+          : match.wornArmorSlot != null
+            ? match.wornArmorSlot
+            : -1,
         wornShieldSlot: match.wornShieldSlot != null ? match.wornShieldSlot : -1,
         backpackTier: getEquippedBackpackTier(match),
         skills,
@@ -195,13 +206,25 @@ export function createPlaySession(hub) {
       if (anchor && state.input.setAimAnchor) {
         state.input.setAimAnchor(anchor.x, anchor.y);
       }
+      const playerUnit =
+        match.pools && match.pools.units
+          ? match.pools.units[playerId]
+          : null;
       const polled = state.input.poll(
         playerId,
         state.camera,
         cssW,
         cssH,
         match.activeHotbar,
-        match.inventory
+        match.inventory,
+        {
+          driving: !!(
+            playerUnit &&
+            playerUnit.vehicleId != null &&
+            playerUnit.hiddenInVehicle &&
+            !playerUnit.vehicleTween
+          ),
+        }
       );
       state.mouseScreenX = polled.mouseScreenX;
       state.mouseScreenY = polled.mouseScreenY;

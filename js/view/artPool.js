@@ -23,6 +23,11 @@ let gameplayPool = null;
  *   pixels?: Uint8ClampedArray,
  *   dataUrl: string,
  *   image?: HTMLImageElement|null,
+ *   footW?: number,
+ *   footH?: number,
+ *   pivots?: {x:number,y:number}[],
+ *   sizeSide?: number,
+ *   kind?: string,
  * }} ArtPoolEntry
  */
 
@@ -40,6 +45,27 @@ export function artPoolKeyUnitComposite(groupId, spec) {
   return 'u:' + (groupId || '') + '|' + hold + '|' + gun;
 }
 
+/** Shared structure composite key (Settings / Trail / Tools / map / gameplay). */
+export function artPoolKeyStructure(artId, weaponGroup, footW, footH) {
+  const fw = Math.max(1, footW != null ? footW | 0 : 1);
+  const fh = Math.max(1, footH != null ? footH | 0 : 1);
+  return (
+    's4:' +
+    (artId || '-') +
+    '|' +
+    (weaponGroup || '-') +
+    '|' +
+    fw +
+    'x' +
+    fh
+  );
+}
+
+/** Shared vehicle composite key. */
+export function artPoolKeyVehicle(artId, skinId, weaponGroup) {
+  return 'v4:' + (artId || '') + '|' + (skinId || '-') + '|' + (weaponGroup || '-');
+}
+
 export function getGameplayArtPool() {
   return gameplayPool;
 }
@@ -47,6 +73,50 @@ export function getGameplayArtPool() {
 export function setGameplayArtPool(pool) {
   gameplayPool = pool || null;
   return gameplayPool;
+}
+
+/** Copy entries into the gameplay pool (same sprites Settings baked). */
+export function mergeIntoGameplayArtPool(fromMap) {
+  if (!fromMap || typeof fromMap.forEach !== 'function') return getGameplayArtPool();
+  const pool = gameplayPool || setGameplayArtPool(new Map());
+  fromMap.forEach((entry, key) => {
+    if (entry && key) pool.set(key, entry);
+  });
+  return pool;
+}
+
+/**
+ * Draw a pool entry into a world/footprint rect (center-anchored).
+ * footW/footH on the entry: one SizeView cell maps to destW/footW.
+ */
+export function drawArtPoolEntry(ctx, entry, x, y, destW, destH, opts) {
+  if (!ctx || !entry) return false;
+  const img = entry.image;
+  const fw = entry.frameW | 0;
+  const fh = entry.frameH | 0;
+  if ((!img || !img.width) && !entry.dataUrl) return false;
+  const cell = entry.cellSize || ART_POOL_PIXEL;
+  const footW = Math.max(1, entry.footW != null ? entry.footW | 0 : 1);
+  const footH = Math.max(1, entry.footH != null ? entry.footH | 0 : 1);
+  const cellWorld = Math.min(destW / footW, destH / footH);
+  const scale = cellWorld / cell;
+  const drawW = fw * scale;
+  const drawH = fh * scale;
+  const cx = x + destW / 2;
+  const cy = y + destH / 2;
+  const rot = opts && typeof opts.rotation === 'number' ? opts.rotation : 0;
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rot) ctx.rotate(rot);
+  ctx.imageSmoothingEnabled = false;
+  if (img && img.width > 0) {
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+  } else {
+    ctx.restore();
+    return false;
+  }
+  ctx.restore();
+  return true;
 }
 
 /** Hard alpha + bucketed RGB → lineless low-bit look. */
@@ -75,7 +145,7 @@ export function downsampleToPixelArt(srcCanvas, destW, destH) {
   const out = document.createElement('canvas');
   out.width = destW;
   out.height = destH;
-  const octx = out.getContext('2d');
+  const octx = out.getContext('2d', { willReadFrequently: true });
   octx.imageSmoothingEnabled = false;
   octx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, 0, 0, destW, destH);
   const img = octx.getImageData(0, 0, destW, destH);
@@ -117,7 +187,7 @@ export async function rasterMarkupToEntry(markup, destW, destH) {
     hctx.clearRect(0, 0, hiW, hiH);
     hctx.drawImage(img, 0, 0, hiW, hiH);
     const canvas = downsampleToPixelArt(hi, w, h);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const imageData = ctx.getImageData(0, 0, w, h);
     const dataUrl = canvas.toDataURL('image/png');
     const outImg = await loadImageFromUrl(dataUrl, 'async').catch(() => null);
@@ -166,7 +236,7 @@ export async function rasterSvgXmlToEntry(xmlSvg, framePx) {
     hctx.clearRect(0, 0, hiPx, hiPx);
     hctx.drawImage(img, 0, 0, hiPx, hiPx);
     const canvas = downsampleToPixelArt(hi, px, px);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const imageData = ctx.getImageData(0, 0, px, px);
     const dataUrl = canvas.toDataURL('image/png');
     const outImg = await loadImageFromUrl(dataUrl, 'async').catch(() => null);

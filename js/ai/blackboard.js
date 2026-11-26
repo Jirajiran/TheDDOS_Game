@@ -60,6 +60,9 @@ export const STAGE_TO_LEGACY = Object.freeze({
   PLACE: 'place',
 });
 
+/** When driving, legacy label for HUD / debug. */
+export const DRIVE_STAGE_LEGACY = 'drive';
+
 function emptyPriorityMap() {
   const m = Object.create(null);
   const keys = Object.keys(Goal);
@@ -345,6 +348,11 @@ export function writePathGoal(ent, x, y, radius) {
   bb.pathGoalRadius = radius != null ? radius : 160;
   ent.pathGoalX = x;
   ent.pathGoalY = y;
+  if (bb.navigation) {
+    bb.navigation.pathGoalX = x;
+    bb.navigation.pathGoalY = y;
+    bb.navigation.pathGoalRadius = bb.pathGoalRadius;
+  }
   return bb;
 }
 

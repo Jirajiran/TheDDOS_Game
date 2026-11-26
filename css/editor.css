@@ -739,6 +739,58 @@ image.map-art-pool {
   align-items: end;
 }
 
+.editor-line.is-resist-row {
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.editor-resist-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0 4px;
+  max-width: 16rem;
+}
+
+.editor-resist-cell {
+  flex: 1 1 72px;
+  min-width: 64px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #b8b3a6;
+}
+
+.editor-resist-column .editor-resist-cell {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.editor-resist-cell input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #0e1116;
+  border: 1px solid #4a5568;
+  border-radius: 3px;
+  color: #e6e1d6;
+  color-scheme: dark;
+}
+
+.editor-resist-cell input:focus {
+  outline: 2px solid #71829b;
+  border-color: #71829b;
+}
+
+.editor-matrix-modal-body .editor-resist-column {
+  max-width: 14rem;
+}
+
 .editor-line.is-compact-row {
   flex-wrap: nowrap;
   align-items: center;

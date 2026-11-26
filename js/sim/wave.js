@@ -26,6 +26,7 @@ import {
   acquireUnit,
 } from '../world/pools.js';
 import {
+  ensureUnitWearVisuals,
   skinGroupIdFromSheet,
   UNIT_VISUAL_ACTIONS,
 } from '../view/unitVisual.js';
@@ -400,9 +401,15 @@ function spawnRows(match, rows) {
       u.tauntTimer = 0;
       u.tauntedById = -1;
       u.activeArmorId = null;
+      u.activeArmorTopId = null;
+      u.activeArmorVestId = null;
       u.activeShieldId = null;
-      if (orders.armorId) equipArmorOnUnit(u, orders.armorId);
+      if (orders.armorTopId) equipArmorOnUnit(u, orders.armorTopId);
+      if (orders.armorVestId || orders.armorId) {
+        equipArmorOnUnit(u, orders.armorVestId || orders.armorId);
+      }
       if (orders.shieldId) equipShieldOnUnit(u, orders.shieldId);
+      ensureUnitWearVisuals(u);
       u.hasPlacementSkill = !!(archetype && archetype.hasPlacementSkill);
       u.inventory = null;
       u.activeHotbar = orders.currentSlot || 0;

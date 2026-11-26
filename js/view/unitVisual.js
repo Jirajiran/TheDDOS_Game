@@ -1,14 +1,18 @@
 /**
  * Unit_Template.svg — visual only.
  * Z (top→bottom): Asset Top → Body → Weapon → Arm → Asset Bottom
- * Paint order: Bottom → Arm → (weapon in render) → Body → Top
+ * Paint order: Bottom → Arm → VestArm overlay → (weapon) → Body → Top → WornTop
+ * Vest arms draw ON TOP of skin arms (same pose) — do not replace skin arms.
  * Action tween = Arm_1 / Arm_2 matrices only · SizeView = L3 64.
  * Enemy default = Default_skin_2. Playable menu skins = Default 1–2 only.
  */
 
-import { GAME_PACK, L3_SIZE, ReloadType, getWeaponDef } from '../config.js';
+import { GAME_PACK, L3_SIZE, ReloadType, getItemDef, getWeaponDef } from '../config.js';
 import {
   UNIT_TEMPLATE_FILE,
+  ITEM_HOLD_FILE,
+  ARMOR_VEST_ART_IDS,
+  ARMOR_TOP_ART_IDS,
   closedModelGroupId,
   listClosedModelGroupIds,
 } from '../assets/closedCatalog.js';
@@ -150,6 +154,9 @@ const ARM_VB = Object.freeze({ x: -80, y: -80, w: 160, h: 160 });
 
 let _svgText = '';
 let _defsHtml = '';
+/** ItemHold.svg text — shield / hold overlays not in Unit_Template. */
+let _itemHoldText = '';
+let _itemHoldDefsHtml = '';
 /** @type {Map<string, {arm1:object,arm2:object,pivot1:object}>} */
 const _armPoses = new Map();
 /** @type {Map<string, HTMLImageElement|null>} */
@@ -390,6 +397,28 @@ async function ensureLayerImage(skinGroupId, kind) {
   return p;
 }
 
+function findArmChild(root, which) {
+  if (!root) return null;
+  const kids = root.querySelectorAll('[id]');
+  let armEl = null;
+  for (let i = 0; i < kids.length; i++) {
+    const id = kids[i].getAttribute('id') || '';
+    if (which === 1 && (/^Asset_Arm_1/i.test(id) || /^Arm_1/i.test(id))) {
+      armEl = kids[i];
+      break;
+    }
+    if (which === 2 && (/^Asset_Arm_2/i.test(id) || /^Arm_2/i.test(id))) {
+      armEl = kids[i];
+      break;
+    }
+    if (which === 1 && /^Arm_n/i.test(id)) {
+      armEl = kids[i];
+      break;
+    }
+  }
+  return armEl;
+}
+
 async function ensureArmImage(skinGroupId, which) {
   const key = `arm${which}::${skinGroupId}`;
   if (_armCache.has(key)) return _armCache.get(key);
@@ -398,25 +427,7 @@ async function ensureArmImage(skinGroupId, which) {
   const p = (async () => {
     const doc = new DOMParser().parseFromString(_svgText, 'image/svg+xml');
     const skin = doc.getElementById(skinGroupId);
-    let armEl = null;
-    if (skin) {
-      const kids = skin.querySelectorAll('[id]');
-      for (let i = 0; i < kids.length; i++) {
-        const id = kids[i].getAttribute('id') || '';
-        if (which === 1 && /^Arm_1/i.test(id)) {
-          armEl = kids[i];
-          break;
-        }
-        if (which === 2 && /^Arm_2/i.test(id)) {
-          armEl = kids[i];
-          break;
-        }
-        if (which === 1 && /^Arm_n/i.test(id)) {
-          armEl = kids[i];
-          break;
-        }
-      }
-    }
+    let armEl = findArmChild(skin, which);
     if (!armEl) {
       armEl = findByIds(
         doc,
@@ -454,6 +465,217 @@ async function ensureArmImage(skinGroupId, which) {
 
   _pending.set(key, p);
   return p;
+}
+
+/** Vest arm overlay — raster from Asset_Arm_Vest_* / Asset_Arm_1|2 (not skin). */
+async function ensureVestArmImage(vestGroupId, which) {
+  const key = `vestArm${which}::${vestGroupId}`;
+  if (_armCache.has(key)) return _armCache.get(key);
+  if (_pending.has(key)) return _pending.get(key);
+
+  const p = (async () => {
+    const doc = new DOMParser().parseFromString(_svgText, 'image/svg+xml');
+    const vest = doc.getElementById(vestGroupId);
+    const armEl = findArmChild(vest, which);
+    if (!armEl) {
+      _armCache.set(key, null);
+      return null;
+    }
+    const clone = armEl.cloneNode(true);
+    clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+    const markup = wrapSvg(
+      new XMLSerializer().serializeToString(clone),
+      ARM_VB,
+      ARM_RASTER_PX
+    );
+    const img = await svgMarkupToPoolImage(markup, ARM_RASTER_PX, ARM_RASTER_PX);
+    _armCache.set(key, img);
+    return img;
+  })().finally(() => _pending.delete(key));
+
+  _pending.set(key, p);
+  return p;
+}
+
+/**
+ * Worn TOP hat/helmet — Asset_Top_* overlay.
+ * Same bake contract as skin layers: reset shelf transform → hide SizeView →
+ * LOCAL_VB + Unit_Template defs (Suit_* via <use>). Editor Map composes the
+ * same group into the unit; Gameplay draws it as a front overlay.
+ */
+async function ensureWornTopImage(topGroupId) {
+  const key = `wornTop::${topGroupId}`;
+  if (_layerCache.has(key)) return _layerCache.get(key);
+  if (_pending.has(key)) return _pending.get(key);
+
+  const p = (async () => {
+    if (!_svgText) {
+      _layerCache.set(key, null);
+      return null;
+    }
+    const doc = new DOMParser().parseFromString(_svgText, 'image/svg+xml');
+    const src = doc.getElementById(topGroupId);
+    if (!src) {
+      _layerCache.set(key, null);
+      return null;
+    }
+    const clone = src.cloneNode(true);
+    // Drop shelf translate (e.g. 143,329) — same as Editor cloneArtGroup.
+    clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+    const all = clone.querySelectorAll('[id]');
+    for (let i = 0; i < all.length; i++) {
+      const id = all[i].getAttribute('id') || '';
+      for (let pfx = 0; pfx < MEASURE_PREFIXES.length; pfx++) {
+        if (id.indexOf(MEASURE_PREFIXES[pfx]) === 0) hideEl(all[i]);
+      }
+    }
+    const markup = wrapSvg(
+      new XMLSerializer().serializeToString(clone),
+      LOCAL_VB,
+      RASTER_PX
+    );
+    const img = await svgMarkupToPoolImage(markup, RASTER_PX, RASTER_PX);
+    _layerCache.set(key, img || null);
+    return img || null;
+  })().finally(() => _pending.delete(key));
+
+  _pending.set(key, p);
+  return p;
+}
+
+function wrapItemHoldSvg(inner, vb, px) {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
+    `width="${px}" height="${px}" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" ` +
+    `preserveAspectRatio="xMidYMid meet">` +
+    `<defs>${_itemHoldDefsHtml}</defs>${inner}</svg>`
+  );
+}
+
+async function ensureItemHoldText() {
+  if (_itemHoldText) return true;
+  try {
+    const res = await fetch(ITEM_HOLD_FILE + '?v=20261126a', { cache: 'no-cache' });
+    if (!res.ok) return false;
+    _itemHoldText = await res.text();
+    const doc = new DOMParser().parseFromString(_itemHoldText, 'image/svg+xml');
+    const defs = doc.querySelector('defs');
+    _itemHoldDefsHtml = defs ? defs.innerHTML : '';
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Shield item art from ItemHold (Basic / Energy). */
+async function ensureWornShieldImage(shieldGroupId) {
+  const key = `wornShield::${shieldGroupId}`;
+  if (_layerCache.has(key)) return _layerCache.get(key);
+  if (_pending.has(key)) return _pending.get(key);
+
+  const p = (async () => {
+    const ok = await ensureItemHoldText();
+    if (!ok || !_itemHoldText) {
+      _layerCache.set(key, null);
+      return null;
+    }
+    const doc = new DOMParser().parseFromString(_itemHoldText, 'image/svg+xml');
+    const src = doc.getElementById(shieldGroupId);
+    if (!src) {
+      _layerCache.set(key, null);
+      return null;
+    }
+    const clone = src.cloneNode(true);
+    clone.setAttribute('transform', 'matrix(1,0,0,1,0,0)');
+    const markup = wrapItemHoldSvg(
+      new XMLSerializer().serializeToString(clone),
+      LOCAL_VB,
+      RASTER_PX
+    );
+    const entry = await rasterMarkupToEntry(markup, RASTER_PX, RASTER_PX);
+    const img = entry ? await ensureEntryImage(entry) : null;
+    _layerCache.set(key, img);
+    return img;
+  })().finally(() => _pending.delete(key));
+
+  _pending.set(key, p);
+  return p;
+}
+
+function wornVestArtId(unit) {
+  const id = unit && (unit.activeArmorVestId || unit.activeArmorId);
+  if (!id) return '';
+  const def = getItemDef(id);
+  return (def && def.artId && String(def.artId).trim()) || '';
+}
+
+function wornTopArtId(unit) {
+  const id = unit && unit.activeArmorTopId;
+  if (!id) return '';
+  const def = getItemDef(id);
+  if (def && def.artId && String(def.artId).trim()) return String(def.artId).trim();
+  // Allow art group id stored directly (Editor trail / custom sheets).
+  if (/^Asset_Top_/i.test(String(id))) return String(id);
+  return '';
+}
+
+/**
+ * Kick wear rasters. Vest path unchanged (vest arms only).
+ * Helmet TOP = same equip channel model as Vest; display = Asset_Top_* overlay.
+ */
+export function ensureUnitWearVisuals(unit) {
+  if (!unit) return;
+  const vest = wornVestArtId(unit);
+  if (vest) {
+    ensureVestArmImage(vest, 1);
+    ensureVestArmImage(vest, 2);
+  }
+  const top = wornTopArtId(unit);
+  if (top) ensureWornTopImage(top);
+  const shield = wornShieldArtId(unit);
+  if (shield) ensureWornShieldImage(shield);
+}
+
+function wornShieldArtId(unit) {
+  if (!unit || !unit.activeShieldId) return '';
+  if (!unit.shield || !unit.shield.enabled || unit.shield.broken) return '';
+  if (!(unit.shield.hp > 0)) return '';
+  const def = getItemDef(unit.activeShieldId);
+  return (def && def.artId && String(def.artId).trim()) || '';
+}
+
+/**
+ * Hotbar icon for Helmet (TOP) — same Asset_Top_* bake Editor wear preview uses.
+ * Vest must NOT use this (keeps color-pad path that already works).
+ * Returns href only when raster is ready (never a half-baked URL → invisible fill:none).
+ */
+export function getTopWearSlotIconHref(itemId) {
+  if (!itemId) return null;
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== 'ARMOR') return null;
+  const artId =
+    def.artId && String(def.artId).trim()
+      ? String(def.artId).trim()
+      : '';
+  if (!artId || !/^Asset_Top_/i.test(artId)) return null;
+  const img = _layerCache.get(`wornTop::${artId}`);
+  if (img && img.src) return img.src;
+  ensureWornTopImage(artId);
+  return null;
+}
+
+/** Hotbar icon for Shield — ItemHold art (optional; Vest untouched). */
+export function getShieldWearSlotIconHref(itemId) {
+  if (!itemId) return null;
+  const def = getItemDef(itemId);
+  if (!def || def.kind !== 'SHIELD') return null;
+  const artId =
+    def.artId && String(def.artId).trim() ? String(def.artId).trim() : '';
+  if (!artId) return null;
+  const img = _layerCache.get(`wornShield::${artId}`);
+  if (img && img.src) return img.src;
+  ensureWornShieldImage(artId);
+  return null;
 }
 
 /** Idle composite for menu preview (bottom + arms + body + top). */
@@ -504,7 +726,13 @@ export async function buildGameplayLayerArtPool(onProgress) {
   const pool = getGameplayArtPool() || setGameplayArtPool(new Map());
   const skins = listClosedModelGroupIds();
   const kinds = ['body', 'assetBottom', 'assetTop'];
-  const total = skins.length * (kinds.length + 2 + 1);
+  const vestIds = ARMOR_VEST_ART_IDS.slice();
+  const topIds = ARMOR_TOP_ART_IDS.slice();
+  const total =
+    skins.length * (kinds.length + 2 + 1) +
+    vestIds.length * 2 +
+    topIds.length +
+    1;
   let done = 0;
   const report = (label) => {
     if (onProgress) onProgress(label, done, total);
@@ -524,12 +752,29 @@ export async function buildGameplayLayerArtPool(onProgress) {
     done += 1;
     await yieldPaint();
   }
+  for (let i = 0; i < vestIds.length; i++) {
+    report('Art pool · vest ' + vestIds[i]);
+    await ensureVestArmImage(vestIds[i], 1);
+    done += 1;
+    await ensureVestArmImage(vestIds[i], 2);
+    done += 1;
+  }
+  for (let i = 0; i < topIds.length; i++) {
+    report('Art pool · top ' + topIds[i]);
+    await ensureWornTopImage(topIds[i]);
+    done += 1;
+  }
+  report('Art pool · ItemHold shields');
+  await ensureItemHoldText();
+  done += 1;
   report('Art pool ready · ' + pool.size + ' layer sprites');
   return pool;
 }
 
 export async function initUnitVisualFromSvgText(svgText, onProgress) {
   _svgText = String(svgText || '');
+  _itemHoldText = '';
+  _itemHoldDefsHtml = '';
   _layerCache.clear();
   _armCache.clear();
   _pending.clear();
@@ -763,6 +1008,8 @@ export function tickAllUnitVisuals(match, dt) {
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (!u.active) continue;
+    // Hidden in hull — no arm/body tween (driver is key only, not a walking sprite).
+    if (u.hiddenInVehicle && !u.vehicleTween) continue;
     if (u.role === 'enemy') {
       u.skinGroupId = enemySkinGroupId();
     }
@@ -891,7 +1138,7 @@ function ensureSkinCaches(skinGroup) {
 }
 
 /**
- * Back pass: Asset Bottom → Arm_1 / Arm_2.
+ * Back pass: Asset Bottom → skin Arm_1/2 → vest Arm overlay (same pose).
  * @returns {boolean} true if body cache ready (unit visuals usable)
  */
 export function drawUnitVisualBack(ctx, unit, zoom) {
@@ -911,18 +1158,31 @@ export function drawUnitVisualBack(ctx, unit, zoom) {
   if (!arm1) ensureArmImage(skinGroup, 1);
   if (!arm2) ensureArmImage(skinGroup, 2);
 
+  const vestId = wornVestArtId(unit);
+  let vestArm1 = null;
+  let vestArm2 = null;
+  if (vestId) {
+    vestArm1 = _armCache.get(`vestArm1::${vestId}`);
+    vestArm2 = _armCache.get(`vestArm2::${vestId}`);
+    if (!vestArm1) ensureVestArmImage(vestId, 1);
+    if (!vestArm2) ensureVestArmImage(vestId, 2);
+  }
+
   ctx.save();
   ctx.translate(unit.x, unit.y);
   ctx.rotate(facingOffset(unit));
   drawLocalLayer(ctx, bottom, unitScale);
   if (arm1) drawArm(ctx, arm1, pose.arm1, unitScale);
   if (arm2) drawArm(ctx, arm2, pose.arm2, unitScale);
+  // Overlay: vest arms on top of skin arms — any skin keeps vest look.
+  if (vestArm1) drawArm(ctx, vestArm1, pose.arm1, unitScale);
+  if (vestArm2) drawArm(ctx, vestArm2, pose.arm2, unitScale);
   ctx.restore();
   return true;
 }
 
 /**
- * Front pass: Body (+Outfit) → Asset Top.
+ * Front pass: Body (+Outfit) → Asset Top → worn TOP helmet/cap → shield art.
  * @returns {boolean}
  */
 export function drawUnitVisualFront(ctx, unit, zoom) {
@@ -936,12 +1196,27 @@ export function drawUnitVisualFront(ctx, unit, zoom) {
 
   const unitScale = unitScaleOf(unit);
   const top = _layerCache.get(`assetTop::${skinGroup}`);
+  const topArtId = wornTopArtId(unit);
+  let wornTop = null;
+  if (topArtId) {
+    const topKey = `wornTop::${topArtId}`;
+    if (_layerCache.has(topKey)) wornTop = _layerCache.get(topKey);
+    else ensureWornTopImage(topArtId);
+  }
+  const shieldArtId = wornShieldArtId(unit);
+  let wornShield = null;
+  if (shieldArtId) {
+    wornShield = _layerCache.get(`wornShield::${shieldArtId}`);
+    if (!wornShield) ensureWornShieldImage(shieldArtId);
+  }
 
   ctx.save();
   ctx.translate(unit.x, unit.y);
   ctx.rotate(facingOffset(unit));
   drawLocalLayer(ctx, body, unitScale);
   drawLocalLayer(ctx, top, unitScale);
+  if (wornTop) drawLocalLayer(ctx, wornTop, unitScale);
+  if (wornShield) drawLocalLayer(ctx, wornShield, unitScale);
   ctx.restore();
   return true;
 }

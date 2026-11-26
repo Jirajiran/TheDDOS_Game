@@ -6,15 +6,23 @@
 import { runParallelStages, wait } from './loadPipeline.js';
 import { preloadEquipArtCache } from '../view/cosmetics.js';
 import { initUnitVisualFromSvgText } from '../view/unitVisual.js';
+import { preloadBlockArt } from '../view/blockArt.js';
+import { preloadVehicleArt } from '../view/vehicleArt.js';
 import { loadDefinitionPack } from '../defs/loadPack.js';
 import { warmSfxPool } from '../audio/sfx.js';
-import { UNIT_TEMPLATE_FILE } from '../assets/closedCatalog.js';
+import {
+  ITEM_HOLD_FILE,
+  UNIT_TEMPLATE_FILE,
+  VEHICLE_ART_FILE,
+} from '../assets/closedCatalog.js';
 
 export const BOOT_ASSETS = Object.freeze([
   { id: 'css', url: 'css/main.css' },
   { id: 'favicon', url: 'Asset/AssetSVG/favicon.svg' },
   { id: 'place_object', url: 'Asset/AssetSVG/PlaceHold/Object_01.svg' },
   { id: 'unit_template', url: UNIT_TEMPLATE_FILE },
+  { id: 'item_hold', url: ITEM_HOLD_FILE },
+  { id: 'vehicle_art', url: VEHICLE_ART_FILE },
   { id: 'main_menu', url: 'Asset/AssetSVG/Ui/MainMenu.svg' },
 ]);
 
@@ -141,7 +149,10 @@ export async function runBootPreload(onProgress, options = {}) {
     throw new Error('Boot failed: unit visual bake returned empty');
   }
 
-  report(95, 'Finalizing boot…');
+  report(96, 'Block / Vehicle art…');
+  await Promise.all([preloadBlockArt(), preloadVehicleArt()]);
+
+  report(98, 'Finalizing boot…');
   await wait(16);
   report(100, warnings.length ? `Ready (${warnings.length} warn)` : 'Ready');
   await wait(16);

@@ -4,7 +4,6 @@
 
 import { armorTypeNames, damageTypeNames, spawnRow } from './mapDoc.js';
 import {
-  UNIT_MODEL_IDS,
   appendDivider,
   appendSectionTitle,
   blankRecord,
@@ -22,20 +21,25 @@ import {
   isBlockTabKind,
   itemCategory,
   itemHeadings,
+  isTurretWeaponRecord,
   renderTyped,
   skillEffectNames,
-  weaponPreviewSpec,
+  weaponArtGroups,
 } from './sheetForm.js';
 import { scheduleMapVisibleInsets } from './mapView.js';
 import {
+  countTurretPivots,
+  ensureArtGroupPoolEntry,
+  ensureStructurePoolEntry,
   ensureUnitPoolEntry,
-  getParsedUnitArt,
+  ensureVehiclePoolEntry,
+  ensureWearPoolEntry,
+  ensureWeaponHeldPoolEntry,
   heldLoadout,
   heldWeaponId,
-  mountModelPreview,
   mountPoolPreview,
-  mountStructurePreviewSvg,
   recordSwatch,
+  resolveBlockArtId,
   weaponRecordOf,
 } from './unitArt.js';
 import {
@@ -45,6 +49,13 @@ import {
   teamSelectOptions,
 } from '../defs/teams.js';
 import { GAME_PACK } from '../defs/gamePack.js';
+import {
+  artIdsForCategory,
+  BULLET_ART_IDS,
+  listWeaponShotFrameArtIds,
+  listWeaponTurretArtIds,
+  modelIdsForCategory,
+} from '../assets/closedCatalog.js';
 
 const TABS = [
   ['area', 'Area'],
@@ -60,16 +71,20 @@ const TOP_TAB_SKIP = {
   Factory: true,
   Base: true,
   Weapon: true,
+  Helmet: true,
   Shield: true,
+  'Shield Energy': true,
   Tool: true,
   Ammo: true,
   Backpack: true,
+  Armor: true,
 };
 const ITEM_KINDS = itemHeadings();
 for (let kindIndex = 0; kindIndex < ITEM_KINDS.length; kindIndex++) {
   if (TOP_TAB_SKIP[ITEM_KINDS[kindIndex]]) continue;
-  const tabLabel = ITEM_KINDS[kindIndex] === 'Armor' ? 'Item' : ITEM_KINDS[kindIndex];
-  TABS.push(['item:' + ITEM_KINDS[kindIndex], tabLabel]);
+  const kind = ITEM_KINDS[kindIndex];
+  const tabLabel = kind === 'Vest' || kind === 'Armor' ? 'Item' : kind;
+  TABS.push(['item:' + kind, tabLabel]);
 }
 TABS.push(['skill', 'Skills'], ['rules', 'Rules']);
 
@@ -439,10 +454,36 @@ function resolveCatalogPreviewTarget(doc, kind, templateId) {
   if (!doc || !templateId) {
     return { previewKey: 'itemId', def: null, noteText: 'Object place preview' };
   }
+  if (kind === 'artGroup') {
+    return {
+      previewKey: 'artGroup',
+      def: { id: templateId, artId: templateId },
+      noteText: 'Art group preview',
+    };
+  }
   if (kind === 'unit') {
+    const unitDef = doc.units && doc.units[templateId];
+    if (unitDef) {
+      return {
+        previewKey: 'unitId',
+        def: unitDef,
+        noteText: 'Unit place preview',
+      };
+    }
+    const vehicleItem = doc.items && doc.items[templateId];
+    if (
+      vehicleItem &&
+      (vehicleItem.kind === 'VEHICLE' || vehicleItem.isVehicle)
+    ) {
+      return {
+        previewKey: 'itemId',
+        def: vehicleItem,
+        noteText: 'Vehicle unit-host preview',
+      };
+    }
     return {
       previewKey: 'unitId',
-      def: doc.units && doc.units[templateId],
+      def: null,
       noteText: 'Unit place preview',
     };
   }
@@ -508,6 +549,17 @@ function fillCatalogPreview(trayEl, api, kind, templateId) {
   panel.replaceChildren();
   if (!def) return;
 
+  // Trail-only bake refresh — never renderPanel (keeps Settings picker open).
+  const trailReady = () => {
+    if (
+      trailClaim.source &&
+      trailClaim.kind === kind &&
+      trailClaim.templateId === templateId
+    ) {
+      fillCatalogPreview(trayEl, api, kind, templateId);
+    }
+  };
+
   trayEl.setAttribute('aria-label', 'Trail');
   const header = document.createElement('div');
   header.className = 'editor-placed-header';
@@ -516,7 +568,7 @@ function fillCatalogPreview(trayEl, api, kind, templateId) {
   title.textContent = 'Preview · ' + formatCatalogId(templateId);
   header.appendChild(title);
   panel.appendChild(header);
-  panel.appendChild(previewFor(api, previewKey, def));
+  panel.appendChild(previewFor(api, previewKey, def, { onReady: trailReady }));
   const stats = previewStatusBlock(api, previewKey, def);
   if (stats) panel.appendChild(stats);
   const note = document.createElement('p');
@@ -620,11 +672,22 @@ export function renderPlacedTray(trayEl, api) {
   panel.appendChild(header);
 
   if (sameType) {
-    const def = primary.kind === 'unit'
-      ? (doc.units && doc.units[primary.templateId])
-      : (doc.items && doc.items[primary.templateId]);
+    let def = null;
+    let pKey = 'itemId';
+    if (primary.kind === 'unit') {
+      def = doc.units && doc.units[primary.templateId];
+      pKey = 'unitId';
+      if (!def && doc.items && doc.items[primary.templateId]) {
+        const item = doc.items[primary.templateId];
+        if (item.kind === 'VEHICLE' || item.isVehicle) {
+          def = item;
+          pKey = 'itemId';
+        }
+      }
+    } else {
+      def = doc.items && doc.items[primary.templateId];
+    }
     if (def) {
-      const pKey = primary.kind === 'unit' ? 'unitId' : 'itemId';
       panel.appendChild(previewFor(api, pKey, def));
       const stats = previewStatusBlock(api, pKey, def);
       if (stats) panel.appendChild(stats);
@@ -959,7 +1022,8 @@ function idsOfKind(map, kind) {
     const group = itemRailGroup(map[ids[i]]);
     if (kind === 'Block') {
       if (isBlockTabKind(group)) out.push(ids[i]);
-    } else if (kind === 'Armor') {
+    } else if (kind === 'Vest' || kind === 'Armor' || kind === 'Helmet') {
+      // Item tab rail: Vest + Helmet + Shield + Shield Energy
       if (isArmorTabKind(group)) out.push(ids[i]);
     } else if (kind === 'Resource') {
       if (group === 'Resource' || group === 'Ammo') out.push(ids[i]);
@@ -1746,7 +1810,21 @@ function renderSheet(body, api, doc, map, selectedKey) {
   const ctx = {
     canWear: (itemId) => {
       const item = doc.items && doc.items[itemId];
-      return !!(item && (item.kind === 'ARMOR' || item.kind === 'SHIELD'));
+      if (!item) return false;
+      const kind = String(item.kind || '');
+      const itemKind = String(item.itemKind || '');
+      if (kind === 'ARMOR' || kind === 'SHIELD') return true;
+      // After Helmet tab split, tolerate tab names still on the row.
+      return (
+        kind === 'Helmet' ||
+        kind === 'Vest' ||
+        kind === 'Shield' ||
+        kind === 'Shield Energy' ||
+        itemKind === 'Helmet' ||
+        itemKind === 'Vest' ||
+        itemKind === 'Shield' ||
+        itemKind === 'Shield Energy'
+      );
     },
     stackCap: (itemId) => {
       const item = doc.items && doc.items[itemId];
@@ -1760,7 +1838,8 @@ function renderSheet(body, api, doc, map, selectedKey) {
       return !!(doc.weapons && doc.weapons[itemId] && (!item || item.kind === 'WEAPON'));
     },
     armorTypes: armorTypeNames(doc),
-    choices: (key, current) => choiceIds(doc, key, current),
+    damageTypes: damageTypeNames(doc),
+    choices: (key, current) => choiceIds(doc, key, current, record, selectedKey),
     rename: (next) => {
       const normalized = formatCatalogId(next);
       if (!normalized || normalized === record.id || map[normalized]) return;
@@ -1833,7 +1912,9 @@ function showsCraft(selectedKey, record) {
   if (selectedKey === 'weaponId') return true;
   if (selectedKey !== 'itemId') return false;
   const category = record.pending ? record.pendingCategory || 'Block' : itemCategory(record);
-  if (isBlockTabKind(category) || isArmorTabKind(category)) return true;
+  if (isBlockTabKind(category) || isArmorTabKind(category) || category === 'Vehicle') {
+    return true;
+  }
   return (
     category === 'Turret' ||
     category === 'Ammo' ||
@@ -2069,27 +2150,87 @@ function ammoItemIds(items) {
   return resourceItemIds(items);
 }
 
-function choiceIds(doc, key, current) {
+function sheetCategoryOf(doc, record, selectedKey) {
+  if (selectedKey === 'unitId') return 'Unit';
+  if (selectedKey === 'weaponId') return 'Weapon';
+  if (selectedKey === 'skillId') return 'Skill';
+  if (record) {
+    if (record.pending) return record.pendingCategory || 'Block';
+    return itemCategory(record);
+  }
+  return 'Block';
+}
+
+function choiceIds(doc, key, current, record, selectedKey) {
   const units = mapRecords(doc.units);
   const weapons = mapRecords(doc.weapons).filter((r) => r && !r.pending);
   const items = mapRecords(doc.items).filter((r) => r && !r.pending);
   const skills = mapRecords(doc.skills).filter((r) => r && !r.pending);
+  const category = sheetCategoryOf(doc, record, selectedKey);
   let ids = [];
-  if (key === 'model') ids = UNIT_MODEL_IDS.slice();
-  else if (key === 'ammoTypeId') ids = ammoItemIds(doc.items);
-  else if (key === 'targetFaction') ids = FACTION_CHOICES.slice();
-  else if (key === 'damageType') ids = damageTypeNames(doc);
-  else if (key === 'reloadType') ids = RELOAD_CHOICES.slice();
-  else if (key === 'armorType') ids = armorTypeNames(doc);
-  else if (key === 'itemId') ids = nonPendingIds(doc.items);
-  else if (key === 'defaultWeapon' || key === 'weaponId') ids = nonPendingIds(doc.weapons);
-  else if (key === 'skills' || key === 'activeSkills' || key === 'skillId') {
+  if (key === 'model') {
+    // Unit sheet only — never mix vehicle models.
+    ids = modelIdsForCategory('Unit');
+  } else if (key === 'modelId') {
+    ids = modelIdsForCategory(category === 'Vehicle' ? 'Vehicle' : 'Unit');
+  } else if (key === 'armorSlot') {
+    ids = ['TOP', 'VEST'];
+  } else if (key === 'artId') {
+    if (category === 'Weapon') {
+      const held = weaponArtGroups();
+      const turrets = listWeaponTurretArtIds();
+      ids = held.slice();
+      for (let i = 0; i < turrets.length; i++) {
+        if (ids.indexOf(turrets[i]) < 0) ids.push(turrets[i]);
+      }
+    } else {
+      ids = artIdsForCategory(category, record || {});
+    }
+  } else if (key === 'bulletArtId') {
+    ids = BULLET_ART_IDS.slice();
+  } else if (key === 'shotFrameArtId') {
+    const art = record && (record.artId || record.model);
+    if (/^Weapon_Turrent_[123]$/i.test(String(art || ''))) {
+      ids = listWeaponShotFrameArtIds(art);
+    } else {
+      ids = [];
+    }
+  } else if (key === 'previewHost') {
+    ids = ['unit', 'empty'];
+  } else if (key === 'startUnitDriven') {
+    ids = [''].concat(nonPendingIds(doc.units));
+  } else if (key === 'ammoTypeId') {
+    ids = ammoItemIds(doc.items);
+  } else if (key === 'targetFaction') {
+    ids = FACTION_CHOICES.slice();
+  } else if (key === 'damageType') {
+    ids = damageTypeNames(doc);
+  } else if (key === 'reloadType') {
+    ids = RELOAD_CHOICES.slice();
+  } else if (key === 'armorType') {
+    ids = armorTypeNames(doc);
+  } else if (key === 'itemId') {
+    ids = nonPendingIds(doc.items);
+  } else if (key === 'defaultWeapon' || key === 'weaponId') {
+    ids = nonPendingIds(doc.weapons);
+    // Base / Turret: prefer Weapon_Turrent_* when present. Vehicle uses any weapon art.
+    if (key === 'weaponId' && (category === 'Base' || category === 'Turret')) {
+      const turretIds = ids.filter((id) =>
+        isTurretWeaponRecord(doc.weapons[id])
+      );
+      if (turretIds.length) ids = turretIds;
+    }
+  } else if (key === 'skills' || key === 'activeSkills' || key === 'skillId') {
     ids = nonPendingIds(doc.skills);
+  } else if (key === 'allowedGoals') {
+    ids = collectStrings(units, 'allowedGoals');
+  } else if (key === 'targetPriorityList') {
+    ids = collectStrings(units, 'targetPriorityList');
+  } else if (key === 'preferredRange') {
+    ids = collectStrings(units, 'preferredRange');
+  } else {
+    ids = collectStrings(units.concat(weapons, items, skills), key);
   }
-  else if (key === 'allowedGoals') ids = collectStrings(units, 'allowedGoals');
-  else if (key === 'targetPriorityList') ids = collectStrings(units, 'targetPriorityList');
-  else if (key === 'preferredRange') ids = collectStrings(units, 'preferredRange');
-  else ids = collectStrings(units.concat(weapons, items, skills), key);
   if (current && ids.indexOf(current) < 0) ids = [current].concat(ids);
   return ids;
 }
@@ -2152,13 +2293,17 @@ function rewriteRefs(node, prev, next) {
   }
 }
 
-function previewFor(api, key, record) {
-  if (key === 'unitId') return unitPreview(api, record);
+function previewFor(api, key, record, opts) {
+  const onReady = (opts && opts.onReady) || refreshWhenReady(api);
+  if (key === 'artGroup') {
+    return artGroupPoolPreview(api, record && record.artId, record, onReady);
+  }
+  if (key === 'unitId') return unitPreview(api, record, onReady);
   if (key === 'weaponId') {
     if (record && record.pending && record.pendingCategory === 'Melee') {
       return colorPreview(recordSwatch(record));
     }
-    return weaponPreview(api, record);
+    return weaponPreview(api, record, onReady);
   }
   if (key === 'itemId') {
     const category =
@@ -2172,7 +2317,19 @@ function previewFor(api, key, record) {
         (record && record.id) ||
         '';
       const weapon = weaponRecordOf(doc, wid) || record;
-      return weaponPreview(api, weapon);
+      return weaponPreview(api, weapon, onReady);
+    }
+    if (category === 'Vehicle') {
+      return vehicleCompositePreview(api, record, onReady);
+    }
+    if (
+      category === 'Armor' ||
+      category === 'Vest' ||
+      category === 'Helmet' ||
+      category === 'Shield' ||
+      category === 'Shield Energy'
+    ) {
+      return wearPreview(api, record, onReady);
     }
     if (
       category === 'Block' ||
@@ -2182,10 +2339,85 @@ function previewFor(api, key, record) {
       category === 'Generator' ||
       category === 'Factory'
     ) {
-      return structurePreview(api, record);
+      return structurePoolPreview(api, record, onReady);
     }
   }
   return colorPreview(recordSwatch(record));
+}
+
+/** Attach pool sprite or swatch; refresh panel when lazy-bake finishes. */
+function attachPoolPreview(api, frame, entry) {
+  if (entry) {
+    const img = mountPoolPreview(entry);
+    if (img) frame.box.appendChild(img);
+  }
+  return frame.wrap;
+}
+
+function refreshWhenReady(api) {
+  return () => {
+    // If a Settings/tools catalog picker is open, only refresh Trail.
+    if (trailClaim.source === 'settings' || trailClaim.source === 'tools') {
+      refreshTrail(api);
+      return;
+    }
+    if (api.refreshPanel) api.refreshPanel();
+  };
+}
+
+/** Single art group as pixel (fallback when wear composite has no artId). */
+function artGroupPoolPreview(api, artId, record, onReady) {
+  const frame = previewFrame();
+  const pack = api.getPack ? api.getPack() : null;
+  const groupId = artId || (record && record.artId) || '';
+  if (!groupId) {
+    const swatch = document.createElement('div');
+    swatch.className = 'editor-preview-swatch';
+    swatch.style.background = cssColor(recordSwatch(record));
+    frame.box.appendChild(swatch);
+    return frame.wrap;
+  }
+  const ready = onReady || refreshWhenReady(api);
+  const entry = ensureArtGroupPoolEntry(pack, groupId, ready);
+  return attachPoolPreview(api, frame, entry);
+}
+
+/** Vest/Helmet/Shield: Unit + item → pixel. */
+function wearPreview(api, record, onReady) {
+  const frame = previewFrame();
+  const pack = api.getPack ? api.getPack() : null;
+  if (!(record && record.artId)) {
+    return artGroupPoolPreview(api, '', record, onReady);
+  }
+  const ready = onReady || refreshWhenReady(api);
+  const entry = ensureWearPoolEntry(pack, record, ready);
+  return attachPoolPreview(api, frame, entry);
+}
+
+/** Block / Turret: BlockArt + optional weapon → pixel. */
+function structurePoolPreview(api, record, onReady) {
+  const frame = previewFrame();
+  frame.box.classList.add('is-structure');
+  const pack = api.getPack ? api.getPack() : null;
+  const doc = api.getDoc ? api.getDoc() : null;
+  const ready = onReady || refreshWhenReady(api);
+  const entry = ensureStructurePoolEntry(pack, doc, record, ready);
+  if (entry) return attachPoolPreview(api, frame, entry);
+  // Still baking — show nothing until refresh (avoid live SVG).
+  if (!resolveBlockArtId(record) && !(record && record.weaponId)) {
+    return structurePreview(api, record);
+  }
+  return frame.wrap;
+}
+
+/** Vehicle: hull + unit + weapon → pixel. */
+function vehicleCompositePreview(api, record, onReady) {
+  const frame = previewFrame();
+  const pack = api.getPack ? api.getPack() : null;
+  const doc = api.getDoc ? api.getDoc() : null;
+  const ready = onReady || refreshWhenReady(api);
+  const entry = ensureVehiclePoolEntry(pack, record, doc, ready);
+  return attachPoolPreview(api, frame, entry);
 }
 
 function pushStat(lines, label, value) {
@@ -2242,8 +2474,8 @@ function previewStatusLines(api, key, record) {
     record.pending ? record.pendingCategory || 'Block' : itemCategory(record);
   if (record.maxHp != null) pushStat(lines, 'HP', record.maxHp);
   if (record.armorType) pushStat(lines, 'Armor', record.armorType);
-  if (cat === 'Turret' || record.isTurret) {
-    pushStat(lines, 'Type', 'Turret');
+  if (cat === 'Turret' || record.isTurret || cat === 'Base' || cat === 'Vehicle') {
+    pushStat(lines, 'Type', cat === 'Vehicle' ? 'Vehicle' : cat === 'Base' ? 'Base' : 'Turret');
     if (record.weaponId) {
       pushStat(lines, 'Weapon', record.weaponId);
       const w = weaponRecordOf(doc, record.weaponId);
@@ -2251,6 +2483,14 @@ function previewStatusLines(api, key, record) {
       if (w && w.cooldownSec != null) pushStat(lines, 'Cooldown', w.cooldownSec + 's');
     }
     if (record.detectRadius != null) pushStat(lines, 'Detect', record.detectRadius);
+    if (record.artId && api.getPack) {
+      const pivots = countTurretPivots(api.getPack(), record.artId);
+      if (pivots > 0) pushStat(lines, 'Turret pivots', pivots + ' (shared)');
+    }
+    if (record.footprint) {
+      const fp = record.footprint;
+      pushStat(lines, 'Footprint', (fp.w || 1) + '×' + (fp.h || 1));
+    }
   } else if (cat === 'Weapon') {
     const wid = record.weaponId || record.id;
     const w = weaponRecordOf(doc, wid);
@@ -2332,41 +2572,18 @@ function previewCaption(text) {
   return note;
 }
 
-function weaponPreview(api, record) {
+function weaponPreview(api, record, onReady) {
   const frame = previewFrame();
   frame.box.classList.add('is-weapon-hold');
   const pack = api.getPack ? api.getPack() : null;
-  const parsed = getParsedUnitArt(pack);
-  // Live layers: bottom / arms / gun / body / top — not a merged pixel bake.
-  const svg = mountModelPreview(parsed, 'Default_skin_1', weaponPreviewSpec(record));
-  if (svg) {
-    frame.box.appendChild(svg);
-    requestAnimationFrame(() => fitPreviewArt(frame.wrap));
-  } else {
-    const swatch = document.createElement('div');
-    swatch.className = 'editor-preview-swatch';
-    swatch.style.background = cssColor(recordSwatch(record));
-    frame.box.appendChild(swatch);
-  }
-  return frame.wrap;
+  const ready = onReady || refreshWhenReady(api);
+  const entry = ensureWeaponHeldPoolEntry(pack, record, ready);
+  return attachPoolPreview(api, frame, entry);
 }
 
 function structurePreview(api, record) {
-  const frame = previewFrame();
-  frame.box.classList.add('is-structure');
-  const pack = api.getPack ? api.getPack() : null;
-  const doc = api.getDoc ? api.getDoc() : null;
-  // Layer 1 SizeView footprint + Layer 2 gun; overflow expands viewBox (Unit-style).
-  const svg = mountStructurePreviewSvg(pack, doc, record);
-  if (svg) {
-    frame.box.appendChild(svg);
-  } else {
-    const swatch = document.createElement('div');
-    swatch.className = 'editor-preview-swatch';
-    swatch.style.background = cssColor(recordSwatch(record));
-    frame.box.appendChild(swatch);
-  }
-  return frame.wrap;
+  // Same pool path as Settings structurePoolPreview — no live SVG fork.
+  return structurePoolPreview(api, record);
 }
 
 function wearLine(doc, list) {
@@ -2378,8 +2595,21 @@ function wearLine(doc, list) {
     const item = doc && doc.items ? doc.items[row.itemId] : null;
     if (!item) continue;
     const state = row.active === true ? ' active' : ' inactive';
-    if (item.kind === 'ARMOR') armor.push(row.itemId + state);
-    if (item.kind === 'SHIELD') shield.push(row.itemId + state);
+    const kind = String(item.kind || '');
+    const itemKind = String(item.itemKind || '');
+    const isArmor =
+      kind === 'ARMOR' ||
+      kind === 'Helmet' ||
+      kind === 'Vest' ||
+      itemKind === 'Helmet' ||
+      itemKind === 'Vest';
+    const isShield =
+      kind === 'SHIELD' ||
+      kind === 'Shield' ||
+      itemKind === 'Shield' ||
+      itemKind === 'Shield Energy';
+    if (isArmor) armor.push(row.itemId + state);
+    if (isShield) shield.push(row.itemId + state);
   }
   const armorText = armor.length ? 'Armor ' + armor.join(', ') : 'Armor inactive';
   const shieldText = shield.length ? 'Shield ' + shield.join(', ') : 'Shield inactive';
@@ -2392,13 +2622,12 @@ function unitCaption(doc, record) {
   return 'Slot ' + (held.index + 1) + ': ' + itemId + ' · ' + wearLine(doc, held.list);
 }
 
-function unitPreview(api, record) {
+function unitPreview(api, record, onReady) {
   const frame = previewFrame();
   const pack = api.getPack ? api.getPack() : null;
   const doc = api.getDoc ? api.getDoc() : null;
-  const pooled = ensureUnitPoolEntry(pack, doc, record, () => {
-    if (api.refreshPanel) api.refreshPanel();
-  });
+  const ready = onReady || refreshWhenReady(api);
+  const pooled = ensureUnitPoolEntry(pack, doc, record, ready);
   if (pooled) {
     const img = mountPoolPreview(pooled);
     if (img) frame.box.appendChild(img);

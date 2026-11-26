@@ -2,6 +2,10 @@
  * One settings panel per kind. The id field is the real string the game uses.
  */
 
+import {
+  artIdsForCategory,
+  modelIdFromVehicleArt,
+} from '../assets/closedCatalog.js';
 import { WEAPON_BTN_ART, weaponArtSpec } from '../view/cosmetics.js';
 import { appendDivider, appendSectionTitle, renderRecord, toReadableLabel } from './recordForm.js';
 
@@ -17,14 +21,15 @@ export const WEAPON_TYPES = [
 ];
 
 export const BLOCK_TAB_KINDS = ['Block', 'Door', 'Generator', 'Factory', 'Base'];
-export const ARMOR_TAB_KINDS = ['Armor', 'Shield'];
+/** Item tab kinds — no Armor Slot picker; Kind alone sets wear channel. */
+export const ARMOR_TAB_KINDS = ['Vest', 'Helmet', 'Shield', 'Shield Energy'];
 
 export function isBlockTabKind(name) {
   return BLOCK_TAB_KINDS.indexOf(name) >= 0;
 }
 
 export function isArmorTabKind(name) {
-  return ARMOR_TAB_KINDS.indexOf(name) >= 0;
+  return ARMOR_TAB_KINDS.indexOf(name) >= 0 || name === 'Armor';
 }
 
 export function weaponArtGroups() {
@@ -42,11 +47,32 @@ export function weaponArtGroups() {
 }
 
 export function shownWeaponModel(record) {
+  if (record && typeof record.artId === 'string' && record.artId) return record.artId;
   if (record && typeof record.model === 'string' && record.model) return record.model;
   const spec = weaponArtSpec(record && record.id);
   if (spec && spec.group) return spec.group;
-  // No silent Colt default — missing art stays empty (not M1911).
   return null;
+}
+
+/** Write cosmetics/default into artId once so the form field is the source of truth. */
+export function ensureWeaponArtId(record) {
+  if (!record) return;
+  if (typeof record.artId === 'string' && record.artId) {
+    record.model = record.artId;
+    return;
+  }
+  const fromModel = typeof record.model === 'string' && record.model ? record.model : '';
+  const fromCosmetics = weaponArtSpec(record.id);
+  const group = fromModel || (fromCosmetics && fromCosmetics.group) || '';
+  if (group) {
+    record.artId = group;
+    record.model = group;
+  }
+}
+
+export function isTurretWeaponRecord(record) {
+  const art = shownWeaponModel(record) || '';
+  return /^Weapon_Turrent_[123]$/i.test(art);
 }
 
 export function shownWeaponHold(record) {
@@ -63,7 +89,8 @@ export function weaponPreviewSpec(record) {
   };
 }
 
-const WEAPON_IDENTITY = ['id', 'label', 'color'];
+const WEAPON_IDENTITY = ['id', 'label', 'color', 'artId', 'bulletArtId', 'previewHost'];
+const WEAPON_IDENTITY_TURRET = WEAPON_IDENTITY.concat(['shotFrameArtId']);
 const WEAPON_BALLISTICS = [
   'baseDamage', 'cooldownSec', 'spreadDeg', 'maxDistancePath', 'aiFireRangePath',
   'muzzleLeadSec', 'projectileRadius',
@@ -72,7 +99,6 @@ const WEAPON_AMMO = [
   'magCapacity', 'maxMags', 'reloadSec', 'infiniteAmmo', 'ammoTypeId',
   'damageType', 'targetFaction',
 ];
-/** reloadType is derived from weapon category — not shown in Editor. */
 const WEAPON_COMMON = WEAPON_IDENTITY.concat(WEAPON_BALLISTICS, WEAPON_AMMO);
 
 const WEAPON_EXTRA = {
@@ -86,14 +112,20 @@ const PLACE_FLAGS = [
   'isDefeatCondition', 'isTurret', 'isHeal', 'isGen', 'isFactory', 'isDoor', 'isWire', 'isHarvest',
 ];
 
-/** Shared placeable fields (collider bodies): armor, skill slot, size, priority, … */
 const PLACEABLE_CORE = [
   'id', 'label', 'color', 'typeId', 'maxStack', 'maxHp', 'armorType', 'priorityScore',
-  'skillId', 'pierceCost', 'footprint',
+  'skillId', 'pierceCost', 'footprint', 'artId',
 ];
 
 const TURRET_RECORD = PLACEABLE_CORE.concat([
   'weaponId', 'detectRadius', 'infiniteAmmo',
+]);
+
+const WEAR_CORE = ['id', 'label', 'color', 'maxStack', 'artId', 'markerColor'];
+const VEST_HELMET_FIELDS = WEAR_CORE.concat(['damageReduction', 'armorType']);
+const SHIELD_FIELDS = WEAR_CORE.concat([
+  'shieldMaxHp', 'shieldRadius', 'shieldOffset', 'shieldPierceCost',
+  'shieldAbsorbRatio', 'shieldRegenPerSec',
 ]);
 
 const ITEM_FIELDS = {
@@ -108,12 +140,20 @@ const ITEM_FIELDS = {
   Weapon: ['id', 'label', 'color', 'weaponId', 'maxStack'],
   Resource: ['id', 'label', 'color', 'maxStack'],
   Tool: ['id', 'label', 'color', 'toolTier', 'maxStack', 'harvestDamage', 'structureDamage', 'repairAmount', 'meleeRole', 'activeDurationSec', 'cooldownSec'],
-  Armor: ['id', 'label', 'color', 'maxStack', 'damageReduction', 'markerColor'],
-  Shield: ['id', 'label', 'color', 'maxStack', 'shieldMaxHp', 'shieldRadius', 'shieldOffset', 'shieldPierceCost', 'shieldAbsorbRatio', 'shieldRegenPerSec', 'markerColor'],
+  Vest: VEST_HELMET_FIELDS.slice(),
+  Helmet: VEST_HELMET_FIELDS.slice(),
+  Shield: SHIELD_FIELDS.slice(),
+  'Shield Energy': SHIELD_FIELDS.slice(),
   Backpack: ['id', 'label', 'color', 'maxStack', 'backpackTier', 'backpackBonusSlots'],
+  /** Vehicle mirrors unit armor contract: maxHp + armorType + resistPercent (panel). */
+  Vehicle: [
+    'id', 'label', 'color', 'artId', 'maxHp', 'armorType', 'speed', 'speedBase',
+    'speedMax', 'accel', 'brake', 'turnRateRadPerSec', 'weaponId',
+    'detectRadius', 'mobilityHpRatio', 'mobilityRepairChance', 'brokenClearSec',
+    'ramSpeedMin', 'ramDamage', 'driverProtection', 'startUnitDriven',
+  ],
 };
 
-/** Max inherent generator outputs (Base / Generator). */
 export const GENERATOR_OUTPUT_CAP = 3;
 
 const EFFECT = {
@@ -163,7 +203,6 @@ export function weaponCategory(record) {
 }
 
 function reloadTypeForCategory(category) {
-  // Shotgun shells reload one-by-one; others use full magazine.
   return category === 'Shotgun' ? 'INDIVIDUAL_SHELL' : 'MAGAZINE';
 }
 
@@ -200,33 +239,13 @@ function applyWeapon(record, category) {
     burstCount: category === 'Burst' ? 3 : 1,
     burstIntervalSec: 0.06,
     beamDurationSec: category === 'Lazer' ? 1 : 0,
+    artId: '',
+    bulletArtId: '',
+    shotFrameArtId: '',
+    previewHost: 'unit',
   });
-}
-
-const GUN_ONLY_KEYS = WEAPON_BALLISTICS.concat(
-  WEAPON_AMMO,
-  ['bulletSpeedPxSec', 'pierceUnits', 'pelletCount', 'burstCount', 'burstIntervalSec', 'beamDurationSec'],
-  ['projectileMode', 'pierceConfig', 'model', 'holdStyle']
-);
-
-const TOOL_ONLY_KEYS = [
-  'kind', 'toolTier', 'maxStack', 'harvestDamage', 'structureDamage',
-  'repairAmount', 'meleeRole', 'activeDurationSec',
-];
-
-export function prepareWeaponAsTool(record) {
-  for (let i = 0; i < GUN_ONLY_KEYS.length; i++) {
-    const k = GUN_ONLY_KEYS[i];
-    if (k !== 'cooldownSec') delete record[k];
-  }
-  applyItem(record, 'Tool');
-}
-
-export function prepareToolAsWeapon(record, category) {
-  for (let i = 0; i < TOOL_ONLY_KEYS.length; i++) {
-    delete record[TOOL_ONLY_KEYS[i]];
-  }
-  applyWeapon(record, category || 'Normal');
+  ensureWeaponArtId(record);
+  if (!isTurretWeaponRecord(record)) delete record.shotFrameArtId;
 }
 
 export function itemHeadings() {
@@ -250,6 +269,15 @@ export function isLockedBackpack(record) {
   return !!(record && !record.pending && LOCKED_BACKPACK_IDS[record.id]);
 }
 
+function isEnergyShieldRecord(record) {
+  if (!record) return false;
+  if (record.shieldVariant === 'ENERGY' || record.itemKind === 'Shield Energy') return true;
+  const art = String(record.artId || '');
+  const id = String(record.id || '');
+  return /Enegy|Energy/i.test(art) || /ENERGY/i.test(id);
+}
+
+/** Display / rail category for an item record. */
 export function itemCategory(record) {
   if (record.kind === 'WEAPON') return 'Weapon';
   if (
@@ -258,13 +286,18 @@ export function itemCategory(record) {
     record.typeId === 'AMMO' ||
     record.typeId === 'RESOURCE'
   ) {
-    // Wood / Ammo / other stocks share one Resource pipe; Craft checkbox gates recipes.
     return 'Resource';
   }
   if (record.kind === 'TOOL') return 'Tool';
-  if (record.kind === 'ARMOR') return 'Armor';
-  if (record.kind === 'SHIELD') return 'Shield';
   if (record.kind === 'BACKPACK') return 'Backpack';
+  if (record.kind === 'VEHICLE' || record.isVehicle) return 'Vehicle';
+  if (record.kind === 'ARMOR') {
+    if (record.itemKind === 'Helmet' || record.armorSlot === 'TOP') return 'Helmet';
+    return 'Vest';
+  }
+  if (record.kind === 'SHIELD') {
+    return isEnergyShieldRecord(record) ? 'Shield Energy' : 'Shield';
+  }
   if (record.isDefeatCondition) return 'Base';
   if (record.isTurret) return 'Turret';
   if (record.isGen) return 'Generator';
@@ -276,15 +309,53 @@ export function itemCategory(record) {
 function storedItemKeys(category) {
   if (category === 'Ammo') return ITEM_FIELDS.Resource;
   if (category === 'Turret') return TURRET_RECORD;
+  if (category === 'Armor') return ITEM_FIELDS.Vest;
   return ITEM_FIELDS[category];
+}
+
+/** Apply Kind → runtime kind + hidden armorSlot / shieldVariant. */
+function applyWearKind(record, category) {
+  record.itemKind = category;
+  if (category === 'Vest') {
+    record.kind = 'ARMOR';
+    record.armorSlot = 'VEST';
+    delete record.shieldVariant;
+  } else if (category === 'Helmet') {
+    record.kind = 'ARMOR';
+    record.armorSlot = 'TOP';
+    delete record.shieldVariant;
+  } else if (category === 'Shield') {
+    record.kind = 'SHIELD';
+    record.shieldVariant = 'BASIC';
+    delete record.armorSlot;
+  } else if (category === 'Shield Energy') {
+    record.kind = 'SHIELD';
+    record.shieldVariant = 'ENERGY';
+    delete record.armorSlot;
+  }
 }
 
 function applyItem(record, category) {
   if (category === 'Wire' || category === 'Heal') category = 'Block';
+  if (category === 'Armor') category = 'Vest';
   const fields = storedItemKeys(category);
-  const placeable = !!fields && category !== 'Ammo' && category !== 'Weapon' && category !== 'Resource' && category !== 'Tool' && category !== 'Armor' && category !== 'Shield' && category !== 'Backpack';
+  const wear = isArmorTabKind(category);
+  const placeable =
+    !!fields &&
+    category !== 'Ammo' &&
+    category !== 'Weapon' &&
+    category !== 'Resource' &&
+    category !== 'Tool' &&
+    !wear &&
+    category !== 'Backpack' &&
+    category !== 'Vehicle';
   if (category === 'Ammo') record.kind = 'RESOURCE';
-  else if (placeable) {
+  else if (category === 'Vehicle') {
+    record.kind = 'VEHICLE';
+    record.isVehicle = true;
+  } else if (wear) {
+    applyWearKind(record, category);
+  } else if (placeable) {
     record.kind = 'PLACEABLE';
     for (let i = 0; i < PLACE_FLAGS.length; i++) record[PLACE_FLAGS[i]] = false;
     if (category === 'Base') record.isDefeatCondition = true;
@@ -295,13 +366,14 @@ function applyItem(record, category) {
   } else if (category !== 'Ammo') {
     record.kind = category.toUpperCase();
   }
+  const defaultArt = artIdsForCategory(category, record)[0] || '';
   ensure(record, fields || ITEM_FIELDS.Block, {
     label: record.id || '',
     color: '#8a8a8a',
     typeId: category === 'Ammo' ? 'RESOURCE' : category.toUpperCase(),
     maxStack: category === 'Resource' || category === 'Ammo' ? 64 : 1,
-    maxHp: 100,
-    armorType: 'Default',
+    maxHp: category === 'Vehicle' ? 400 : 100,
+    armorType: 'DEFAULT',
     skillId: '',
     pierceCost: 1,
     walkSolid: true,
@@ -309,8 +381,8 @@ function applyItem(record, category) {
     allowProjectilePass: false,
     canToggle: category === 'Door',
     blocksProjectiles: true,
-    weaponId: '',
-    detectRadius: 256,
+    weaponId: category === 'Vehicle' ? 'AK47' : '',
+    detectRadius: category === 'Vehicle' ? 420 : 256,
     infiniteAmmo: false,
     priorityScore: 5,
     healFriendly: true,
@@ -331,17 +403,35 @@ function applyItem(record, category) {
     meleeRole: 'HARVEST_AXE',
     activeDurationSec: 0.1,
     cooldownSec: 0.2,
-    damageReduction: 0.2,
+    damageReduction: category === 'Helmet' ? 0.1 : 0.2,
     markerColor: '#7a9ab0',
-    shieldMaxHp: 100,
+    artId: defaultArt,
+    speed: 220,
+    turnRateRadPerSec: 2.4,
+    mobilityHpRatio: 0.45,
+    mobilityRepairChance: 0.55,
+    brokenClearSec: 60,
+    driverProtection: {
+      allowPierce: true,
+      absorbRatio: 0,
+      explosionFactor: 1,
+    },
+    startUnitDriven: '',
+    resistPercent: { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 },
+    shieldMaxHp: category === 'Shield Energy' ? 120 : 100,
     shieldRadius: 35,
     shieldOffset: 42,
     shieldPierceCost: 1,
     shieldAbsorbRatio: 1,
-    shieldRegenPerSec: 0,
+    shieldRegenPerSec: category === 'Shield Energy' ? 4 : 0,
     backpackTier: 1,
     backpackBonusSlots: 2,
   });
+  if (category === 'Vehicle') {
+    if (!record.artId) record.artId = 'Vehicle_ArmorCar_1';
+    record.modelId = modelIdFromVehicleArt(record.artId);
+  }
+  if (wear && !record.artId) record.artId = defaultArt;
 }
 
 function applyEffect(record, type) {
@@ -377,27 +467,21 @@ function deleteButton(ctx, id) {
     const yes = ctx.confirm
       ? await ctx.confirm('Delete ' + id + '? This id and its side tab will be removed.')
       : false;
-    if (yes && ctx.remove) ctx.remove();
+    if (!yes) return;
+    if (ctx.remove) ctx.remove(id);
   });
   return button;
 }
 
-function finishDraft(key, record) {
+export function finishDraft(key, record) {
   const category = record.pendingCategory;
   if (key === 'weaponId') {
-    if (category === 'Melee' || category === 'Tool') applyItem(record, 'Tool');
-    else if (category === 'Gun') applyWeapon(record, 'Normal');
-    else applyWeapon(record, category || 'Normal');
+    if (category === 'Melee') {
+      record.kind = 'TOOL';
+      applyItem(record, 'Tool');
+    } else applyWeapon(record, category || 'Normal');
   } else if (key === 'itemId') applyItem(record, category || 'Block');
-  else {
-    applyEffect(record, category || 'MELEE_SWING');
-    ensure(record, SKILL_HEAD, {
-      label: record.id || '',
-      castTimeSec: 0,
-      activeDurationSec: 0,
-      cooldownSec: 1,
-    });
-  }
+  else applyEffect(record, category || 'MELEE_SWING');
   delete record.pending;
   delete record.pendingCategory;
 }
@@ -422,9 +506,15 @@ function renderDraft(body, key, record, ctx) {
       category = 'Block';
       record.pendingCategory = 'Block';
     }
+    if (category === 'Armor') {
+      category = 'Vest';
+      record.pendingCategory = 'Vest';
+    }
     if (isBlockTabKind(category)) {
       body.appendChild(categorySelect('Kind', BLOCK_TAB_KINDS, category, (next) => {
         record.pendingCategory = next;
+        if (next !== 'Base' && next !== 'Turret') delete record.artId;
+        if (ctx.touch) ctx.touch(true);
       }));
     } else if (isArmorTabKind(category)) {
       body.appendChild(categorySelect('Kind', ARMOR_TAB_KINDS, category, (next) => {
@@ -432,6 +522,35 @@ function renderDraft(body, key, record, ctx) {
       }));
     } else {
       kindNote(body, category);
+    }
+    // Base / Turret: pick artId before Apply (pivot layout lives on the art).
+    if (category === 'Base' || category === 'Turret') {
+      const artIds = artIdsForCategory(category, record);
+      const note = document.createElement('p');
+      note.className = 'editor-note';
+      note.textContent =
+        category === 'Base'
+          ? 'Art Id required — Base art has 4× Pivot_turrent for weapon snap.'
+          : 'Art Id required — Turret art has 1× Pivot_turrent for weapon snap.';
+      body.appendChild(note);
+      const preferred =
+        category === 'Base'
+          ? 'Block_Base'
+          : category === 'Turret'
+            ? 'Block_Turrent_1'
+            : '';
+      const artValue =
+        record.artId && artIds.indexOf(record.artId) >= 0
+          ? record.artId
+          : artIds.indexOf(preferred) >= 0
+            ? preferred
+            : artIds[0] || '';
+      if (artValue && !record.artId) record.artId = artValue;
+      body.appendChild(categorySelect('Art Id', artIds, record.artId || artValue, (next) => {
+        record.artId = next;
+        if (ctx.trailPreview) ctx.trailPreview('artGroup', next);
+        if (ctx.touch) ctx.touch(false);
+      }));
     }
   } else {
     const names = Object.keys(EFFECT);
@@ -443,6 +562,18 @@ function renderDraft(body, key, record, ctx) {
   apply.type = 'button';
   apply.textContent = 'Apply';
   apply.addEventListener('click', () => {
+    if (
+      key === 'itemId' &&
+      (record.pendingCategory === 'Base' || record.pendingCategory === 'Turret') &&
+      !(record.artId && String(record.artId).trim())
+    ) {
+      if (ctx.setFieldHelp) {
+        ctx.setFieldHelp('Pick Art Id before Apply (pivot snap depends on art).', {
+          warn: true,
+        });
+      }
+      return;
+    }
     finishDraft(key, record);
     if (ctx.afterApply) ctx.afterApply(record);
     else ctx.touch(true);
@@ -451,34 +582,103 @@ function renderDraft(body, key, record, ctx) {
   body.appendChild(deleteButton(ctx, record.id));
 }
 
-function labeledNumber(parent, label, value, onChange) {
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.step = 'any';
-  input.value = String(value == null ? 0 : value);
-  input.addEventListener('change', () => onChange(Number(input.value) || 0));
-  const wrap = document.createElement('label');
-  wrap.textContent = label;
-  wrap.appendChild(input);
-  parent.appendChild(wrap);
-}
-
-function renderArmorExtra(parent, record, ctx) {
-  const types = Array.isArray(ctx.armorTypes) ? ctx.armorTypes : [];
+/**
+ * Resist % column (DEFAULT / BULLET / …). Used inside the modal only —
+ * Settings just opens the panel (no duplicate inline fields).
+ */
+function renderResistPercentColumn(parent, record, ctx) {
+  const damageTypes = Array.isArray(ctx.damageTypes) && ctx.damageTypes.length
+    ? ctx.damageTypes
+    : ['DEFAULT', 'BULLET', 'EXPLOSION', 'LAZER'];
   if (!record.resistPercent || typeof record.resistPercent !== 'object' || Array.isArray(record.resistPercent)) {
     record.resistPercent = {};
   }
-  for (let i = 0; i < types.length; i++) {
-    const typeName = types[i];
-    labeledNumber(parent, typeName + ' %', record.resistPercent[typeName] || 0, (next) => {
-      record.resistPercent[typeName] = next;
+  for (let i = 0; i < damageTypes.length; i++) {
+    if (record.resistPercent[damageTypes[i]] == null) record.resistPercent[damageTypes[i]] = 0;
+  }
+
+  const col = document.createElement('div');
+  col.className = 'editor-resist-column';
+  for (let i = 0; i < damageTypes.length; i++) {
+    const typeName = damageTypes[i];
+    const cell = document.createElement('label');
+    cell.className = 'editor-resist-cell';
+    cell.textContent = typeName + ' %';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = 'any';
+    input.value = String(record.resistPercent[typeName] || 0);
+    input.addEventListener('change', () => {
+      record.resistPercent[typeName] = Number(input.value) || 0;
       ctx.touch(false);
     });
+    cell.appendChild(input);
+    col.appendChild(cell);
   }
-  labeledNumber(parent, 'bonusHp', record.bonusHp || 0, (next) => {
-    record.bonusHp = next;
+  parent.appendChild(col);
+}
+
+function openItemResistModal(record, ctx, damageTypes) {
+  const modal = document.getElementById('editor-matrix-modal');
+  const body = document.getElementById('editor-matrix-body');
+  const title = modal && modal.querySelector('h2');
+  if (!modal || !body) return;
+  if (title) title.textContent = 'Resist % · ' + (record.id || 'Item');
+  body.replaceChildren();
+  const note = document.createElement('p');
+  note.className = 'editor-note';
+  note.textContent = 'Per-item resist — not the Rules damage×armor matrix.';
+  body.appendChild(note);
+  renderResistPercentColumn(body, record, ctx);
+  modal.hidden = false;
+  const restore = () => {
+    if (title && title.dataset.prevTitle != null) {
+      title.textContent = title.dataset.prevTitle;
+      delete title.dataset.prevTitle;
+    }
+    modal.hidden = true;
+  };
+  if (title) title.dataset.prevTitle = title.dataset.prevTitle || title.textContent || '';
+  const done = document.getElementById('editor-matrix-done');
+  const close = document.getElementById('editor-matrix-close');
+  if (done) {
+    done.onclick = () => {
+      restore();
+      if (ctx && ctx.touch) ctx.touch(false);
+    };
+  }
+  if (close) close.onclick = restore;
+}
+
+/** Settings: open Resist panel only — no inline duplicate fields. */
+function renderResistOpenButton(parent, record, ctx) {
+  if (!record.resistPercent || typeof record.resistPercent !== 'object') {
+    record.resistPercent = { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 };
+  }
+  const damageTypes = Array.isArray(ctx.damageTypes) && ctx.damageTypes.length
+    ? ctx.damageTypes
+    : ['DEFAULT', 'BULLET', 'EXPLOSION', 'LAZER'];
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.textContent = 'Edit Resist %';
+  openBtn.title = 'Open Resist % panel';
+  openBtn.addEventListener('click', () => openItemResistModal(record, ctx, damageTypes));
+  parent.appendChild(openBtn);
+}
+
+function renderArmorExtra(parent, record, ctx) {
+  renderResistOpenButton(parent, record, ctx);
+  const bonus = document.createElement('label');
+  bonus.textContent = 'bonusHp';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = String(record.bonusHp || 0);
+  input.addEventListener('change', () => {
+    record.bonusHp = Number(input.value) || 0;
     ctx.touch(false);
   });
+  bonus.appendChild(input);
+  parent.appendChild(bonus);
 }
 
 function renderBlockSkill(parent, record, ctx) {
@@ -507,31 +707,81 @@ function renderBlockSkill(parent, record, ctx) {
   parent.appendChild(wrap);
 }
 
+function syncVehicleModelFromArt(record) {
+  if (!record) return;
+  record.modelId = modelIdFromVehicleArt(record.artId);
+}
+
+/** Keep Vest/Helmet/Vehicle/Block resist + armorSlot contracts current. */
+export function migrateItemRecord(record) {
+  if (!record || record.pending) return;
+  const kind = itemCategory(record);
+  if (kind === 'Helmet') {
+    record.kind = 'ARMOR';
+    record.armorSlot = 'TOP';
+    record.itemKind = 'Helmet';
+  } else if (kind === 'Vest' || (record.kind === 'ARMOR' && record.armorSlot !== 'TOP')) {
+    if (kind === 'Vest' || record.itemKind === 'Vest') {
+      record.kind = 'ARMOR';
+      record.armorSlot = 'VEST';
+      record.itemKind = 'Vest';
+    }
+  }
+  if (
+    kind === 'Vehicle' ||
+    kind === 'Base' ||
+    kind === 'Turret' ||
+    kind === 'Block' ||
+    kind === 'Vest' ||
+    kind === 'Helmet'
+  ) {
+    if (!record.resistPercent || typeof record.resistPercent !== 'object') {
+      record.resistPercent = { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 };
+    }
+  }
+  if (kind === 'Vehicle') {
+    if (record.turnRateRadPerSec != null) {
+      record.turnRateRadPerSec = Number(record.turnRateRadPerSec) || 0;
+    }
+    if (record.speedMax == null && record.speed != null) {
+      record.speedMax = record.speed;
+    }
+    if (!record.armorType) record.armorType = 'DEFAULT';
+  }
+}
+
 export function renderTyped(body, key, record, ctx) {
   if (record.pending) {
     renderDraft(body, key, record, ctx);
     return;
   }
+  if (key === 'itemId') migrateItemRecord(record);
   if (key === 'weaponId') {
     const category = weaponCategory(record);
     record.reloadType = reloadTypeForCategory(category);
+    ensureWeaponArtId(record);
+    if (!record.previewHost) record.previewHost = 'unit';
+    if (!isTurretWeaponRecord(record)) delete record.shotFrameArtId;
     kindNote(body, category);
     appendDivider(body);
     appendSectionTitle(body, 'Appearance & ID');
-    const groups = weaponArtGroups();
-    const resolvedArt = shownWeaponModel(record);
-    const artValue = resolvedArt || DEFAULT_WEAPON_GROUP;
-    if (artValue && groups.indexOf(artValue) < 0) groups.push(artValue);
-    body.appendChild(categorySelect('Art', groups, artValue, (next) => {
-      record.model = next;
-      ctx.touch(true);
-    }));
     body.appendChild(categorySelect('Hold', HOLD_STYLES, shownWeaponHold(record), (next) => {
       record.holdStyle = next;
       ctx.touch(true);
     }));
+    const identityFields = isTurretWeaponRecord(record)
+      ? WEAPON_IDENTITY_TURRET
+      : WEAPON_IDENTITY;
     renderRecord(body, record, record, Object.assign({}, ctx, {
-      only: WEAPON_IDENTITY,
+      only: identityFields,
+      afterField: (fieldKey, next) => {
+        if (fieldKey === 'artId') {
+          record.model = next || '';
+          if (!isTurretWeaponRecord(record)) delete record.shotFrameArtId;
+          ctx.touch(true);
+        }
+        if (fieldKey === 'previewHost') ctx.touch(true);
+      },
     }));
     appendDivider(body);
     appendSectionTitle(body, 'Ballistics');
@@ -550,16 +800,47 @@ export function renderTyped(body, key, record, ctx) {
   if (key === 'itemId') {
     const category = itemCategory(record);
     let fields = storedItemKeys(category) || ITEM_FIELDS.Block;
-    // typeId is Apply-time only — hide after the record is committed.
     if (!record.pending) {
-      fields = fields.filter((name) => name !== 'typeId');
+      fields = fields.filter((name) => name !== 'typeId' && name !== 'modelId' && name !== 'armorSlot');
+      // Base / Turret art locked at Apply — pivots come from that art.
+      if (category === 'Base' || category === 'Turret') {
+        fields = fields.filter((name) => name !== 'artId');
+      }
     }
-    kindNote(body, isLockedBackpack(record) ? 'Backpack' : category === 'Tool' ? 'Melee (Tool)' : category);
+    if (category === 'Vehicle') syncVehicleModelFromArt(record);
+    kindNote(
+      body,
+      isLockedBackpack(record)
+        ? 'Backpack'
+        : category === 'Tool'
+          ? 'Melee (Tool)'
+          : category
+    );
+    if ((category === 'Base' || category === 'Turret') && record.artId) {
+      const locked = document.createElement('p');
+      locked.className = 'editor-note';
+      locked.textContent = 'Art locked at Apply: ' + record.artId;
+      body.appendChild(locked);
+    }
+    if (category === 'Base' || category === 'Turret' || category === 'Vehicle') {
+      const note = document.createElement('p');
+      note.className = 'editor-note';
+      note.textContent =
+        category === 'Vehicle'
+          ? 'Vehicle is unit-host (Tool Draw → Unit): hull + unit + weapon art from Weapon sheet at every Pivot_turrent.'
+          : 'Weapon is shared across every Pivot_turrent on this art.';
+      body.appendChild(note);
+    }
     appendDivider(body);
     if (category === 'Weapon' && record.maxStack !== 1) record.maxStack = 1;
     const formCtx = Object.assign({}, ctx, {
       only: fields,
       lockMaxStack: category === 'Weapon',
+      afterField: (fieldKey, next) => {
+        if (fieldKey === 'artId' && category === 'Vehicle') {
+          syncVehicleModelFromArt(record);
+        }
+      },
     });
     if (isLockedBackpack(record)) {
       const box = document.createElement('div');
@@ -570,7 +851,6 @@ export function renderTyped(body, key, record, ctx) {
       body.appendChild(box);
       return;
     }
-    // skillId uses Skills-tab picker (not a free text field).
     const fieldsNoSkill = fields.filter((name) => name !== 'skillId');
     renderRecord(
       body,
@@ -578,8 +858,19 @@ export function renderTyped(body, key, record, ctx) {
       record,
       Object.assign({}, formCtx, { only: fieldsNoSkill })
     );
-    if (category === 'Armor') renderArmorExtra(body, record, ctx);
-    if (category === 'Shield') {
+    if (category === 'Vest' || category === 'Helmet') {
+      renderArmorExtra(body, record, ctx);
+    }
+    if (
+      category === 'Vehicle' ||
+      category === 'Base' ||
+      category === 'Turret' ||
+      category === 'Block'
+    ) {
+      appendDivider(body);
+      renderResistOpenButton(body, record, ctx);
+    }
+    if (category === 'Shield' || category === 'Shield Energy') {
       const pierce = document.createElement('p');
       pierce.className = 'editor-note';
       pierce.textContent = 'The projectile requests the pierce. The shield charges shieldPierceCost.';
@@ -591,30 +882,14 @@ export function renderTyped(body, key, record, ctx) {
     }
     appendDivider(body);
     body.appendChild(deleteButton(ctx, record.id));
-    return;
-  }
-  if (key === 'skillId') {
-    let type = (record.effect && record.effect.type) || '';
-    const typeUpper = String(type).toUpperCase();
-    // Skills tab: never surface Tile / Backpack labels.
-    if (typeUpper === 'TILE' || typeUpper.indexOf('BACKPACK') >= 0) type = '';
-    kindNote(body, type || 'Skill');
-    appendDivider(body);
-    renderRecord(body, record, record, Object.assign({}, ctx, { only: SKILL_HEAD }));
-    const effect = record.effect || {};
-    const box = document.createElement('div');
-    box.className = 'editor-fields';
-    const keys = Object.keys(effect).filter((name) => name !== 'type' && name !== 'id');
-    if (keys.length) appendDivider(body);
-    renderRecord(box, effect, effect, {
-      choices: ctx.choices,
-      canWear: ctx.canWear,
-      touch: () => ctx.touch(false),
-      rename: () => {},
-      only: keys,
-    });
-    body.appendChild(box);
-    appendDivider(body);
-    body.appendChild(deleteButton(ctx, record.id));
   }
 }
+
+export {
+  WEAPON_COMMON,
+  WEAPON_BALLISTICS,
+  WEAPON_AMMO,
+  WEAPON_EXTRA,
+  ITEM_FIELDS,
+  SKILL_HEAD,
+};

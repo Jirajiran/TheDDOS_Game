@@ -5,6 +5,20 @@
 
 import { L3_SIZE } from '../config.js';
 
+/**
+ * Energy / regenerating wear shields stay in inventory when HP hits 0.
+ * BASIC (no regen / shieldVariant BASIC) eject on break.
+ * Driven by item fields — not a fixed item id.
+ */
+export function shieldPersistsWhenBroken(def) {
+  if (!def) return false;
+  const kind = String(def.kind || '');
+  if (kind !== 'SHIELD' && kind !== 'Shield') return false;
+  if (def.shieldVariant === 'ENERGY') return true;
+  if (def.itemKind === 'Shield Energy') return true;
+  return (Number(def.shieldRegenPerSec) || 0) > 0;
+}
+
 export function createShieldState(partial = {}) {
   const maxHp = partial.maxHp != null ? partial.maxHp : 120;
   return {

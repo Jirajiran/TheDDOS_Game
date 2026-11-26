@@ -169,6 +169,24 @@ export function applyExplosionAoE(
       });
     }
   }
+  const vehicles = match.vehicles;
+  const applyVehicle = opts.applyDamageToVehicle;
+  if (vehicles && applyVehicle) {
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      if (!v || !v.active) continue;
+      if (sourceTeam != null && v.team != null && v.team === sourceTeam) continue;
+      const dx = v.x - cx;
+      const dy = v.y - cy;
+      if (dx * dx + dy * dy > r2) continue;
+      applyVehicle(match, v, damage, {
+        sourceTeam,
+        damageKind: 'EXPLOSION',
+        pierceToDriver: 0.5,
+        impact: true,
+      });
+    }
+  }
 }
 
 function damageAreaOwner(match, block, ratio, applyDamageToBlock) {
@@ -220,6 +238,7 @@ export function tickAreaTriggers(match, dt, hooks = {}) {
         {
           applyDamageToUnit: applyUnit,
           applyDamageToBlock: applyBlock,
+          applyDamageToVehicle: hooks.applyDamageToVehicle,
           sourceTeam: at.team,
           skipTeam: at.team,
           skipBlockId: block.id,
@@ -298,6 +317,7 @@ export function tryProjectileExplosion(match, projectile, hooks = {}) {
     {
       applyDamageToUnit: hooks.applyDamageToUnit,
       applyDamageToBlock: hooks.applyDamageToBlock,
+      applyDamageToVehicle: hooks.applyDamageToVehicle,
       sourceTeam: projectile.team,
       skipTeam: null,
     }

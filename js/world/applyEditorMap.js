@@ -15,6 +15,10 @@ import {
 } from '../config.js';
 import { GAME_PACK } from '../defs/gamePack.js';
 import {
+  clearPlayItemOverlay,
+  installPlayItemOverlay,
+} from '../defs/registry.js';
+import {
   enemyTeamId,
   firstTeamId,
   playerTeamId,
@@ -26,12 +30,17 @@ import { ensureMeleeSwing } from '../combat/meleeTools.js';
 import { ensureUnitMorale, seedMoraleFromArchetype } from '../combat/morale.js';
 import { seedShieldFromArchetype } from '../combat/shield.js';
 import { ensureBlackboardStub } from '../combat/taunt.js';
-import { readLoadoutOrders } from '../player/inventory.js';
+import {
+  equipArmorOnUnit,
+  equipShieldOnUnit,
+  readLoadoutOrders,
+} from '../player/inventory.js';
 import {
   applyEffectiveArchetypeToUnit,
   resolveEffectiveArchetype,
 } from '../ai/archetypes.js';
 import {
+  ensureUnitWearVisuals,
   skinGroupIdFromSheet,
   UNIT_VISUAL_ACTIONS,
 } from '../view/unitVisual.js';
@@ -46,6 +55,13 @@ import {
   syncBaseStorageFromGenerators,
 } from '../sim/block.js';
 import { createPlacedBlock } from '../sim/place.js';
+import {
+  isVehicleTemplateId,
+  normalizeVehicleArtId,
+  seatUnitInVehicle,
+  spawnVehicle,
+  VehicleState,
+} from '../sim/vehicle.js';
 import { refreshEdgeAreas } from './world.js';
 import {
   installSenseTeams,
@@ -54,6 +70,82 @@ import {
   unregisterSenseUnit,
 } from '../ai/senseIndex.js';
 import { resetPlayerStats } from '../sim/unit.js';
+
+function isVehicleItem(doc, templateId) {
+  const rec = doc && doc.items && doc.items[templateId];
+  return !!(rec && (rec.kind === 'VEHICLE' || rec.isVehicle));
+}
+
+/** Same wear contract as wave spawn — loadout On → unit activeArmor* / shield. */
+function applyLoadoutWear(unit, orders) {
+  if (!unit) return;
+  unit.activeArmorId = null;
+  unit.activeArmorTopId = null;
+  unit.activeArmorVestId = null;
+  unit.activeShieldId = null;
+  if (!orders) return;
+  if (orders.armorTopId) equipArmorOnUnit(unit, orders.armorTopId);
+  if (orders.armorVestId || orders.armorId) {
+    equipArmorOnUnit(unit, orders.armorVestId || orders.armorId);
+  }
+  if (orders.shieldId) equipShieldOnUnit(unit, orders.shieldId);
+  ensureUnitWearVisuals(unit);
+}
+
+function isPlacedVehicle(doc, inst) {
+  if (!inst || !inst.templateId) return false;
+  return isVehicleTemplateId(inst.templateId) || isVehicleItem(doc, inst.templateId);
+}
+
+/** Empty vehicle on map; optional startUnitDriven uses placed team for driver. */
+function spawnPlacedVehicleFromInst(match, doc, inst) {
+  const tpl =
+    (doc && doc.items && doc.items[inst.templateId]) || Object.create(null);
+  const maxHp =
+    inst.maxHp != null
+      ? inst.maxHp
+      : tpl.maxHp != null
+        ? tpl.maxHp
+        : 400;
+  // Editor place = footprint top-left; entity sits on SizeView center.
+  const placeX = inst.x || 0;
+  const placeY = inst.y || 0;
+  const vehicle = spawnVehicle(match, {
+    artId: normalizeVehicleArtId(tpl.artId || inst.templateId),
+    templateId: inst.templateId,
+    x: placeX + L3_SIZE * 0.5,
+    y: placeY + L3_SIZE * 0.5,
+    facingRad: inst.facingRad != null ? inst.facingRad : undefined,
+    state: VehicleState.Empty,
+    team: null,
+    driverUnitId: null,
+    hp: inst.currentHp != null ? inst.currentHp : maxHp,
+    maxHp: maxHp,
+    speed: tpl.speed,
+    speedMax: tpl.speedMax != null ? tpl.speedMax : tpl.speed,
+    speedBase: tpl.speedBase,
+    accel: tpl.accel,
+    brake: tpl.brake,
+    ramSpeedMin: tpl.ramSpeedMin,
+    ramDamage: tpl.ramDamage,
+    ramCooldownSec: tpl.ramCooldownSec,
+    turnRateRadPerSec: tpl.turnRateRadPerSec,
+    armorType: tpl.armorType,
+    resistPercent: tpl.resistPercent,
+    weaponId: tpl.weaponId || inst.weaponId,
+    detectRadius: tpl.detectRadius,
+    mobilityHpRatio: tpl.mobilityHpRatio,
+    mobilityRepairChance: tpl.mobilityRepairChance,
+    brokenClearSec: tpl.brokenClearSec,
+    driverProtection: inst.driverProtection || tpl.driverProtection || undefined,
+  });
+  const startDriver = (inst.startUnitDriven || tpl.startUnitDriven || '').trim();
+  if (vehicle && startDriver) {
+    vehicle._startUnitDriven = startDriver;
+    vehicle._startDriverTeam = inst.team != null ? inst.team | 0 : null;
+  }
+  return vehicle;
+}
 
 function lookupId(raw, getters) {
   if (!raw) return { id: '', def: null };
@@ -81,8 +173,21 @@ function lookupId(raw, getters) {
 }
 
 function resolveBlockDef(templateId) {
-  const hit = lookupId(templateId, [getBlockDef, getItemDef]);
-  return hit.def ? { id: hit.id, def: hit.def } : null;
+  const blockHit = lookupId(templateId, [getBlockDef]);
+  const itemHit = lookupId(templateId, [getItemDef]);
+  if (!blockHit.def && !itemHit.def) return null;
+  const id = blockHit.id || itemHit.id;
+  const def = Object.assign({}, blockHit.def || {}, itemHit.def || {});
+  // items.json owns artId; blocks.json may omit it — keep Editor/Gameplay aligned.
+  if (
+    itemHit.def &&
+    typeof itemHit.def.artId === 'string' &&
+    itemHit.def.artId.trim()
+  ) {
+    def.artId = itemHit.def.artId.trim();
+  }
+  // Map doc item override (editor sheet).
+  return { id, def };
 }
 
 function resolveUnitArchetype(templateId) {
@@ -286,6 +391,10 @@ export function materializePlacedObjects(match, doc) {
   for (let i = 0; i < placed.length; i++) {
     const inst = placed[i];
     if (!inst || inst.kind === 'unit') continue;
+    if (isPlacedVehicle(doc, inst)) {
+      spawnPlacedVehicleFromInst(match, doc, inst);
+      continue;
+    }
     const resolved = resolveBlockDef(inst.templateId);
     if (!resolved) {
       console.warn('[map] unknown placeable', inst.templateId);
@@ -359,6 +468,11 @@ export function materializePlacedUnits(match, doc) {
   for (let i = 0; i < placed.length; i++) {
     const inst = placed[i];
     if (!inst || inst.kind !== 'unit') continue;
+    // Vehicle placed via Unit Tool Draw — still a vehicle, not a grunt.
+    if (isPlacedVehicle(doc, inst)) {
+      spawnPlacedVehicleFromInst(match, doc, inst);
+      continue;
+    }
     match.editorPlacedUnits.push({
       templateId: inst.templateId,
       x: inst.x || 0,
@@ -461,6 +575,8 @@ export function materializePlacedUnits(match, doc) {
       seedMoraleFromArchetype(u, archetype);
       seedShieldFromArchetype(u, archetype);
     }
+    applyLoadoutWear(u, orders);
+    u.activeHotbar = orders.currentSlot || 0;
     const effective = resolveEffectiveArchetype(u, u.archetypeId);
     if (effective) applyEffectiveArchetypeToUnit(u, effective, { syncWeapon: false });
     ensureUnitSkills(u);
@@ -489,14 +605,116 @@ export function applyEditorMapDoc(match, doc) {
     match.mapRules = Object.assign({}, match.mapRules || {}, doc.rules);
   }
 
+  // Host loadout Helmet/Vest/Shield live on doc.items — pack registry alone misses them.
+  if (doc.items && typeof doc.items === 'object') {
+    installPlayItemOverlay(doc.items);
+  } else {
+    clearPlayItemOverlay();
+  }
+
   installSenseTeams(match, doc.teams);
   bindHostSeatFromDoc(match, doc);
   installEditorAreas(match, doc);
   materializePlacedObjects(match, doc);
   materializePlacedUnits(match, doc);
+  seatStartUnitDriven(match, doc);
   rebuildSenseIndexFromMatch(match);
 
   return match;
+}
+
+/**
+ * Vehicles with startUnitDriven: spawn that unit template and seat as Driven.
+ */
+function seatStartUnitDriven(match, doc) {
+  const list = match && match.vehicles;
+  if (!list || !list.length) return;
+  for (let i = 0; i < list.length; i++) {
+    const vehicle = list[i];
+    if (!vehicle || !vehicle.active || !vehicle._startUnitDriven) continue;
+    if (vehicle.driverUnitId != null) continue;
+    const unitId = vehicle._startUnitDriven;
+    const team =
+      vehicle._startDriverTeam != null
+        ? vehicle._startDriverTeam
+        : enemyTeamId(match, GAME_PACK && GAME_PACK.teams);
+    const unit = spawnEditorUnitAt(match, doc, {
+      templateId: unitId,
+      x: vehicle.x,
+      y: vehicle.y,
+      team,
+    });
+    delete vehicle._startUnitDriven;
+    delete vehicle._startDriverTeam;
+    if (unit) seatUnitInVehicle(match, unit, vehicle);
+  }
+}
+
+/** Minimal unit spawn for vehicle start driver (AI role). */
+function spawnEditorUnitAt(match, doc, opts) {
+  if (!match || !match.pools || !opts || !opts.templateId) return null;
+  const resolved = resolveUnitArchetype(opts.templateId);
+  const archetype = resolved ? resolved.def : getUnitArchetype('GRUNT_BASIC');
+  const archId = resolved ? resolved.id : 'GRUNT_BASIC';
+  const u = acquireUnit(match.pools);
+  if (!u) return null;
+  const pack = getBalancePack();
+  const packTeams = GAME_PACK && GAME_PACK.teams;
+  const team = opts.team != null ? opts.team | 0 : enemyTeamId(match, packTeams);
+  const sheet =
+    (doc &&
+      doc.units &&
+      (doc.units[opts.templateId] ||
+        doc.units[archId] ||
+        doc.units[String(opts.templateId || '').toUpperCase()])) ||
+    archetype;
+  const orders = readLoadoutOrders(
+    (sheet && sheet.startingLoadout) ||
+      (archetype && archetype.startingLoadout),
+    (sheet && sheet.currentSlot) != null
+      ? sheet.currentSlot
+      : archetype && archetype.currentSlot
+  );
+  const weaponId = orders.weaponId;
+  const hpLo = archetype && archetype.hpRange ? archetype.hpRange[0] : pack.enemyMaxHp;
+  const hpHi = archetype && archetype.hpRange ? archetype.hpRange[1] : pack.enemyMaxHp + 4;
+  const maxHp = Math.round((hpLo + hpHi) / 2);
+
+  u.active = true;
+  u.typeId = 2;
+  u.team = team;
+  u.role = 'enemy';
+  u.collisionLayer = deriveCollisionLayer({ team, role: u.role });
+  u.pierceCost = 1;
+  u.skinGroupId = skinGroupIdFromSheet(sheet);
+  u.visualAction = UNIT_VISUAL_ACTIONS.idle;
+  u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
+  u.archetypeId = archetype ? archetype.id : archId;
+  u.isBoss = !!(archetype && archetype.isBoss);
+  u.sizeScale =
+    (archetype && (archetype.sizeScale || (archetype.isBoss ? 1.5 : 1))) || 1;
+  u.maxHp = Math.max(1, maxHp);
+  u.hp = u.maxHp;
+  u.speed = pack.enemySpeed * (u.isBoss ? 0.85 : 1);
+  u.radius = Math.round(pack.enemyRadius * (u.sizeScale || 1));
+  u.x = opts.x || 0;
+  u.y = opts.y || 0;
+  u.facingRad = 0;
+  u.aimRad = 0;
+  u.weaponId = weaponId || null;
+  if (weaponId) Object.assign(u, createAmmoState(weaponId));
+  ensureUnitMorale(u);
+  seedMoraleFromArchetype(u, archetype);
+  ensureBlackboardStub(u);
+  ensureUnitSkills(u);
+  ensureMeleeSwing(u);
+  seedShieldFromArchetype(u, archetype);
+  applyLoadoutWear(u, orders);
+  u.activeHotbar = orders.currentSlot || 0;
+  const effective = resolveEffectiveArchetype(u, u.archetypeId);
+  if (effective) applyEffectiveArchetypeToUnit(u, effective);
+  registerSenseUnit(match, u);
+  return u;
 }
 
 /**

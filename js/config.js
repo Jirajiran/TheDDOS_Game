@@ -230,10 +230,14 @@ export const ItemKind = Object.freeze({
   WEAPON: 'WEAPON',
   RESOURCE: 'RESOURCE',
   TOOL: 'TOOL',
-  /** Single active armor slot on unit — equip new deactivates old. */
+  /**
+   * Body wear — two channels via armorSlot: TOP (Helmet) + VEST.
+   * Both may be worn; damageReduction stacks (see getArmorDamageReduction).
+   * Equip replaces only the same channel.
+   */
   ARMOR: 'ARMOR',
   /**
-   * Single active shield slot (separate from armor).
+   * Third wear channel (separate from TOP/VEST armor).
    * Equip enables/refreshes unit.shield from item stats; ORs with archetype
    * hasPassiveShield (item wins while equipped; unequip restores passive).
    */

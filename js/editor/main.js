@@ -3,7 +3,12 @@
  * Loads the same pack the game reads, then keeps one map file in this page.
  */
 
-import { UNIT_TEMPLATE_FILE } from '../assets/closedCatalog.js';
+import {
+  BLOCK_ART_FILE,
+  ITEM_HOLD_FILE,
+  UNIT_TEMPLATE_FILE,
+  VEHICLE_ART_FILE,
+} from '../assets/closedCatalog.js';
 import {
   MAX_SIDE,
   clearPageCache,
@@ -118,6 +123,21 @@ async function loadResources(onStatus) {
   const svgText = await art.text();
   if (svgText.indexOf('<svg') < 0) throw new Error('Unit art is not SVG');
   pack.unitArt = svgText;
+
+  async function loadSvg(url, label) {
+    onStatus('Reading ' + label + '…');
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) {
+      console.warn('[editor] skip art', url, res.status);
+      return '';
+    }
+    const text = await res.text();
+    return text.indexOf('<svg') >= 0 ? text : '';
+  }
+  pack.vehicleArt = await loadSvg(VEHICLE_ART_FILE, 'vehicle art');
+  pack.blockArt = await loadSvg(BLOCK_ART_FILE, 'block art');
+  pack.itemHoldArt = await loadSvg(ITEM_HOLD_FILE, 'item hold art');
+
   await buildArtPool(pack, (label) => {
     onStatus(label || 'Building art pool…');
   });
@@ -399,9 +419,22 @@ function toolObjectIds(doc) {
     const rec = items[id];
     if (!rec || rec.pending) return false;
     const cat = itemCategory(rec);
-    // Same placeables as Block tab (Door/Gen/Factory/Base/…) plus Turret.
+    // Placeables + Turret. Vehicle is a unit-host → Unit Tool Draw.
     return isBlockTabKind(cat) || cat === 'Turret';
   });
+}
+
+function toolVehicleIds(doc) {
+  const items = (doc && doc.items) || {};
+  return Object.keys(items).filter((id) => {
+    const rec = items[id];
+    return !!(rec && !rec.pending && itemCategory(rec) === 'Vehicle');
+  });
+}
+
+/** Unit picker = unit sheets + Vehicle items (real unit-host placeables). */
+function toolUnitIds(doc) {
+  return nonPendingIds(doc && doc.units).concat(toolVehicleIds(doc));
 }
 
 function refreshTrailFromTools() {
@@ -531,7 +564,7 @@ function syncToolTeamSelects() {
 function syncToolDropdownsIfChanged() {
   if (!state.doc) return;
   const itemIds = toolObjectIds(state.doc);
-  const unitIds = nonPendingIds(state.doc.units);
+  const unitIds = toolUnitIds(state.doc);
   const teamIds = (state.doc.teams || [])
     .map((row) => (row && row.id != null ? row.id : ''))
     .join(',');
@@ -548,7 +581,7 @@ function syncToolDropdownsIfChanged() {
 function syncToolDropdowns() {
   if (!state.doc) return;
   const itemIds = toolObjectIds(state.doc);
-  const unitIds = nonPendingIds(state.doc.units);
+  const unitIds = toolUnitIds(state.doc);
   const teamIds = (state.doc.teams || [])
     .map((row) => (row && row.id != null ? row.id : ''))
     .join(',');
@@ -861,7 +894,17 @@ function bindWork() {
   });
 }
 
-async function runLoading() {
+function packPoolWarm(pack) {
+  return !!(pack && pack.artPool && pack.artPool.size > 0);
+}
+
+/**
+ * Load pack + art pool. Same editor document: reuse warm pack (import / re-enter).
+ * Full page load (boot / return from Test Play) always bakes — memory was cleared.
+ * @param {{ force?: boolean }} [opts]
+ */
+async function runLoading(opts) {
+  const force = !!(opts && opts.force);
   show('loading');
   const label = document.getElementById('editor-load-label');
   const error = document.getElementById('editor-load-error');
@@ -875,6 +918,10 @@ async function runLoading() {
     if (fill) fill.style.width = progress + '%';
     if (pctEl) pctEl.textContent = 'Loading ' + Math.round(progress) + '%';
   };
+  if (!force && packPoolWarm(state.pack)) {
+    setProgress(100, 'Ready (cached pack)');
+    return state.pack;
+  }
   setProgress(4, 'Reading pack…');
   try {
     state.pack = await loadResources((text) => {
@@ -889,6 +936,7 @@ async function runLoading() {
     if (error) error.textContent = err.message || String(err);
     throw err;
   }
+  return state.pack;
 }
 
 function setCreateError(message) {
@@ -964,7 +1012,7 @@ async function importMapFromFile(file, opts = {}) {
     state.spawnKey = '';
     state.rulesKey = 'rule';
     resetHistory();
-    show('loading');
+    // Pack/pool already warm in this tab — skip full rebuild (map JSON only).
     await runLoading();
     openWork();
   } catch (err) {
@@ -1072,6 +1120,7 @@ function bindCreate() {
 }
 
 function enterEditor() {
+  // First boot in this document always loads; later calls reuse warm pack.
   return runLoading()
     .then(() => {
       // Resume cached draft after refresh / return from Test Play.

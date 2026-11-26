@@ -48,7 +48,8 @@
           "amount": 1,
           "intervalSec": 90
         }
-      ]
+      ],
+      "artId": "Block_Base"
     },
     "WALL_WOOD": {
       "kind": "PLACEABLE",
@@ -78,7 +79,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 250
+      "maxHp": 250,
+      "artId": "Block_Wood"
     },
     "WALL_STONE": {
       "kind": "PLACEABLE",
@@ -108,7 +110,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 550
+      "maxHp": 550,
+      "artId": "Block_Stone"
     },
     "WALL_IRON": {
       "kind": "PLACEABLE",
@@ -138,7 +141,8 @@
         "w": 1,
         "h": 1
       },
-      "maxHp": 800
+      "maxHp": 800,
+      "artId": "Block_Iron"
     },
     "DOOR_WOOD": {
       "kind": "PLACEABLE",
@@ -291,7 +295,8 @@
       },
       "maxHp": 350,
       "weaponId": "M1991",
-      "detectRadius": 819
+      "detectRadius": 819,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_50CAL": {
       "kind": "PLACEABLE",
@@ -323,7 +328,8 @@
       },
       "maxHp": 450,
       "weaponId": "WEAPON_50CAL",
-      "detectRadius": 1024
+      "detectRadius": 1024,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_SMG": {
       "kind": "PLACEABLE",
@@ -355,7 +361,8 @@
       },
       "maxHp": 380,
       "weaponId": "SMG",
-      "detectRadius": 870
+      "detectRadius": 870,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_AK47": {
       "kind": "PLACEABLE",
@@ -387,7 +394,8 @@
       },
       "maxHp": 420,
       "weaponId": "AK47",
-      "detectRadius": 973
+      "detectRadius": 973,
+      "artId": "Block_Turrent_1"
     },
     "TURRET_LAZER": {
       "kind": "PLACEABLE",
@@ -419,7 +427,8 @@
       },
       "maxHp": 500,
       "weaponId": "LAZER",
-      "detectRadius": 1126
+      "detectRadius": 1126,
+      "artId": "Block_Turrent_1"
     },
     "HEAL_BLOCK": {
       "kind": "PLACEABLE",

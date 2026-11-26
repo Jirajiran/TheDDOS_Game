@@ -12,6 +12,8 @@ import {
 } from '../player/inventory.js';
 import {
   applyBlockRepair,
+  getMeleeToolRole,
+  MeleeToolRole,
   resolveFistVsUnit,
   resolveMeleeVsBlock,
   tickMeleeSwing,
@@ -24,6 +26,11 @@ import {
   applyDamageToUnit,
   resolveUnitInventory,
 } from './unit.js';
+import {
+  applyDamageToVehicle,
+  tryRepairVehicleMobility,
+  vehicleAabb,
+} from './vehicle.js';
 export function tryHarvest(match, unit, _wx, _wy) {
   const inv = resolveUnitInventory(match, unit);
   if (!inv) return;
@@ -110,6 +117,35 @@ export function applyMeleeSwingHits(match, unit) {
         applyDamageToBlock(match, target, sw.damage, 'DEFAULT', {
           sourceTeam,
           damageKind: 'TOOL',
+          impact: true,
+        });
+      }
+    }
+    // Wrench: Mobility repair. Axe/fist: hull damage on vehicles in volume.
+    const vehicles = vehiclesOverlappingMeleeVolume(match, vol);
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      if (toolDef && getMeleeToolRole(toolDef.id) === MeleeToolRole.REPAIR_WRENCH) {
+        if (v.immobilized) {
+          const r = tryRepairVehicleMobility(match, unit, v);
+          if (r.ok) playSfx('combat.hit.fix');
+        }
+        continue;
+      }
+      if (toolDef) {
+        const amount =
+          toolDef.structureDamage || toolDef.harvestDamage || sw.damage || 20;
+        applyDamageToVehicle(match, v, amount, {
+          sourceTeam,
+          damageKind: 'TOOL',
+          pierceToDriver: 0,
+          impact: true,
+        });
+      } else if (sw.source === 'FIST') {
+        applyDamageToVehicle(match, v, sw.damage, {
+          sourceTeam,
+          damageKind: 'TOOL',
+          pierceToDriver: 0,
           impact: true,
         });
       }
@@ -202,6 +238,19 @@ export function tickExplosionVfx(match, dt) {
 }
 
 /** Alive harvest resources + placeables overlapping the oriented melee box. */
+
+export function vehiclesOverlappingMeleeVolume(match, vol) {
+  const out = [];
+  const list = match.vehicles || [];
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    if (!v || !v.active) continue;
+    const box = vehicleAabb(v);
+    if (!aabbOverlapsMeleeVolume(box.x, box.y, box.w, box.h, vol)) continue;
+    out.push(v);
+  }
+  return out;
+}
 
 export function blocksOverlappingMeleeVolume(match, vol) {
   const out = [];

@@ -28,7 +28,7 @@ import { huntAreaGoal } from './huntArea.js';
 import {
   equipArmorOnUnit,
   equipShieldOnUnit,
-  ejectBrokenBasicShield,
+  ejectBrokenWearShield,
   getArmorDamageReduction,
 } from '../player/inventory.js';
 import {
@@ -42,6 +42,7 @@ import {
 import {
   resolveUnitVsOccupancy,
 } from '../world/occupancy.js';
+import { resolveUnitVsVehicles } from './vehicle.js';
 import {
   acquireUnit,
   clearMuzzleQueue,
@@ -85,6 +86,7 @@ import {
   tryPlace,
 } from './place.js';
 import {
+  ensureUnitWearVisuals,
   skinGroupIdFromSheet,
   UNIT_VISUAL_ACTIONS,
 } from '../view/unitVisual.js';
@@ -234,13 +236,23 @@ export function resetPlayerStats(u, pack, match) {
   u.shield = null;
   u.tauntTimer = 0;
   u.tauntedById = -1;
-  const armorSlot = match && match.wornArmorSlot >= 0 ? match.wornArmorSlot : -1;
-  const armorItem =
-    armorSlot >= 0 && match.inventory && match.inventory[armorSlot]
-      ? match.inventory[armorSlot].itemId
-      : null;
-  if (armorItem) equipArmorOnUnit(u, armorItem);
-  else u.activeArmorId = null;
+  u.activeArmorTopId = null;
+  u.activeArmorVestId = null;
+  u.activeArmorId = null;
+  const topSlot =
+    match && match.wornArmorTopSlot >= 0 ? match.wornArmorTopSlot : -1;
+  const vestSlot =
+    match && match.wornArmorVestSlot >= 0
+      ? match.wornArmorVestSlot
+      : match && match.wornArmorSlot >= 0
+        ? match.wornArmorSlot
+        : -1;
+  if (topSlot >= 0 && match.inventory && match.inventory[topSlot]) {
+    equipArmorOnUnit(u, match.inventory[topSlot].itemId);
+  }
+  if (vestSlot >= 0 && match.inventory && match.inventory[vestSlot]) {
+    equipArmorOnUnit(u, match.inventory[vestSlot].itemId);
+  }
   const shieldSlot =
     match && match.wornShieldSlot >= 0 ? match.wornShieldSlot : -1;
   const shieldItem =
@@ -260,6 +272,7 @@ export function resetPlayerStats(u, pack, match) {
     u.skinGroupId = null;
   }
   if (sheet) seedShieldFromArchetype(u, sheet);
+  ensureUnitWearVisuals(u);
   u.visualAction = UNIT_VISUAL_ACTIONS.idle;
   u.visualActionPrev = UNIT_VISUAL_ACTIONS.idle;
   u.visualActionT = 0;
@@ -344,6 +357,11 @@ export function slewAngle(current, target, rateRadPerSec, dt) {
   return current + Math.sign(diff) * maxStep;
 }
 
+/** Seated / mounting driver = key only — hull owns motion; no foot physics. */
+function unitSeatLocked(u) {
+  return !!(u && u.vehicleId != null);
+}
+
 export function integrateUnitMotion(match, dt) {
   const units = match.pools.units;
   const { world, occupancy } = match;
@@ -351,9 +369,16 @@ export function integrateUnitMotion(match, dt) {
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (!u.active) continue;
+    // Driver pose is snapped in tickVehicleOccupants — skip foot integrate.
+    if (unitSeatLocked(u)) {
+      u.vx = 0;
+      u.vy = 0;
+      continue;
+    }
     u.x += u.vx * dt;
     u.y += u.vy * dt;
     resolveUnitVsOccupancy(u, occupancy, getter);
+    resolveUnitVsVehicles(u, match);
     clampUnitInWorld(u, world);
   }
 }
@@ -362,7 +387,7 @@ export function separateUnits(match) {
   const units = match.pools.units;
   const active = [];
   for (let i = 0; i < units.length; i++) {
-    if (units[i].active) active.push(units[i]);
+    if (units[i].active && !unitSeatLocked(units[i])) active.push(units[i]);
   }
   // Stronger soft push so AI squads do not death-ball into one cell.
   const soft = Math.max(
@@ -401,6 +426,7 @@ export function separateUnits(match) {
   const getter = (id) => getBlock(match, id);
   for (let i = 0; i < active.length; i++) {
     resolveUnitVsOccupancy(active[i], match.occupancy, getter);
+    resolveUnitVsVehicles(active[i], match);
     clampUnitInWorld(active[i], match.world);
   }
 }
@@ -426,7 +452,7 @@ export function applyDamageToUnit(match, unit, damage, ctx = {}) {
     const abs = absorbDamageWithShield(unit, dmg);
     dmg = abs.leftover;
     shieldHit = abs.absorbed > 0;
-    if (abs.broke) ejectBrokenBasicShield(match, unit);
+    if (abs.broke) ejectBrokenWearShield(match, unit);
   }
   if (dmg <= 0) {
     if (ctx.impact && shieldHit) playSfx('combat.hit.shield');

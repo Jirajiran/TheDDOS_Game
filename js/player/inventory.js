@@ -9,10 +9,12 @@ import {
   getWeaponDef,
   isBackpackItemId,
 } from '../config.js';
+import { armorSlotOf } from '../assets/closedCatalog.js';
 import { createAmmoState } from '../combat/weapons.js';
 import {
   createShieldState,
   seedShieldFromArchetype,
+  shieldPersistsWhenBroken,
 } from '../combat/shield.js';
 
 /**
@@ -129,13 +131,17 @@ export function resolveItemId(itemId) {
 export function makeSlotFromItem(itemId, count = 1) {
   const def = getItemDef(resolveItemId(itemId));
   if (!def) return emptySlot();
+  // Runtime wear kinds only — map overlay already normalized Helmet→ARMOR etc.
+  let kind = def.kind;
+  if (kind === 'Helmet' || kind === 'Vest') kind = ItemKind.ARMOR;
+  if (kind === 'Shield' || kind === 'Shield Energy') kind = ItemKind.SHIELD;
   const slot = {
-    itemId: def.id,
+    itemId: def.id || resolveItemId(itemId),
     count,
-    kind: def.kind,
+    kind,
     label: def.label || def.id,
     color: def.color || '#888',
-    weaponId: def.weaponId || (def.kind === ItemKind.WEAPON ? def.id : null),
+    weaponId: def.weaponId || (kind === ItemKind.WEAPON ? def.id : null),
     ammoInMag: 0,
     mags: 0,
     reloadTimer: 0,
@@ -149,25 +155,55 @@ export function makeSlotFromItem(itemId, count = 1) {
   return slot;
 }
 
-/** Worn gear from a unit loadout. active applies to armor and shield only. */
+/** Worn gear from a unit loadout. active applies to armor (TOP+VEST) and shield. */
 export function readLoadoutOrders(loadout, currentSlot = 0) {
   const rows = Array.isArray(loadout) ? loadout : [];
-  const seen = Object.create(null);
-  let armorId = null;
+  const seenArmor = Object.create(null);
+  let armorTopId = null;
+  let armorVestId = null;
+  let armorId = null; // legacy = vest channel
   let shieldId = null;
+  let seenShield = false;
   for (let i = 0; i < rows.length; i++) {
     const entry = rows[i];
-    if (!entry || !entry.active) continue;
+    // Wear On only — inactive rows still fill inventory via applyStartingLoadout.
+    if (!entry || entry.active !== true) continue;
     const def = getItemDef(resolveItemId(entry.itemId));
-    const kind = def && def.kind;
-    if (kind !== ItemKind.ARMOR && kind !== ItemKind.SHIELD) continue;
-    if (seen[kind]) {
-      console.warn(`[loadout] ignored second active ${kind}: ${entry.itemId}`);
+    if (!def) continue;
+    const kind = def.kind;
+    const itemKind = def.itemKind;
+    const isShield =
+      kind === ItemKind.SHIELD ||
+      kind === 'Shield' ||
+      itemKind === 'Shield' ||
+      itemKind === 'Shield Energy';
+    if (isShield) {
+      if (seenShield) {
+        console.warn(`[loadout] ignored second active SHIELD: ${entry.itemId}`);
+        continue;
+      }
+      seenShield = true;
+      shieldId = def.id;
       continue;
     }
-    seen[kind] = true;
-    if (kind === ItemKind.ARMOR) armorId = def.id;
-    else shieldId = def.id;
+    const isArmor =
+      kind === ItemKind.ARMOR ||
+      kind === 'Helmet' ||
+      kind === 'Vest' ||
+      itemKind === 'Helmet' ||
+      itemKind === 'Vest';
+    if (!isArmor) continue;
+    const channel = armorSlotOf(def);
+    if (seenArmor[channel]) {
+      console.warn(`[loadout] ignored second active ARMOR ${channel}: ${entry.itemId}`);
+      continue;
+    }
+    seenArmor[channel] = true;
+    if (channel === 'TOP') armorTopId = def.id;
+    else {
+      armorVestId = def.id;
+      armorId = def.id;
+    }
   }
   const slot = currentSlot | 0;
   let weaponId = null;
@@ -178,7 +214,14 @@ export function readLoadoutOrders(loadout, currentSlot = 0) {
       weaponId = def.weaponId || def.id;
     }
   }
-  return { armorId, shieldId, weaponId, currentSlot: slot };
+  return {
+    armorId,
+    armorTopId,
+    armorVestId,
+    shieldId,
+    weaponId,
+    currentSlot: slot,
+  };
 }
 
 /** Apply a unit startingLoadout into inventory slots. */
@@ -187,27 +230,45 @@ export function applyStartingLoadout(
   loadout = GAME_PACK.startingLoadout,
   currentSlot = GAME_PACK.currentSlot || 0
 ) {
+  const rows = Array.isArray(loadout) ? loadout : [];
+  // Grow bag so Helmet/Vest/Shield rows past hotbarBase are not dropped.
+  while (inventory.length < rows.length) {
+    inventory.push(emptySlot());
+  }
   for (let i = 0; i < inventory.length; i++) {
     inventory[i] = emptySlot();
   }
-  const rows = Array.isArray(loadout) ? loadout : [];
   for (let i = 0; i < rows.length && i < inventory.length; i++) {
     const entry = rows[i];
-    inventory[i] = makeSlotFromItem(entry.itemId, entry.count);
+    inventory[i] = makeSlotFromItem(
+      entry && entry.itemId,
+      entry && entry.count != null ? entry.count : 1
+    );
   }
   const orders = readLoadoutOrders(rows, currentSlot);
-  let wornArmorSlot = -1;
+  let wornArmorTopSlot = -1;
+  let wornArmorVestSlot = -1;
   let wornShieldSlot = -1;
-  for (let i = 0; i < rows.length && i < inventory.length; i++) {
-    if (orders.armorId && rows[i].itemId === orders.armorId && wornArmorSlot < 0) {
-      wornArmorSlot = i;
+  // Match against resolved inventory ids (same as readLoadoutOrders / equip).
+  // Raw row.itemId can differ in case from def.id and miss worn*Slot → no wear on spawn.
+  for (let i = 0; i < inventory.length; i++) {
+    const itemId = inventory[i] && inventory[i].itemId;
+    if (!itemId) continue;
+    if (orders.armorTopId && itemId === orders.armorTopId && wornArmorTopSlot < 0) {
+      wornArmorTopSlot = i;
     }
-    if (orders.shieldId && rows[i].itemId === orders.shieldId && wornShieldSlot < 0) {
+    if (orders.armorVestId && itemId === orders.armorVestId && wornArmorVestSlot < 0) {
+      wornArmorVestSlot = i;
+    }
+    if (orders.shieldId && itemId === orders.shieldId && wornShieldSlot < 0) {
       wornShieldSlot = i;
     }
   }
   return {
-    wornArmorSlot,
+    wornArmorTopSlot,
+    wornArmorVestSlot,
+    /** @deprecated use wornArmorVestSlot — kept for HUD/memento */
+    wornArmorSlot: wornArmorVestSlot,
     wornShieldSlot,
     activeHotbar: orders.currentSlot,
     activeWeaponId: orders.weaponId,
@@ -242,8 +303,8 @@ export function isShieldSlot(slot) {
 }
 
 /**
- * Single active armor slot — equipping a new armor deactivates the previous
- * in the same assignment (never two activeArmorId values).
+ * TOP and VEST armor channels are independent — both may be worn.
+ * Equipping a new piece replaces only the same channel.
  */
 function shiftWornIndex(idx, from, to, mode) {
   const i = typeof idx === 'number' ? idx : -1;
@@ -254,18 +315,34 @@ function shiftWornIndex(idx, from, to, mode) {
   return i;
 }
 
+function syncLegacyWornArmor(match) {
+  if (!match) return;
+  match.wornArmorSlot =
+    match.wornArmorVestSlot != null ? match.wornArmorVestSlot : -1;
+}
+
+function wornKeyForArmorChannel(channel) {
+  return channel === 'TOP' ? 'wornArmorTopSlot' : 'wornArmorVestSlot';
+}
+
 /** Click the active armor or shield slot. The same slot again takes that piece off. */
 export function tryEquipWornFromActive(match, unit) {
   if (!match || !unit) return false;
   const index = match.activeHotbar | 0;
   const slot = getActiveSlot(match.inventory, index);
   if (isArmorSlot(slot)) {
-    if (match.wornArmorSlot === index) {
-      match.wornArmorSlot = -1;
-      return equipArmorOnUnit(unit, null);
+    const def = getItemDef(slot.itemId);
+    const channel = armorSlotOf(def);
+    const key = wornKeyForArmorChannel(channel);
+    if (match[key] == null) match[key] = -1;
+    if (match[key] === index) {
+      match[key] = -1;
+      syncLegacyWornArmor(match);
+      return unequipArmorChannel(unit, channel);
     }
     if (!equipArmorOnUnit(unit, slot.itemId)) return false;
-    match.wornArmorSlot = index;
+    match[key] = index;
+    syncLegacyWornArmor(match);
     return true;
   }
   if (isShieldSlot(slot)) {
@@ -284,33 +361,72 @@ export function tryEquipWornFromActive(match, unit) {
 export function releaseWornSlot(match, unit, slotIndex) {
   if (!match) return;
   const index = slotIndex | 0;
-  if (match.wornArmorSlot === index) {
-    match.wornArmorSlot = -1;
-    if (unit) equipArmorOnUnit(unit, null);
+  if (match.wornArmorTopSlot === index) {
+    match.wornArmorTopSlot = -1;
+    if (unit) unequipArmorChannel(unit, 'TOP');
   }
+  if (match.wornArmorVestSlot === index || match.wornArmorSlot === index) {
+    match.wornArmorVestSlot = -1;
+    if (unit) unequipArmorChannel(unit, 'VEST');
+  }
+  syncLegacyWornArmor(match);
   if (match.wornShieldSlot === index) {
     match.wornShieldSlot = -1;
     if (unit) equipShieldOnUnit(unit, null);
   }
 }
 
+export function unequipArmorChannel(unit, channel) {
+  if (!unit) return false;
+  if (channel === 'TOP') {
+    unit.activeArmorTopId = null;
+    return true;
+  }
+  unit.activeArmorVestId = null;
+  unit.activeArmorId = null; // legacy alias = vest
+  return true;
+}
+
+/** Equip armor into TOP or VEST channel from item.armorSlot (default VEST). */
 export function equipArmorOnUnit(unit, itemId) {
   if (!unit) return false;
   if (!itemId) {
+    unit.activeArmorTopId = null;
+    unit.activeArmorVestId = null;
     unit.activeArmorId = null;
     return true;
   }
   const def = getItemDef(itemId);
-  if (!def || def.kind !== ItemKind.ARMOR) return false;
-  unit.activeArmorId = def.id;
+  if (!def) return false;
+  const kind = def.kind;
+  const itemKind = def.itemKind;
+  const isArmor =
+    kind === ItemKind.ARMOR ||
+    kind === 'Helmet' ||
+    kind === 'Vest' ||
+    itemKind === 'Helmet' ||
+    itemKind === 'Vest';
+  if (!isArmor) return false;
+  if (armorSlotOf(def) === 'TOP') {
+    unit.activeArmorTopId = def.id;
+  } else {
+    unit.activeArmorVestId = def.id;
+    unit.activeArmorId = def.id;
+  }
   return true;
 }
 
 export function getArmorDamageReduction(unit) {
-  if (!unit || !unit.activeArmorId) return 0;
-  const def = getItemDef(unit.activeArmorId);
-  if (!def || typeof def.damageReduction !== 'number') return 0;
-  return Math.max(0, Math.min(0.85, def.damageReduction));
+  if (!unit) return 0;
+  let sum = 0;
+  const top = unit.activeArmorTopId ? getItemDef(unit.activeArmorTopId) : null;
+  const vest =
+    unit.activeArmorVestId || unit.activeArmorId
+      ? getItemDef(unit.activeArmorVestId || unit.activeArmorId)
+      : null;
+  if (top && typeof top.damageReduction === 'number') sum += top.damageReduction;
+  if (vest && typeof vest.damageReduction === 'number') sum += vest.damageReduction;
+  return Math.max(0, Math.min(0.85, sum));
 }
 
 /**
@@ -326,7 +442,15 @@ export function equipShieldOnUnit(unit, itemId) {
     return true;
   }
   const def = getItemDef(itemId);
-  if (!def || def.kind !== ItemKind.SHIELD) return false;
+  if (!def) return false;
+  const kind = def.kind;
+  const itemKind = def.itemKind;
+  const isShield =
+    kind === ItemKind.SHIELD ||
+    kind === 'Shield' ||
+    itemKind === 'Shield' ||
+    itemKind === 'Shield Energy';
+  if (!isShield) return false;
   unit.activeShieldId = def.id;
   unit.shield = createShieldState({
     maxHp: def.shieldMaxHp != null ? def.shieldMaxHp : 100,
@@ -342,23 +466,40 @@ export function equipShieldOnUnit(unit, itemId) {
   return true;
 }
 
-/** SHIELD_BASIC breaks out of the hotbar. The slot returns to the empty pool. */
-export function ejectBrokenBasicShield(match, unit) {
-  if (!unit || unit.activeShieldId !== 'SHIELD_BASIC') return;
-  if (!unit.shield || !unit.shield.broken) return;
+/**
+ * When a wear shield breaks: Energy/regen stays equipped (tickShields revives);
+ * consumable BASIC-style shields leave inventory + clear worn slot.
+ */
+export function ejectBrokenWearShield(match, unit) {
+  if (!unit || !unit.shield || !unit.shield.broken) return;
+  if (unit.shield.source !== 'item') return;
+  const id = unit.activeShieldId;
+  if (!id) return;
+  const def = getItemDef(id);
+  if (shieldPersistsWhenBroken(def)) return;
   if (unit.role === 'player' && match) {
-    clearBasicShieldSlots(match.inventory);
-    match.wornShieldSlot = -1;
+    clearShieldItemSlots(match.inventory, id);
+    if (
+      match.wornShieldSlot >= 0 &&
+      match.inventory &&
+      match.inventory[match.wornShieldSlot] &&
+      match.inventory[match.wornShieldSlot].itemId === id
+    ) {
+      match.wornShieldSlot = -1;
+    }
   }
-  clearBasicShieldSlots(unit.inventory);
+  clearShieldItemSlots(unit.inventory, id);
   equipShieldOnUnit(unit, null);
 }
 
-function clearBasicShieldSlots(bag) {
-  if (!bag) return;
+/** @deprecated use ejectBrokenWearShield */
+export const ejectBrokenBasicShield = ejectBrokenWearShield;
+
+function clearShieldItemSlots(bag, itemId) {
+  if (!bag || !itemId) return;
   for (let i = 0; i < bag.length; i++) {
     const slot = bag[i];
-    if (slot && slot.itemId === 'SHIELD_BASIC') bag[i] = emptySlot();
+    if (slot && slot.itemId === itemId) bag[i] = emptySlot();
   }
 }
 
@@ -439,8 +580,10 @@ export function moveOrSwapInventorySlots(inventory, from, to, match) {
     inventory[to] = src;
     inventory[from] = emptySlot();
     if (match) {
-      match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'move');
+      match.wornArmorTopSlot = shiftWornIndex(match.wornArmorTopSlot, from, to, 'move');
+      match.wornArmorVestSlot = shiftWornIndex(match.wornArmorVestSlot, from, to, 'move');
       match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'move');
+      syncLegacyWornArmor(match);
     }
     return true;
   }
@@ -456,8 +599,10 @@ export function moveOrSwapInventorySlots(inventory, from, to, match) {
       if (src.count <= 0) {
         inventory[from] = emptySlot();
         if (match) {
-          match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'move');
+          match.wornArmorTopSlot = shiftWornIndex(match.wornArmorTopSlot, from, to, 'move');
+          match.wornArmorVestSlot = shiftWornIndex(match.wornArmorVestSlot, from, to, 'move');
           match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'move');
+          syncLegacyWornArmor(match);
         }
       }
       return true;
@@ -465,8 +610,10 @@ export function moveOrSwapInventorySlots(inventory, from, to, match) {
   }
   const swapped = swapInventorySlots(inventory, from, to);
   if (swapped && match) {
-    match.wornArmorSlot = shiftWornIndex(match.wornArmorSlot, from, to, 'swap');
+    match.wornArmorTopSlot = shiftWornIndex(match.wornArmorTopSlot, from, to, 'swap');
+    match.wornArmorVestSlot = shiftWornIndex(match.wornArmorVestSlot, from, to, 'swap');
     match.wornShieldSlot = shiftWornIndex(match.wornShieldSlot, from, to, 'swap');
+    syncLegacyWornArmor(match);
   }
   return swapped;
 }
