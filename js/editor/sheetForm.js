@@ -8,6 +8,11 @@ import {
 } from '../assets/closedCatalog.js';
 import { WEAPON_BTN_ART, weaponArtSpec } from '../view/cosmetics.js';
 import { appendDivider, appendSectionTitle, renderRecord, toReadableLabel } from './recordForm.js';
+import {
+  BLOCK_SIZE,
+  createDefaultSkillRecord,
+  ensureSkillRecord,
+} from './defaultMapFactory.js';
 
 const DEFAULT_WEAPON_GROUP = 'Weapon_Colt_1911';
 const HOLD_STYLES = ['hold_Gun', 'hold_Gun_2'];
@@ -164,7 +169,9 @@ const EFFECT = {
   HEAL_SELF: { amount: 5 },
 };
 
-const SKILL_HEAD = ['id', 'label', 'castTimeSec', 'activeDurationSec', 'cooldownSec'];
+const SKILL_HEAD = ['id', 'label', 'artId', 'castTimeSec', 'activeDurationSec', 'cooldownSec'];
+const SKILL_TARGET_TYPES = ['Self', 'Ally', 'Enemy', 'Point / Area'];
+const SKILL_EFFECT_TYPES = ['Heal', 'Damage', 'Buff', 'Spawn'];
 
 function categorySelect(label, items, value, onChange) {
   const select = document.createElement('select');
@@ -448,7 +455,14 @@ function applyEffect(record, type) {
 export function blankFor(key, category) {
   if (key === 'weaponId') return { id: '', pending: true, pendingCategory: category || 'Normal' };
   if (key === 'itemId') return { id: '', pending: true, pendingCategory: category || 'Block' };
-  return { id: '', pending: true, pendingCategory: category || 'MELEE_SWING' };
+  if (key === 'skillId') {
+    const row = createDefaultSkillRecord('', category || 'Damage');
+    row.pending = true;
+    row.pendingCategory = category || 'MELEE_SWING';
+    row.kind = 'skill';
+    return row;
+  }
+  return { id: '', pending: true, pendingCategory: category || 'MELEE_SWING', kind: 'skill' };
 }
 
 function kindNote(parent, text) {
@@ -481,7 +495,11 @@ export function finishDraft(key, record) {
       applyItem(record, 'Tool');
     } else applyWeapon(record, category || 'Normal');
   } else if (key === 'itemId') applyItem(record, category || 'Block');
-  else applyEffect(record, category || 'MELEE_SWING');
+  else {
+    applyEffect(record, category || 'MELEE_SWING');
+    ensureSkillRecord(record);
+    record.kind = 'skill';
+  }
   delete record.pending;
   delete record.pendingCategory;
 }
@@ -627,7 +645,8 @@ function openItemResistModal(record, ctx, damageTypes) {
   body.replaceChildren();
   const note = document.createElement('p');
   note.className = 'editor-note';
-  note.textContent = 'Per-item resist — not the Rules damage×armor matrix.';
+  note.textContent =
+    'ลดดาเมจเพิ่มเติมจากค่าที่ผ่าน Damage × Armor Matrix แล้ว (Final = Base × Matrix × (1 − Resist%/100)).';
   body.appendChild(note);
   renderResistPercentColumn(body, record, ctx);
   modal.hidden = false;
@@ -750,9 +769,62 @@ export function migrateItemRecord(record) {
   }
 }
 
+function renderSkillForm(body, record, ctx) {
+  ensureSkillRecord(record);
+  kindNote(body, 'Skill');
+  appendDivider(body);
+  appendSectionTitle(body, 'General');
+  renderRecord(body, record, record, Object.assign({}, ctx, {
+    only: ['id', 'label', 'artId'],
+  }));
+  body.appendChild(categorySelect('Target Type', SKILL_TARGET_TYPES, record.targetType || 'Enemy', (next) => {
+    record.targetType = next;
+    if (ctx.touch) ctx.touch(false);
+  }));
+  appendDivider(body);
+  appendSectionTitle(body, 'Timing & Range');
+  renderRecord(body, record, record, Object.assign({}, ctx, {
+    only: ['cooldownSec', 'castTimeSec', 'castRangeBlocks', 'effectRadiusBlocks'],
+  }));
+  const unitNote = document.createElement('p');
+  unitNote.className = 'editor-note';
+  unitNote.textContent = 'Ranges in blocks (1 block = ' + BLOCK_SIZE + 'px). Timing in seconds.';
+  body.appendChild(unitNote);
+  appendDivider(body);
+  appendSectionTitle(body, 'Effect');
+  body.appendChild(categorySelect('Effect Type', SKILL_EFFECT_TYPES, record.effectType || 'Damage', (next) => {
+    record.effectType = next;
+    if (ctx.touch) ctx.touch(false);
+  }));
+  renderRecord(body, record, record, Object.assign({}, ctx, {
+    only: ['power', 'durationSec'],
+  }));
+  // Keep legacy effect blob in sync for runtime readers.
+  if (!record.effect || typeof record.effect !== 'object') record.effect = {};
+  record.effect.type =
+    record.effectType === 'Heal'
+      ? 'HEAL_SELF'
+      : record.effectType === 'Buff'
+        ? 'SPEED_BOOST'
+        : record.effectType === 'Spawn'
+          ? 'PASS_THROUGH'
+          : 'MELEE_SWING';
+  if (record.effectType === 'Damage' || record.effectType === 'Heal') {
+    record.effect.damage = record.power;
+    record.effect.amount = record.power;
+  }
+  record.activeDurationSec = record.durationSec;
+  appendDivider(body);
+  body.appendChild(deleteButton(ctx, record.id));
+}
+
 export function renderTyped(body, key, record, ctx) {
   if (record.pending) {
     renderDraft(body, key, record, ctx);
+    return;
+  }
+  if (key === 'skillId') {
+    renderSkillForm(body, record, ctx);
     return;
   }
   if (key === 'itemId') migrateItemRecord(record);

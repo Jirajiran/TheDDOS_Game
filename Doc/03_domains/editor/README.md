@@ -1,5 +1,8 @@
 # editor — หน้าวางแมป (อ้างอิง Warcraft Editor)
 
+โคลนสำหรับพอร์ต React → `CLoneEditor/` (UI snapshot + Doc สำเนา · หน้าเล่นจริงยังเป็น `editor.html` ที่ root)  
+แพ็กความจริงอยู่ที่ `data/pack/` เท่านั้น — React อ่าน/เขียนที่นั่น · `CLoneEditor/vanilla/data/pack/` ไม่ใช่ความจริง
+
 สถานะล่าสุด (Test Play / Art pool / Loading) → `Doc/03_domains/editor/DocEditor.txt`
 
 อ่านก่อน:

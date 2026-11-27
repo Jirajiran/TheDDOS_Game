@@ -24,6 +24,9 @@
 - [✓] Loading Editor/Match ใช้สไตล์ THE DDOS + แถบแดง (boot / ภาพออกแบบ)
 - [✓] เข้า Editor ทุกครั้งเจอหน้า New map (Create) · มี Import + ลากวางไฟล์ .json บนหน้านี้ = import แมพ
 - [✓] Materialize map JSON → เกมจริง: เคลียร์ FlatLand red edgeAreas; ใช้ areas จากแมพ (วาดสีฟ้า); placeholds → createPlacedBlock / spawn unit; base → phase setup; host spawn; wave อ่าน editorSpawns + mapAreas; createWorld({skipEdgeAreas}) สำหรับ theddos-map / Test Play
+- [✓] mapDoc sanitize + defaultMapFactory (AI Role/Goals H*/Morale · skill kind) · tacticalBaker (nav graph + cover) ตอน Export/Test Play · applyEditorMap fallback bake
+- [✓] Inspector: Units เรียง Preview→Core→Combat→Resist→Skills/AI→Drops · Detect Rad (blocks) + gizmo · Skills form แยกจาก Block · AI modal Add Goal / dark buttons
+- [✓] Bottom tools: Bake Graph / Check Graph / Edit Cover (manualOverride)
 
 ---
 ต้นทางเกมหลัก — Art pool / raster (สัญญาเดียวกับ Editor; เกมต้อง boot แบบเดียวกัน)

@@ -19,12 +19,14 @@ import {
   hasPageCache,
   parseMapFile,
   peekPageCacheMeta,
+  prepareMapForPackaging,
   readPageCache,
   sheetsFromPack,
   spawnPoint,
   spawnRow,
   writePageCache,
 } from './mapDoc.js';
+import { bakeTacticalData, assessNavGraphQuality } from './tacticalBaker.js';
 import { mountMapView } from './mapView.js';
 import {
   renderCatalogTrailPreview,
@@ -56,6 +58,7 @@ const state = {
   rulesKey: 'rule',
   sheetIds: { unitId: 'Player', weaponId: '', itemId: '', skillId: '' },
   toolMode: 'area', // 'area' | 'place-obj' | 'place-unit' | 'select'
+  graphOverlayMode: 'off', // 'off' | 'graph' | 'quality' | 'manual'
   selectedPlacedIds: [],
   toolObjTemplate: '',
   toolUnitTemplate: '',
@@ -260,6 +263,10 @@ function api() {
     getToolMode: () => state.toolMode || 'area',
     setToolMode: (mode) => {
       state.toolMode = mode || 'area';
+    },
+    getGraphOverlayMode: () => state.graphOverlayMode || 'off',
+    setGraphOverlayMode: (mode) => {
+      state.graphOverlayMode = mode || 'off';
     },
     getSelectedPlacedId: () => (state.selectedPlacedIds[0] || ''),
     getSelectedPlacedIds: () => state.selectedPlacedIds.slice(),
@@ -725,15 +732,92 @@ function bindWork() {
   }
 
   document.getElementById('editor-export').addEventListener('click', () => {
-    const blob = new Blob([exportMapText(state.doc)], {
+    const blob = new Blob([exportMapText(state.doc, { forceBake: true })], {
       type: 'application/json',
     });
+    // Keep live doc in sync with packaged bake.
+    try {
+      const packaged = prepareMapForPackaging(state.doc, { forceBake: true });
+      state.doc.navGraph = packaged.navGraph;
+      state.doc.tacticalWaypoints = packaged.tacticalWaypoints;
+      state.doc.tacticalMeta = packaged.tacticalMeta;
+      state.doc.walkableGrid = packaged.walkableGrid;
+      writePageCache(state.doc);
+      view.paint();
+    } catch (_) {}
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = state.doc.name + '.json';
     link.click();
     URL.revokeObjectURL(link.href);
   });
+
+  function syncGraphToolButtons() {
+    const mode = state.graphOverlayMode || 'off';
+    const ids = [
+      ['tool-graph-auto', 'graph'],
+      ['tool-graph-check', 'quality'],
+      ['tool-graph-manual', 'manual'],
+    ];
+    for (let i = 0; i < ids.length; i++) {
+      const btn = document.getElementById(ids[i][0]);
+      if (!btn) continue;
+      btn.classList.toggle('is-active', mode === ids[i][1]);
+    }
+  }
+
+  const btnGraphAuto = document.getElementById('tool-graph-auto');
+  const btnGraphCheck = document.getElementById('tool-graph-check');
+  const btnGraphManual = document.getElementById('tool-graph-manual');
+  if (btnGraphAuto) {
+    btnGraphAuto.addEventListener('click', () => {
+      if (!state.doc) return;
+      bakeTacticalData(state.doc, { force: true });
+      writePageCache(state.doc);
+      state.graphOverlayMode = 'graph';
+      syncGraphToolButtons();
+      view.paint();
+      askNotice(
+        'Auto-bake done: ' +
+          ((state.doc.navGraph && state.doc.navGraph.nodes && state.doc.navGraph.nodes.length) || 0) +
+          ' nodes, ' +
+          ((state.doc.tacticalWaypoints && state.doc.tacticalWaypoints.length) || 0) +
+          ' cover points.'
+      );
+    });
+  }
+  if (btnGraphCheck) {
+    btnGraphCheck.addEventListener('click', () => {
+      if (!state.doc) return;
+      if (!state.doc.navGraph || !state.doc.navGraph.nodes || !state.doc.navGraph.nodes.length) {
+        bakeTacticalData(state.doc, { force: true });
+      }
+      const issues = assessNavGraphQuality(state.doc);
+      state.graphOverlayMode = 'quality';
+      syncGraphToolButtons();
+      view.paint();
+      if (!issues.length) {
+        askNotice('Graph quality: OK — no disconnected / weak-cover issues flagged.');
+      } else {
+        askNotice(
+          'Graph quality:\n' + issues.map((x) => '• ' + x.message).join('\n')
+        );
+      }
+    });
+  }
+  if (btnGraphManual) {
+    btnGraphManual.addEventListener('click', () => {
+      state.graphOverlayMode =
+        state.graphOverlayMode === 'manual' ? 'off' : 'manual';
+      syncGraphToolButtons();
+      view.paint();
+      if (state.graphOverlayMode === 'manual') {
+        askNotice(
+          'Manual cleanup: click a cover square to toggle manualOverride. Auto-bake will keep those points.'
+        );
+      }
+    });
+  }
 
   const btnTestPlay = document.getElementById('editor-test-play');
   if (btnTestPlay) {

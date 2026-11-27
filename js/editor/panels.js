@@ -1998,7 +1998,9 @@ function renderDropRows(body, api, doc, record, selectedKey) {
   const block = selectedKey !== 'unitId';
   const rows = block ? blockDropRows(record) : unitDropRows(record);
   appendDivider(body);
-  appendSectionTitle(body, 'Drops');
+  const dropsWrap = document.createElement('div');
+  dropsWrap.className = 'editor-drops-section';
+  appendSectionTitle(dropsWrap, 'Drops / Loot');
   for (let i = 0; i < rows.length; i++) {
     const line = document.createElement('div');
     line.className = 'editor-line is-compact-row';
@@ -2037,10 +2039,11 @@ function renderDropRows(body, api, doc, record, selectedKey) {
         renderPanel(api.panelRoot(), api);
       })
     );
-    body.appendChild(line);
+    dropsWrap.appendChild(line);
   }
   const add = document.createElement('button');
   add.type = 'button';
+  add.className = 'editor-btn-dark';
   add.textContent = 'Add';
   add.setAttribute('aria-label', 'Add drop');
   add.addEventListener('click', () => {
@@ -2052,7 +2055,8 @@ function renderDropRows(body, api, doc, record, selectedKey) {
     api.touch();
     renderPanel(api.panelRoot(), api);
   });
-  body.appendChild(add);
+  dropsWrap.appendChild(add);
+  body.appendChild(dropsWrap);
 }
 
 function resourceItemIds(items) {
@@ -2222,12 +2226,29 @@ function choiceIds(doc, key, current, record, selectedKey) {
     }
   } else if (key === 'skills' || key === 'activeSkills' || key === 'skillId') {
     ids = nonPendingIds(doc.skills);
-  } else if (key === 'allowedGoals') {
-    ids = collectStrings(units, 'allowedGoals');
+  } else if (key === 'allowedGoals' || key === 'goalId') {
+    ids = [
+      'DESTROY_BASE',
+      'ELIMINATE_PLAYER',
+      'ELIMINATE_TARGET',
+      'REACH_PATH_GOAL',
+      'SURVIVE_RETREAT',
+      'SEEK_HEAL_POINT',
+      'HOLD_SECTOR',
+      'REGROUP_ALLIES',
+      'PLACE_TRAP',
+      'REPAIR_STRUCTURE',
+      'PROTECT_ALLY',
+      'FLANK_POSITION',
+      'SUICIDE_ATTACK',
+    ];
   } else if (key === 'targetPriorityList') {
     ids = collectStrings(units, 'targetPriorityList');
+    if (!ids.length) ids = ['PLAYER', 'TURRET', 'BASE', 'UNIT'];
   } else if (key === 'preferredRange') {
-    ids = collectStrings(units, 'preferredRange');
+    ids = ['CLOSE', 'MEDIUM', 'LONG_RANGE'];
+  } else if (key === 'aiRole') {
+    ids = ['Grunt', 'Sidekick', 'Sniper', 'Vanguard', 'Boss_1v1'];
   } else {
     ids = collectStrings(units.concat(weapons, items, skills), key);
   }
@@ -2466,6 +2487,18 @@ function previewStatusLines(api, key, record) {
       pushStat(lines, 'Range (path)', record.maxDistancePath);
     }
     if (record.spreadDeg != null) pushStat(lines, 'Spread', record.spreadDeg + '°');
+    return lines;
+  }
+
+  if (key === 'skillId') {
+    pushStat(lines, 'Type', 'Skill');
+    if (record.targetType) pushStat(lines, 'Target', record.targetType);
+    if (record.effectType) pushStat(lines, 'Effect', record.effectType);
+    if (record.cooldownSec != null) pushStat(lines, 'Cooldown', record.cooldownSec + 's');
+    if (record.castRangeBlocks != null) {
+      pushStat(lines, 'Cast range', record.castRangeBlocks + ' blocks');
+    }
+    if (record.power != null) pushStat(lines, 'Power', record.power);
     return lines;
   }
 

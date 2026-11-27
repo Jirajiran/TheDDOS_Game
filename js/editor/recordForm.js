@@ -4,6 +4,20 @@
  */
 
 import { L3_SIZE } from '../config.js';
+import {
+  AI_ARCHETYPES,
+  AI_ROLES,
+  BLOCK_SIZE,
+  allGoalIds,
+  applyAiArchetype,
+  blocksToSensePath,
+  createDefaultGoalEntry,
+  ensureUnitAiFields,
+  normalizeAllowedGoalsList,
+  sensePathToBlocks,
+  worldToBlocks,
+  blocksToWorld,
+} from './defaultMapFactory.js';
 
 const TEXT_KEYS = { id: true, label: true, description: true };
 const SPEED_BLOCKS_MIN = 0.01;
@@ -157,7 +171,12 @@ const FIELD_HELP = {
   defaultWeapon: 'Fallback gun id if loadout has no weapon. Set on the Units tab loadout when possible.',
   footprint: 'Occupied size in L3 cells (64×64). Minimum 1×1. Used for place overlap.',
   maxHp: 'Maximum hit points for this placeable template. Placed instances copy this as Max HP.',
-  detectRadius: 'How far (world units) a turret searches for targets.',
+  detectRadius: 'How far a turret searches for targets (editor shows blocks; 1 block = 64px).',
+  senseRadiusPath: 'Unit detect radius in blocks (stored as path fractions for runtime sense).',
+  aiRole: 'Perception / reaction role — limits how sharp the bot feels without cheating rules.',
+  reactionTimeSec: 'Delay before the bot reacts to new threats (seconds).',
+  morale: 'Bravery 0–1. Lower morale retreats sooner when pressured.',
+  fleeOnAllyCasualties: 'Retreat when nearby allies drop (morale pressure).',
   magCapacity: 'Rounds per magazine. Authored on the Weapons sheet; units only pick which weapon id to hold (Units → Loadout).',
   maxMags: 'Spare magazines carried with the weapon template (Weapons sheet). Units reference the weapon via Loadout.',
   reloadSec: 'Reload duration in seconds (Weapons sheet). Units do not override this — they hold a weapon id.',
@@ -341,7 +360,21 @@ export function toReadableLabel(str) {
     projectileSolid: 'Proj Solid',
     allowProjectilePass: 'Pass Shot',
     pierceCost: 'Pierce Cost',
-    detectRadius: 'Detect Rad',
+    detectRadius: 'Detect Rad (blocks)',
+    senseRadiusPath: 'Detect Rad (blocks)',
+    aiRole: 'AI Role',
+    reactionTimeSec: 'Reaction (s)',
+    morale: 'Morale',
+    fleeOnAllyCasualties: 'Flee On Ally Casualties',
+    castRangeBlocks: 'Cast Range (blocks)',
+    effectRadiusBlocks: 'Effect Radius (blocks)',
+    castTimeSec: 'Cast Time (s)',
+    cooldownSec: 'Cooldown (s)',
+    durationSec: 'Duration (s)',
+    power: 'Power / Value',
+    targetType: 'Target Type',
+    effectType: 'Effect Type',
+    artId: 'Art Id / Icon',
     priorityScore: 'Priority',
     generatorList: 'Gen List',
     genRate: 'Gen Rate',
@@ -882,25 +915,280 @@ function clampPriority(raw) {
   return Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, Math.round(n)));
 }
 
-/** Seed empty behaviorFlags so AI panel has editable controls (pack may omit keys). */
-const DEFAULT_BEHAVIOR_FLAGS = {
-  retreatHpRatio: 0.25,
-  canRegroup: true,
-  preferredRange: 'MEDIUM',
-};
-
 function ownKey(record, key) {
   return !!(record && Object.prototype.hasOwnProperty.call(record, key));
 }
 
 function ensureAiBehaviorData(record) {
-  if (!Array.isArray(record.allowedGoals)) record.allowedGoals = [];
-  if (!record.behaviorFlags || typeof record.behaviorFlags !== 'object') {
-    record.behaviorFlags = Object.assign({}, DEFAULT_BEHAVIOR_FLAGS);
-  } else if (!Object.keys(record.behaviorFlags).length) {
-    Object.assign(record.behaviorFlags, DEFAULT_BEHAVIOR_FLAGS);
+  ensureUnitAiFields(record);
+}
+
+function appendAiNumberField(parent, label, value, opts, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'editor-ai-field' + (opts && opts.short ? ' is-short' : '');
+  wrap.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'number';
+  if (opts && opts.min != null) input.min = String(opts.min);
+  if (opts && opts.max != null) input.max = String(opts.max);
+  input.step = opts && opts.step != null ? String(opts.step) : 'any';
+  input.value = String(value);
+  input.addEventListener('change', () => onChange(Number(input.value)));
+  wrap.appendChild(input);
+  parent.appendChild(wrap);
+  return input;
+}
+
+function appendAiSelect(parent, label, options, value, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'editor-ai-field is-wide';
+  wrap.textContent = label;
+  const select = document.createElement('select');
+  for (let i = 0; i < options.length; i++) {
+    const option = document.createElement('option');
+    option.value = options[i];
+    option.textContent = options[i];
+    select.appendChild(option);
   }
-  if (!Array.isArray(record.targetPriorityList)) record.targetPriorityList = [];
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+  wrap.appendChild(select);
+  parent.appendChild(wrap);
+  return select;
+}
+
+function appendAiCheckbox(parent, label, checked, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'editor-ai-check';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!checked;
+  input.addEventListener('change', () => onChange(input.checked));
+  wrap.appendChild(input);
+  wrap.appendChild(document.createTextNode(' ' + label));
+  parent.appendChild(wrap);
+  return input;
+}
+
+function renderAiGoalsEditor(parent, record, onStructural) {
+  record.allowedGoals = normalizeAllowedGoalsList(record.allowedGoals);
+  const list = record.allowedGoals;
+  const block = document.createElement('div');
+  block.className = 'editor-ai-goals';
+  const title = document.createElement('p');
+  title.className = 'editor-section-title';
+  title.textContent = 'Goals (priority + H*)';
+  block.appendChild(title);
+  const goalChoices = allGoalIds();
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i];
+    const row = document.createElement('div');
+    row.className = 'editor-ai-goal-row';
+    const select = document.createElement('select');
+    for (let g = 0; g < goalChoices.length; g++) {
+      const option = document.createElement('option');
+      option.value = goalChoices[g];
+      option.textContent = goalChoices[g];
+      select.appendChild(option);
+    }
+    if (goalChoices.indexOf(entry.goalId) < 0) {
+      const option = document.createElement('option');
+      option.value = entry.goalId;
+      option.textContent = entry.goalId;
+      select.appendChild(option);
+    }
+    select.value = entry.goalId;
+    select.addEventListener('change', () => {
+      entry.goalId = select.value;
+      onStructural(false);
+    });
+    const pri = document.createElement('input');
+    pri.type = 'number';
+    pri.min = '0';
+    pri.max = '100';
+    pri.title = 'Priority';
+    pri.value = String(entry.priority);
+    pri.addEventListener('change', () => {
+      let n = Number(pri.value);
+      if (!isFinite(n)) n = 50;
+      entry.priority = Math.max(0, Math.min(100, Math.round(n)));
+      pri.value = String(entry.priority);
+      onStructural(false);
+    });
+    const resume = document.createElement('label');
+    resume.className = 'editor-ai-check';
+    const resumeInput = document.createElement('input');
+    resumeInput.type = 'checkbox';
+    resumeInput.checked = entry.resumeOnInterrupt !== false;
+    resumeInput.title = 'Resume on Interrupt (History H*)';
+    resumeInput.addEventListener('change', () => {
+      entry.resumeOnInterrupt = resumeInput.checked;
+      onStructural(false);
+    });
+    resume.appendChild(resumeInput);
+    resume.appendChild(document.createTextNode(' Resume H*'));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'editor-btn-danger editor-btn-dark';
+    remove.textContent = '×';
+    remove.title = 'Remove goal';
+    remove.addEventListener('click', () => {
+      list.splice(i, 1);
+      onStructural(true);
+    });
+    row.appendChild(select);
+    row.appendChild(pri);
+    row.appendChild(resume);
+    row.appendChild(remove);
+    block.appendChild(row);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'editor-btn-dark';
+  add.textContent = 'Add Goal';
+  add.addEventListener('click', () => {
+    const used = Object.create(null);
+    for (let i = 0; i < list.length; i++) used[list[i].goalId] = true;
+    let pick = goalChoices[0] || 'ELIMINATE_PLAYER';
+    for (let i = 0; i < goalChoices.length; i++) {
+      if (!used[goalChoices[i]]) {
+        pick = goalChoices[i];
+        break;
+      }
+    }
+    list.push(createDefaultGoalEntry(pick));
+    onStructural(true);
+  });
+  block.appendChild(add);
+  parent.appendChild(block);
+}
+
+function renderAiBehaviorBody(body, record, shape, ctx) {
+  ensureAiBehaviorData(record);
+  body.replaceChildren();
+  const scroll = document.createElement('div');
+  scroll.className = 'editor-matrix-scroll';
+  const wrap = document.createElement('div');
+  wrap.className = 'editor-fields editor-ai-panel';
+
+  const refresh = (structural) => {
+    if (structural) renderAiBehaviorBody(body, record, shape, ctx);
+    if (ctx && ctx.touch) ctx.touch(!!structural);
+  };
+
+  appendSectionTitle(wrap, 'Role & Perception');
+  const roleGrid = document.createElement('div');
+  roleGrid.className = 'editor-ai-grid';
+  appendAiSelect(roleGrid, 'AI Role', AI_ROLES.slice(), record.aiRole || 'Grunt', (next) => {
+    record.aiRole = next;
+    refresh(false);
+  });
+  appendAiNumberField(
+    roleGrid,
+    'Reaction Time (s)',
+    record.reactionTimeSec,
+    { short: true, min: 0, max: 3, step: 0.05 },
+    (n) => {
+      record.reactionTimeSec = isFinite(n) ? Math.max(0, n) : 0.35;
+      refresh(false);
+    }
+  );
+  wrap.appendChild(roleGrid);
+
+  const archRow = document.createElement('div');
+  archRow.className = 'editor-ai-grid';
+  const archKeys = Object.keys(AI_ARCHETYPES);
+  appendAiSelect(archRow, 'Apply Archetype Template', archKeys, archKeys[0], () => {});
+  const applyArch = document.createElement('button');
+  applyArch.type = 'button';
+  applyArch.className = 'editor-btn-dark';
+  applyArch.textContent = 'Apply Template';
+  applyArch.addEventListener('click', () => {
+    const select = archRow.querySelector('select');
+    applyAiArchetype(record, select && select.value);
+    refresh(true);
+  });
+  archRow.appendChild(applyArch);
+  wrap.appendChild(archRow);
+
+  appendDivider(wrap);
+  appendSectionTitle(wrap, 'Morale');
+  const moraleGrid = document.createElement('div');
+  moraleGrid.className = 'editor-ai-grid';
+  appendAiNumberField(
+    moraleGrid,
+    'Morale / Bravery (0–1)',
+    record.morale,
+    { short: true, min: 0, max: 1, step: 0.05 },
+    (n) => {
+      record.morale = Math.max(0, Math.min(1, isFinite(n) ? n : 0.55));
+      refresh(false);
+    }
+  );
+  const checkRow = document.createElement('div');
+  checkRow.className = 'editor-ai-checks';
+  appendAiCheckbox(checkRow, 'Flee On Ally Casualties', record.fleeOnAllyCasualties, (v) => {
+    record.fleeOnAllyCasualties = v;
+    refresh(false);
+  });
+  moraleGrid.appendChild(checkRow);
+  wrap.appendChild(moraleGrid);
+
+  appendDivider(wrap);
+  renderAiGoalsEditor(wrap, record, refresh);
+
+  appendDivider(wrap);
+  appendSectionTitle(wrap, 'Behavior Flags');
+  const flags = record.behaviorFlags;
+  const flagGrid = document.createElement('div');
+  flagGrid.className = 'editor-ai-grid';
+  appendAiNumberField(
+    flagGrid,
+    'Retreat HP',
+    flags.retreatHpRatio,
+    { short: true, min: 0, max: 1, step: 0.05 },
+    (n) => {
+      flags.retreatHpRatio = Math.max(0, Math.min(1, isFinite(n) ? n : 0.25));
+      refresh(false);
+    }
+  );
+  appendAiSelect(
+    flagGrid,
+    'Range',
+    ['CLOSE', 'MEDIUM', 'LONG_RANGE'],
+    flags.preferredRange || 'MEDIUM',
+    (next) => {
+      flags.preferredRange = next;
+      refresh(false);
+    }
+  );
+  wrap.appendChild(flagGrid);
+  const flagChecks = document.createElement('div');
+  flagChecks.className = 'editor-ai-checks';
+  appendAiCheckbox(flagChecks, 'Regroup', flags.canRegroup, (v) => {
+    flags.canRegroup = v;
+    refresh(false);
+  });
+  appendAiCheckbox(flagChecks, 'Relentless', flags.relentless, (v) => {
+    flags.relentless = v;
+    refresh(false);
+  });
+  appendAiCheckbox(flagChecks, 'Flee On Approach', flags.fleeOnApproach, (v) => {
+    flags.fleeOnApproach = v;
+    refresh(false);
+  });
+  appendAiCheckbox(flagChecks, 'Ignore Non Path Obstacles', flags.ignoreNonPathObstacles, (v) => {
+    flags.ignoreNonPathObstacles = v;
+    refresh(false);
+  });
+  wrap.appendChild(flagChecks);
+
+  appendDivider(wrap);
+  appendSectionTitle(wrap, 'Target Priority');
+  renderUnitField(wrap, record, shape, ctx, 'targetPriorityList');
+
+  scroll.appendChild(wrap);
+  body.appendChild(scroll);
 }
 
 /** Open AI & Behavior in the shared editor modal (same pattern as Damage Matrix). */
@@ -914,16 +1202,7 @@ function openAiBehaviorModal(record, shape, ctx) {
     title.dataset.prevTitle = title.textContent || '';
     title.textContent = 'AI & Behavior';
   }
-  body.replaceChildren();
-  const scroll = document.createElement('div');
-  scroll.className = 'editor-matrix-scroll';
-  const wrap = document.createElement('div');
-  wrap.className = 'editor-fields';
-  renderUnitField(wrap, record, shape, ctx, 'allowedGoals');
-  renderUnitField(wrap, record, shape, ctx, 'behaviorFlags');
-  renderUnitField(wrap, record, shape, ctx, 'targetPriorityList');
-  scroll.appendChild(wrap);
-  body.appendChild(scroll);
+  renderAiBehaviorBody(body, record, shape, ctx);
   modal.hidden = false;
   const restore = () => {
     if (title && title.dataset.prevTitle != null) {
@@ -934,17 +1213,20 @@ function openAiBehaviorModal(record, shape, ctx) {
   };
   const done = document.getElementById('editor-matrix-done');
   const close = document.getElementById('editor-matrix-close');
-  if (done) done.onclick = () => {
-    restore();
-    if (ctx && ctx.touch) ctx.touch();
-  };
+  if (done) {
+    done.onclick = () => {
+      restore();
+      if (ctx && ctx.touch) ctx.touch();
+    };
+  }
   if (close) close.onclick = restore;
 }
 
 function renderAiBehaviorPanel(parent, record, shape, ctx) {
-  appendSectionTitle(parent, 'AI & Behavior');
+  appendSectionTitle(parent, 'AI Behavior');
   const openBtn = document.createElement('button');
   openBtn.type = 'button';
+  openBtn.className = 'editor-btn-dark';
   openBtn.textContent = 'Open AI & Behavior';
   openBtn.addEventListener('click', () => openAiBehaviorModal(record, shape, ctx));
   parent.appendChild(openBtn);
@@ -978,14 +1260,20 @@ function migrateUnitRecord(record) {
 
 function renderUnitSections(parent, record, shape, ctx) {
   migrateUnitRecord(record);
-  appendSectionTitle(parent, 'Identity & Stats');
+  ensureUnitAiFields(record);
+
+  // 1. Preview & Identity (preview is mounted by panels.js above this form)
+  appendSectionTitle(parent, 'Preview & Identity');
   if (ownKey(record, 'id') || hasRecordKey(record, shape, 'id')) {
     renderUnitField(parent, record, shape, ctx, 'id');
   }
   if (ownKey(record, 'model')) {
     renderUnitField(parent, record, shape, ctx, 'model');
   }
-  // Only show HP/speed from this record — never invent 0 from union shape.
+
+  // 2. Core Stats
+  appendDivider(parent);
+  appendSectionTitle(parent, 'Core Stats');
   if (ownKey(record, 'hpRange') && Array.isArray(record.hpRange)) {
     const lo = Number(record.hpRange[0]);
     const hi = Number(record.hpRange[1]);
@@ -1014,9 +1302,10 @@ function renderUnitSections(parent, record, shape, ctx) {
   }
   renderUnitField(parent, record, shape, ctx, 'priorityScore', { fullWidth: true });
 
+  // 3. Combat & Perception
+  appendDivider(parent);
+  appendSectionTitle(parent, 'Combat & Perception');
   if (ownKey(record, 'startingLoadout') || ownKey(record, 'currentSlot')) {
-    appendDivider(parent);
-    appendSectionTitle(parent, 'Loadout');
     if (ownKey(record, 'startingLoadout')) {
       renderUnitField(parent, record, shape, ctx, 'startingLoadout', { hideTitle: true });
     }
@@ -1024,8 +1313,43 @@ function renderUnitSections(parent, record, shape, ctx) {
       renderUnitField(parent, record, shape, ctx, 'currentSlot', { fullWidth: true });
     }
   }
+  // Detect Rad (blocks) via senseRadiusPath
+  const detectInput = document.createElement('input');
+  detectInput.type = 'number';
+  detectInput.min = '0.25';
+  detectInput.max = '64';
+  detectInput.step = '0.25';
+  detectInput.value = String(Number(sensePathToBlocks(record.senseRadiusPath).toFixed(2)));
+  detectInput.title = '1 block = ' + (BLOCK_SIZE || 64) + 'px';
+  detectInput.addEventListener('change', () => {
+    let b = Number(detectInput.value);
+    if (!isFinite(b) || b <= 0) b = 4;
+    record.senseRadiusPath = blocksToSensePath(b);
+    detectInput.value = String(Number(sensePathToBlocks(record.senseRadiusPath).toFixed(2)));
+    if (ctx && ctx.touch) ctx.touch(false);
+  });
+  parent.appendChild(field('Detect Rad (blocks)', detectInput, 'is-short', helpCtxOf(ctx, () => detectInput.value)));
 
-  // Skills slot for units — empty list OK (no HUD invent).
+  // 4. Defense (Resist %) — open button if resist map exists or seed it
+  appendDivider(parent);
+  appendSectionTitle(parent, 'Defense (Resist %)');
+  if (!record.resistPercent || typeof record.resistPercent !== 'object') {
+    record.resistPercent = { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 };
+  }
+  const resistBtn = document.createElement('button');
+  resistBtn.type = 'button';
+  resistBtn.className = 'editor-btn-dark';
+  resistBtn.textContent = 'Edit Resist %';
+  resistBtn.title = 'Extra damage reduction after Damage × Armor Matrix';
+  resistBtn.addEventListener('click', () => openUnitResistModal(record, ctx));
+  parent.appendChild(resistBtn);
+  const resistNote = document.createElement('p');
+  resistNote.className = 'editor-note';
+  resistNote.textContent =
+    'ลดดาเมจเพิ่มเติมจากค่าที่ผ่าน Damage × Armor Matrix แล้ว';
+  parent.appendChild(resistNote);
+
+  // 5. Skills & AI Behavior
   appendDivider(parent);
   appendSectionTitle(parent, 'Skills');
   if (ownKey(record, 'activeSkills') && !ownKey(record, 'skills')) {
@@ -1034,9 +1358,69 @@ function renderUnitSections(parent, record, shape, ctx) {
     if (!ownKey(record, 'skills')) record.skills = [];
     renderUnitField(parent, record, shape, ctx, 'skills');
   }
-
   appendDivider(parent);
   renderAiBehaviorPanel(parent, record, shape, ctx);
+}
+
+function openUnitResistModal(record, ctx) {
+  const modal = document.getElementById('editor-matrix-modal');
+  const body = document.getElementById('editor-matrix-body');
+  const title = modal && modal.querySelector('h2');
+  if (!modal || !body) return;
+  if (title) {
+    title.dataset.prevTitle = title.textContent || '';
+    title.textContent = 'Resist % · ' + (record.id || 'Unit');
+  }
+  body.replaceChildren();
+  const note = document.createElement('p');
+  note.className = 'editor-note';
+  note.textContent =
+    'ลดดาเมจเพิ่มเติมจากค่าที่ผ่าน Damage × Armor Matrix แล้ว (Final = Base × Matrix × (1 − Resist%/100)).';
+  body.appendChild(note);
+  if (!record.resistPercent || typeof record.resistPercent !== 'object') {
+    record.resistPercent = { DEFAULT: 0, BULLET: 0, EXPLOSION: 0, LAZER: 0 };
+  }
+  const damageTypes =
+    Array.isArray(ctx.damageTypes) && ctx.damageTypes.length
+      ? ctx.damageTypes
+      : ['DEFAULT', 'BULLET', 'EXPLOSION', 'LAZER'];
+  const col = document.createElement('div');
+  col.className = 'editor-resist-column';
+  for (let i = 0; i < damageTypes.length; i++) {
+    const typeName = damageTypes[i];
+    if (record.resistPercent[typeName] == null) record.resistPercent[typeName] = 0;
+    const cell = document.createElement('label');
+    cell.className = 'editor-resist-cell';
+    cell.textContent = typeName + ' %';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = 'any';
+    input.value = String(record.resistPercent[typeName] || 0);
+    input.addEventListener('change', () => {
+      record.resistPercent[typeName] = Number(input.value) || 0;
+      if (ctx && ctx.touch) ctx.touch(false);
+    });
+    cell.appendChild(input);
+    col.appendChild(cell);
+  }
+  body.appendChild(col);
+  modal.hidden = false;
+  const restore = () => {
+    if (title && title.dataset.prevTitle != null) {
+      title.textContent = title.dataset.prevTitle;
+      delete title.dataset.prevTitle;
+    }
+    modal.hidden = true;
+  };
+  const done = document.getElementById('editor-matrix-done');
+  const close = document.getElementById('editor-matrix-close');
+  if (done) {
+    done.onclick = () => {
+      restore();
+      if (ctx && ctx.touch) ctx.touch(false);
+    };
+  }
+  if (close) close.onclick = restore;
 }
 
 function renderObject(parent, record, shape, ctx, isRoot, objOpts) {
@@ -1189,6 +1573,43 @@ function renderValue(parent, key, value, sample, setValue, ctx, holder, isRootId
         key === 'bulletSpeedPxSec' ? 'Bullet Spd (blocks/s)' : 'Speed (blocks/s)';
       const lab = field(label, input, numberClass, helpCtxOf(ctx, () => input.value));
       parent.appendChild(lab);
+      return;
+    }
+    if (key === 'detectRadius') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0.25';
+      input.max = '64';
+      input.step = '0.25';
+      const blocks = worldToBlocks(value);
+      input.value = String(Number((blocks || 0).toFixed(2)));
+      input.title = '1 block = ' + (BLOCK_SIZE || L3_SIZE || 64) + 'px';
+      input.addEventListener('change', () => {
+        let b = Number(input.value);
+        if (!isFinite(b) || b < 0) b = 0;
+        input.value = String(b);
+        setValue(blocksToWorld(b));
+      });
+      parent.appendChild(
+        field('Detect Rad (blocks)', input, numberClass, helpCtxOf(ctx, () => input.value))
+      );
+      return;
+    }
+    if (key === 'senseRadiusPath') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0.25';
+      input.max = '64';
+      input.step = '0.25';
+      input.value = String(Number(sensePathToBlocks(value).toFixed(2)));
+      input.addEventListener('change', () => {
+        let b = Number(input.value);
+        if (!isFinite(b) || b <= 0) b = 4;
+        setValue(blocksToSensePath(b));
+      });
+      parent.appendChild(
+        field('Detect Rad (blocks)', input, numberClass, helpCtxOf(ctx, () => input.value))
+      );
       return;
     }
     if (key === 'turnRateRadPerSec') {

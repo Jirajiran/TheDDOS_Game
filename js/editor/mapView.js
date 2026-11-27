@@ -5,6 +5,7 @@
  */
 
 import { PATH_SIZE, clampRect, nextAreaId, worldSize } from './mapDoc.js';
+import { BLOCK_SIZE, sensePathToBlocks } from './defaultMapFactory.js';
 import {
   buildStructureMapIcon,
   buildUnitMapIcon,
@@ -844,7 +845,112 @@ export function mountMapView(svg, api) {
       svg.appendChild(ghostGroup);
     }
 
+    // 9. Detect Rad gizmo for selected unit / turret
+    paintDetectGizmo(svg, doc, selectedPlacedIds);
+
+    // 10. Tactical graph / cover overlay (packaging bake preview)
+    paintTacticalOverlay(svg, doc, api.getGraphOverlayMode ? api.getGraphOverlayMode() : '');
+
     emitViewState();
+  }
+
+  function paintDetectGizmo(svgNode, doc, selectedIds) {
+    if (!selectedIds || !selectedIds.length) return;
+    const placedList = doc.placedObjects || [];
+    const overlay = el('g', { class: 'map-detect-gizmo', 'pointer-events': 'none' });
+    for (let i = 0; i < selectedIds.length; i++) {
+      const item = placedList.find((p) => p && p.id === selectedIds[i]);
+      if (!item) continue;
+      let radiusPx = 0;
+      if (item.kind === 'unit') {
+        const unitDef = doc.units && doc.units[item.templateId];
+        if (unitDef && typeof unitDef.senseRadiusPath === 'number') {
+          radiusPx = unitDef.senseRadiusPath * PATH_SIZE;
+        } else {
+          radiusPx = sensePathToBlocks(0.25) * BLOCK_SIZE;
+        }
+      } else {
+        const itemDef = doc.items && doc.items[item.templateId];
+        if (itemDef && typeof itemDef.detectRadius === 'number') {
+          radiusPx = itemDef.detectRadius;
+        }
+      }
+      if (!(radiusPx > 0)) continue;
+      const dim = placedDimensions(doc, item);
+      const cx = item.x + dim.w / 2;
+      const cy = item.y + dim.h / 2;
+      overlay.appendChild(
+        el('circle', {
+          cx,
+          cy,
+          r: radiusPx,
+          fill: 'rgba(88, 166, 255, 0.06)',
+          stroke: '#58a6ff',
+          'stroke-width': 2,
+          'stroke-dasharray': '8 6',
+          'stroke-opacity': '0.85',
+        })
+      );
+    }
+    if (overlay.childNodes.length) svgNode.appendChild(overlay);
+  }
+
+  function paintTacticalOverlay(svgNode, doc, mode) {
+    if (!mode || mode === 'off') return;
+    const graph = doc.navGraph;
+    const wps = doc.tacticalWaypoints || [];
+    const layer = el('g', { class: 'map-tactical-overlay', 'pointer-events': 'none' });
+    if (graph && Array.isArray(graph.edges) && Array.isArray(graph.nodes) && (mode === 'graph' || mode === 'quality' || mode === 'manual')) {
+      const byId = Object.create(null);
+      for (let i = 0; i < graph.nodes.length; i++) byId[graph.nodes[i].id] = graph.nodes[i];
+      for (let i = 0; i < graph.edges.length; i++) {
+        const e = graph.edges[i];
+        const a = byId[e.a];
+        const b = byId[e.b];
+        if (!a || !b) continue;
+        layer.appendChild(
+          el('line', {
+            x1: a.x,
+            y1: a.y,
+            x2: b.x,
+            y2: b.y,
+            stroke: mode === 'quality' ? 'rgba(210, 153, 34, 0.45)' : 'rgba(63, 185, 80, 0.35)',
+            'stroke-width': 2,
+          })
+        );
+      }
+      for (let i = 0; i < graph.nodes.length; i++) {
+        const n = graph.nodes[i];
+        layer.appendChild(
+          el('circle', {
+            cx: n.x,
+            cy: n.y,
+            r: 4,
+            fill: mode === 'quality' ? '#d29922' : '#3fb950',
+            opacity: '0.7',
+          })
+        );
+      }
+    }
+    for (let i = 0; i < wps.length; i++) {
+      const wp = wps[i];
+      if (!wp) continue;
+      const cover = wp.cover || {};
+      const max = Math.max(cover.N || 0, cover.E || 0, cover.S || 0, cover.W || 0);
+      const weak = mode === 'quality' && max > 0 && max < 0.4;
+      layer.appendChild(
+        el('rect', {
+          x: (wp.x || 0) - 10,
+          y: (wp.y || 0) - 10,
+          width: 20,
+          height: 20,
+          fill: weak ? 'rgba(248, 81, 73, 0.35)' : 'rgba(163, 113, 247, 0.28)',
+          stroke: wp.manualOverride ? '#e7e28b' : weak ? '#f85149' : '#a371f7',
+          'stroke-width': 2,
+        })
+      );
+    }
+    if (layer.childNodes.length) svgNode.appendChild(layer);
   }
 
   function resizeArea(area, edge, origin, p, world) {
@@ -929,6 +1035,32 @@ export function mountMapView(svg, api) {
       return;
     }
     if (event.button !== 0) return;
+
+    // Manual cover cleanup — toggle manualOverride on nearest waypoint.
+    const graphMode = api.getGraphOverlayMode ? api.getGraphOverlayMode() : 'off';
+    if (graphMode === 'manual' && Array.isArray(doc.tacticalWaypoints)) {
+      let best = -1;
+      let bestDist = 28 * 28;
+      for (let i = 0; i < doc.tacticalWaypoints.length; i++) {
+        const wp = doc.tacticalWaypoints[i];
+        if (!wp) continue;
+        const dx = (wp.x || 0) - p.x;
+        const dy = (wp.y || 0) - p.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          best = i;
+        }
+      }
+      if (best >= 0) {
+        const wp = doc.tacticalWaypoints[best];
+        wp.manualOverride = !wp.manualOverride;
+        if (api.touch) api.touch();
+        paint();
+        event.preventDefault();
+        return;
+      }
+    }
 
     const toolMode = api.getToolMode ? api.getToolMode() : 'area';
 

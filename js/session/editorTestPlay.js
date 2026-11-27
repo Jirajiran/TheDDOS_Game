@@ -11,6 +11,7 @@ export const EDITOR_TESTPLAY_KEY = 'theddos_editor_testplay';
  */
 export function writeEditorTestPlay(doc, meta) {
   if (!doc) throw new Error('Test Play needs a map JSON doc');
+  // Caller should pass already packaged doc; keep a soft sanitize shell here.
   const payload = {
     doc,
     meta: meta && typeof meta === 'object' ? meta : {},

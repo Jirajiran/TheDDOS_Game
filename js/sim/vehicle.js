@@ -712,6 +712,59 @@ function aabbOverlap(a, b) {
   );
 }
 
+function dampVehicleOnHullHit(v) {
+  if (!v) return;
+  v.currentSpeed = (v.currentSpeed || 0) * 0.35;
+  v.vx = (v.vx || 0) * 0.35;
+  v.vy = (v.vy || 0) * 0.35;
+}
+
+/**
+ * Separate two hull AABBs along the shallowest axis (50/50).
+ * Updates vehicle world centers — Collider_Vehicle only, not turret fire logic.
+ */
+function separateVehicleHulls(a, b) {
+  syncVehicleColliderExtents(a);
+  syncVehicleColliderExtents(b);
+  const boxA = vehicleAabb(a);
+  const boxB = vehicleAabb(b);
+  if (!aabbOverlap(boxA, boxB)) return false;
+  const overlapX =
+    Math.min(boxA.x + boxA.w, boxB.x + boxB.w) - Math.max(boxA.x, boxB.x);
+  const overlapY =
+    Math.min(boxA.y + boxA.h, boxB.y + boxB.h) - Math.max(boxA.y, boxB.y);
+  if (!(overlapX > 0) || !(overlapY > 0)) return false;
+  if (overlapX < overlapY) {
+    const dir = a.x < b.x ? -1 : 1;
+    const half = overlapX * 0.5 + 0.5;
+    a.x += dir * half;
+    b.x -= dir * half;
+  } else {
+    const dir = a.y < b.y ? -1 : 1;
+    const half = overlapY * 0.5 + 0.5;
+    a.y += dir * half;
+    b.y -= dir * half;
+  }
+  dampVehicleOnHullHit(a);
+  dampVehicleOnHullHit(b);
+  return true;
+}
+
+/** Vehicle↔vehicle solid — cars collide; ghosts go away. */
+export function resolveVehicleVsVehicles(match) {
+  const list = match && match.vehicles;
+  if (!list || list.length < 2) return;
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (!a || !a.active || a.broken) continue;
+    for (let j = i + 1; j < list.length; j++) {
+      const b = list[j];
+      if (!b || !b.active || b.broken) continue;
+      separateVehicleHulls(a, b);
+    }
+  }
+}
+
 function canRamHit(vehicle, key, simT) {
   if (!vehicle._ramCooldownUntil) vehicle._ramCooldownUntil = Object.create(null);
   const until = vehicle._ramCooldownUntil[key] || 0;
@@ -935,6 +988,14 @@ export function integrateVehicles(match, dt) {
         pushUnitFromAabb(unit, vehicleAabb(v));
       }
     }
+  }
+  // After all hulls moved — solid vs solid (no ghosting through other cars).
+  resolveVehicleVsVehicles(match);
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    if (!v || !v.active || v.broken) continue;
+    resolveVehicleVsOccupancy(v, match);
+    clampVehicleInWorld(v, match.world);
   }
 }
 

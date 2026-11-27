@@ -1783,4 +1783,116 @@ button.editor-placed-close {
   filter: drop-shadow(0 0 6px #ffd700);
 }
 
+/* Dark action buttons (modal body + inspector) */
+.editor-btn-dark,
+.editor-matrix-modal-body button,
+.editor-fields > button,
+.editor-ai-panel button,
+.editor-ai-goals > button,
+.editor-drops-section > button {
+  padding: 8px 12px;
+  background: #1c2128;
+  border: 1px solid #5c6774;
+  border-radius: 3px;
+  color: #f0f6fc;
+  cursor: pointer;
+  font: inherit;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.editor-btn-dark:hover:not(:disabled),
+.editor-matrix-modal-body button:hover:not(:disabled),
+.editor-fields > button:hover:not(:disabled),
+.editor-ai-panel button:hover:not(:disabled),
+.editor-ai-goals > button:hover:not(:disabled),
+.editor-drops-section > button:hover:not(:disabled) {
+  background: #71829b;
+  border-color: #8b949e;
+  color: #ffffff;
+}
+
+.editor-ai-panel {
+  gap: 10px;
+}
+
+.editor-ai-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(200px, 1.4fr);
+  gap: 10px 12px;
+  align-items: end;
+}
+
+.editor-ai-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.editor-ai-field.is-short input {
+  max-width: 110px;
+  width: 100%;
+}
+
+.editor-ai-field.is-wide select {
+  max-width: 240px;
+  width: 100%;
+}
+
+.editor-ai-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.editor-ai-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #e6e1d6;
+  font-size: 13px;
+}
+
+.editor-ai-goals {
+  display: grid;
+  gap: 8px;
+}
+
+.editor-ai-goal-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) 90px auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-ai-goal-row select {
+  max-width: 240px;
+  width: 100%;
+  padding: 8px 10px;
+  background: #0e1116;
+  border: 1px solid #5c6774;
+  color: #e6e1d6;
+}
+
+.editor-ai-goal-row input[type='number'] {
+  max-width: 110px;
+  width: 100%;
+  padding: 8px 10px;
+  background: #0e1116;
+  border: 1px solid #5c6774;
+  color: #e6e1d6;
+}
+
+.editor-drops-section {
+  margin-top: 24px;
+  display: grid;
+  gap: 8px;
+}
+
+.editor-settings .editor-preview-frame,
+.editor-panel .editor-preview-frame {
+  margin-bottom: 8px;
+}
+
 

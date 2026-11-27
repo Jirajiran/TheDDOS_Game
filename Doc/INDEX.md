@@ -57,7 +57,7 @@
 | `world-gen/` | Gen object Map | `README.md` → AskKeep §5 |
 | `ui/` | HUD / overlay | `README.md` → AskKeep §6 |
 | `menu-net/` | Menu · hash join · net (เฟสถัดไป) | `README.md` → AskKeep §7 |
-| `editor/` | หน้าวางแมปแบบ Warcraft Editor · เปิดที่ `editor.html` เกมยังไม่อ่านไฟล์ส่งออก | `README.md` |
+| `editor/` | หน้าวางแมปแบบ Warcraft Editor · เปิดที่ `editor.html` เกมยังไม่อ่านไฟล์ส่งออก · พอร์ต React อยู่ `CLoneEditor/` | `README.md` |
 
 ## กฎสั้น
 

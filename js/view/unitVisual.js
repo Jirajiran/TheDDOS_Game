@@ -1010,9 +1010,7 @@ export function tickAllUnitVisuals(match, dt) {
     if (!u.active) continue;
     // Hidden in hull — no arm/body tween (driver is key only, not a walking sprite).
     if (u.hiddenInVehicle && !u.vehicleTween) continue;
-    if (u.role === 'enemy') {
-      u.skinGroupId = enemySkinGroupId();
-    }
+    // Skin stays from sheet/spawn (skinGroupIdFromSheet) — never overwrite by team/role.
     tickUnitVisualAction(u, match, dt);
   }
 }

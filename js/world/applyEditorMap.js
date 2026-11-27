@@ -70,6 +70,9 @@ import {
   unregisterSenseUnit,
 } from '../ai/senseIndex.js';
 import { resetPlayerStats } from '../sim/unit.js';
+import { sanitizeMapDoc } from '../editor/mapDoc.js';
+import { bakeTacticalData, needsTacticalBake } from '../editor/tacticalBaker.js';
+import { ensureUnitAiFields } from '../editor/defaultMapFactory.js';
 
 function isVehicleItem(doc, templateId) {
   const rec = doc && doc.items && doc.items[templateId];
@@ -596,28 +599,44 @@ export function materializePlacedUnits(match, doc) {
 export function applyEditorMapDoc(match, doc) {
   if (!match || !doc) return match;
 
-  match.editorMapDoc = doc;
-  match.editorSpawns = Array.isArray(doc.spawns) ? doc.spawns.slice() : [];
-  match.editorPlayerSpawns = Array.isArray(doc.playerSpawns)
-    ? doc.playerSpawns.slice()
+  // Runtime fallback: complete schema + bake tactical if editor skipped packaging.
+  let ready = doc;
+  try {
+    ready = sanitizeMapDoc(doc);
+    if (needsTacticalBake(ready)) bakeTacticalData(ready, { force: false });
+    const units = ready.units || {};
+    const unitIds = Object.keys(units);
+    for (let i = 0; i < unitIds.length; i++) {
+      ensureUnitAiFields(units[unitIds[i]]);
+    }
+  } catch (_) {
+    ready = doc;
+  }
+
+  match.editorMapDoc = ready;
+  match.editorSpawns = Array.isArray(ready.spawns) ? ready.spawns.slice() : [];
+  match.editorPlayerSpawns = Array.isArray(ready.playerSpawns)
+    ? ready.playerSpawns.slice()
     : [];
-  if (doc.rules && typeof doc.rules === 'object') {
-    match.mapRules = Object.assign({}, match.mapRules || {}, doc.rules);
+  match.editorNavGraph = ready.navGraph || null;
+  match.editorTacticalWaypoints = ready.tacticalWaypoints || [];
+  if (ready.rules && typeof ready.rules === 'object') {
+    match.mapRules = Object.assign({}, match.mapRules || {}, ready.rules);
   }
 
   // Host loadout Helmet/Vest/Shield live on doc.items — pack registry alone misses them.
-  if (doc.items && typeof doc.items === 'object') {
-    installPlayItemOverlay(doc.items);
+  if (ready.items && typeof ready.items === 'object') {
+    installPlayItemOverlay(ready.items);
   } else {
     clearPlayItemOverlay();
   }
 
-  installSenseTeams(match, doc.teams);
-  bindHostSeatFromDoc(match, doc);
-  installEditorAreas(match, doc);
-  materializePlacedObjects(match, doc);
-  materializePlacedUnits(match, doc);
-  seatStartUnitDriven(match, doc);
+  installSenseTeams(match, ready.teams);
+  bindHostSeatFromDoc(match, ready);
+  installEditorAreas(match, ready);
+  materializePlacedObjects(match, ready);
+  materializePlacedUnits(match, ready);
+  seatStartUnitDriven(match, ready);
   rebuildSenseIndexFromMatch(match);
 
   return match;

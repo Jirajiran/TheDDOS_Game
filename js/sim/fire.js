@@ -84,6 +84,20 @@ import {
 import { turretAlignedForFire } from './vehicleDrive.js';
 import { blockTurretWorldPoints } from '../view/blockArt.js';
 import { getVehicleAnchors } from '../view/vehicleArt.js';
+import { BULLET_ART_IDS } from '../assets/closedCatalog.js';
+
+/** Projectile art from weapon data — never by weapon id whitelist. */
+function resolveBulletArtId(weapon) {
+  if (!weapon) return null;
+  if (weapon.projectileMode === 'CONTINUOUS_BEAM') return null;
+  const raw =
+    typeof weapon.bulletArtId === 'string' ? weapon.bulletArtId.trim() : '';
+  if (raw && BULLET_ART_IDS.indexOf(raw) >= 0) return raw;
+  if (raw) return raw;
+  // Closed-catalog defaults by damage kind (pack should set bulletArtId explicitly).
+  if (weapon.damageType === 'EXPLOSION') return 'Bullet_Rpg';
+  return 'Bullet_Tracer_1';
+}
 export function pelletAimOffsetRad(match, unit, pelletIndex, spreadRad, simTime) {
   const tick = Math.floor(((simTime != null ? simTime : match.simTime) || 0) * 60);
   let h =
@@ -504,10 +518,7 @@ export function spawnProjectile(match, owner, weapon, aimRad) {
   proj.blockPierceLeft = proj.pierceLeft; // shared budget (legacy field kept in sync)
   proj.pierceConfig = weapon.pierceConfig || null;
   proj.weaponId = weapon.id;
-  proj.bulletArtId =
-    typeof weapon.bulletArtId === 'string' && weapon.bulletArtId.trim()
-      ? weapon.bulletArtId.trim()
-      : null;
+  proj.bulletArtId = resolveBulletArtId(weapon);
   proj.targetFaction = weapon.targetFaction || 'ENEMY';
   proj.hitMask = defaultProjectileHitMask(proj.team, proj.targetFaction);
   proj.hitBlockIds = [];
@@ -1034,7 +1045,8 @@ export function collectProjectileSegmentHits(match, p, units) {
   for (let vi = 0; vi < vehicles.length; vi++) {
     const v = vehicles[vi];
     if (!canHitVehicle(p, v)) continue;
-    if (p.fromVehicle && p.sourceVehicleId === v.id) continue;
+    // Never hit the hull that fired (turret / passenger) — keep weapon pipeline intact.
+    if (p.sourceVehicleId != null && p.sourceVehicleId === v.id) continue;
     if (!segmentHitsVehicleAabb(p, v)) continue;
     const t = segmentClosestT(p.prevX, p.prevY, p.x, p.y, v.x, v.y);
     hits.push({ kind: 'vehicle', t, vehicle: v });
@@ -1179,7 +1191,7 @@ export function castBeamRay(match, b, units, applyDamage) {
   for (let vi = 0; vi < vehicles.length; vi++) {
     const v = vehicles[vi];
     if (!canHitVehicle(b, v)) continue;
-    if (b.fromVehicle && b.sourceVehicleId === v.id) continue;
+    if (b.sourceVehicleId != null && b.sourceVehicleId === v.id) continue;
     const box = vehicleAabb(v);
     const hit = rayHitsAABB(b.x0, b.y0, xMax, yMax, box.x, box.y, box.w, box.h);
     if (hit) hits.push({ kind: 'vehicle', t: hit.t, vehicle: v });

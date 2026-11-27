@@ -5,6 +5,11 @@
  */
 
 import { normalizeTeamRows, teamIdsFromDoc } from '../defs/teams.js';
+import {
+  createDefaultMapDocCore,
+  sanitizeMapDocCore,
+} from './defaultMapFactory.js';
+import { bakeTacticalData, needsTacticalBake } from './tacticalBaker.js';
 
 export const PATH_SIZE = 1024;
 export const MAX_SIDE = 8;
@@ -347,33 +352,30 @@ export function ensureMixSkills(doc) {
   return doc;
 }
 
+export function sanitizeMapDoc(rawDoc) {
+  const doc = sanitizeMapDocCore(rawDoc);
+  doc.teams = normalizeTeams(doc.teams);
+  doc.damageMatrix = cloneDamageMatrix(doc.damageMatrix);
+  return ensureMixSkills(ensurePlayerSpawns(doc));
+}
+
 export function createMapDoc(opts) {
   const pathCols = clampSide(opts.pathCols);
   const pathRows = clampSide(opts.pathRows);
   if (!pathCols || !pathRows) {
     throw new Error('Path grid must be 1 to 8 on each side');
   }
-  const doc = {
-    kind: 'theddos-map',
-    version: '1',
-    name: sanitizeMapName(opts.name),
-    pathCols,
-    pathRows,
-    pathLocked: true,
-    areas: [],
-    placedObjects: Array.isArray(opts.placedObjects) ? opts.placedObjects : [],
-    spawns: [],
-    playerSpawns: [],
-    playerFriendlyFire: false,
-    units: opts.units || {},
-    weapons: opts.weapons || {},
-    items: opts.items || {},
-    skills: opts.skills || {},
-    rules: opts.rules || {},
-    teams: normalizeTeams(opts.teams),
-    damageMatrix: cloneDamageMatrix(opts.damageMatrix),
-  };
-  return ensureMixSkills(ensurePlayerSpawns(doc));
+  const doc = createDefaultMapDocCore(opts.name, pathCols, pathRows, {
+    placedObjects: opts.placedObjects,
+    units: opts.units,
+    weapons: opts.weapons,
+    items: opts.items,
+    skills: opts.skills,
+    rules: opts.rules,
+    teams: opts.teams,
+    damageMatrix: opts.damageMatrix,
+  });
+  return sanitizeMapDoc(doc);
 }
 
 export function parseMapFile(text) {
@@ -433,7 +435,7 @@ export function parseMapFile(text) {
   if (doc.damageMatrix && typeof doc.damageMatrix === 'object') doc.damageMatrix = cloneDamageMatrix(doc.damageMatrix);
   else delete doc.damageMatrix;
   doc.teams = normalizeTeams(doc.teams);
-  return ensureMixSkills(ensurePlayerSpawns(doc));
+  return sanitizeMapDoc(ensureMixSkills(ensurePlayerSpawns(doc)));
 }
 
 function readStorageRaw(storage, key) {
@@ -558,8 +560,23 @@ export function clampRect(rect, world) {
   return { x, y, w, h };
 }
 
-export function exportMapText(doc) {
-  const copy = cloneData(doc);
+/**
+ * Prepare map for Export / Test Play: sanitize + auto-bake tactical if missing.
+ * @param {object} doc
+ * @param {{ forceBake?: boolean }} [opts]
+ */
+export function prepareMapForPackaging(doc, opts) {
+  const next = sanitizeMapDoc(cloneData(doc));
+  if ((opts && opts.forceBake) || needsTacticalBake(next)) {
+    bakeTacticalData(next, { force: !!(opts && opts.forceBake) });
+  } else {
+    bakeTacticalData(next, { force: false });
+  }
+  return next;
+}
+
+export function exportMapText(doc, opts) {
+  const copy = prepareMapForPackaging(doc, opts);
   const names = ['weapons', 'items', 'skills'];
   for (let i = 0; i < names.length; i++) {
     const map = copy[names[i]];

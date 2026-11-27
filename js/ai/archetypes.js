@@ -29,7 +29,13 @@ export function normalizeAllowedGoals(list) {
   const out = [];
   const seen = Object.create(null);
   for (let i = 0; i < list.length; i++) {
-    let g = list[i];
+    let raw = list[i];
+    let g =
+      typeof raw === 'string'
+        ? raw
+        : raw && typeof raw === 'object'
+          ? raw.goalId || raw.id || raw.goal || ''
+          : '';
     if (GOAL_ALIASES[g]) g = GOAL_ALIASES[g];
     if (!g || seen[g]) continue;
     seen[g] = true;
